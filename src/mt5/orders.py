@@ -58,12 +58,10 @@ def place_order(
     magic: int = 123456,
 ) -> dict:
     """
-    Place a market or pending order.
+    Place a market or pending order on live MT5.
     
-    Priority:
-    1. silicon-metatrader5 Docker bridge (macOS with Docker + Wine)
-    2. Native MetaTrader5 package (Windows)
-    3. Simulated order (fallback)
+    REQUIRED: Must place real orders on live account.
+    Does NOT simulate orders.
     
     Args:
         symbol: Trading symbol (default: XAUUSD).
@@ -76,41 +74,39 @@ def place_order(
         magic: Magic number for order identification.
     
     Returns:
-        Dict with order result details.
+        Dict with order result details
+        
+    Raises:
+        ConnectionError: If MT5 not connected or order fails
     """
     connector = get_connector()
+    
+    if not connector.is_connected():
+        raise ConnectionError("MT5 not connected. Cannot place order.")
     
     # Try silicon-metatrader5 Docker bridge first (macOS)
     silicon_mt5 = _get_silicon_mt5()
     if silicon_mt5:
         try:
-            # Check if account is logged in (not simulation mode)
-            if not connector.in_simulation_mode:
-                result = _place_order_via_silicon(
-                    silicon_mt5, symbol, order_type, volume,
-                    price, sl, tp, comment, magic
-                )
-                if result.get("success"):
-                    return result
-                else:
-                    logger.warning(f"Order failed via Docker bridge: {result}")
-                    # Fall through to simulation
+            result = _place_order_via_silicon(
+                silicon_mt5, symbol, order_type, volume,
+                price, sl, tp, comment, magic
+            )
+            if result.get("success"):
+                return result
             else:
-                logger.info(
-                    "Docker bridge available but no account logged in — "
-                    "simulating order"
-                )
+                raise ConnectionError(f"Order failed via Docker bridge: {result}")
+        except ConnectionError:
+            raise
         except Exception as e:
-            logger.warning(f"Docker bridge place_order failed: {e}")
-    
-    # Fall back to simulation
-    if connector.in_simulation_mode:
-        return _simulate_order(symbol, order_type, volume, price, sl, tp, comment, magic)
+            raise ConnectionError(f"Docker bridge place_order failed: {e}")
     
     # Try native MT5 (Windows)
+    if not MT5_AVAILABLE:
+        raise ConnectionError("MT5 package not available")
+    
     if not connector.is_connected():
-        logger.warning("Not connected to MT5, simulating order")
-        return _simulate_order(symbol, order_type, volume, price, sl, tp, comment, magic)
+        raise ConnectionError("MT5 not connected. Cannot place order.")
     
     return _place_order_native(symbol, order_type, volume, price, sl, tp, comment, magic)
 
@@ -267,12 +263,10 @@ def close_order(
     volume: float = 0.0,
 ) -> dict:
     """
-    Close an open order by ticket number.
+    Close an open order by ticket number on live MT5.
     
-    Priority:
-    1. silicon-metatrader5 Docker bridge (macOS with Docker + Wine)
-    2. Native MetaTrader5 package (Windows)
-    3. Simulated close (fallback)
+    REQUIRED: Must close real orders on live account.
+    Does NOT simulate closures.
     
     Args:
         ticket: Order ticket number to close.
@@ -280,38 +274,38 @@ def close_order(
         volume: Volume to close (0 = full volume).
     
     Returns:
-        Dict with close result details.
+        Dict with close result details
+        
+    Raises:
+        ConnectionError: If MT5 not connected or close fails
     """
     connector = get_connector()
+    
+    if not connector.is_connected():
+        raise ConnectionError("MT5 not connected. Cannot close order.")
     
     # Try silicon-metatrader5 Docker bridge first (macOS)
     silicon_mt5 = _get_silicon_mt5()
     if silicon_mt5:
         try:
-            if not connector.in_simulation_mode:
-                result = _close_order_via_silicon(
-                    silicon_mt5, ticket, symbol, volume
-                )
-                if result.get("success"):
-                    return result
+            result = _close_order_via_silicon(
+                silicon_mt5, ticket, symbol, volume
+            )
+            if result.get("success"):
+                return result
+            else:
+                raise ConnectionError(f"Order close failed via Docker bridge: {result}")
+        except ConnectionError:
+            raise
         except Exception as e:
-            logger.warning(f"Docker bridge close_order failed: {e}")
-    
-    # Fall back to simulation
-    if connector.in_simulation_mode:
-        return {
-            "success": True,
-            "message": f"Position {ticket} closed (simulated)",
-            "simulated": True,
-        }
+            raise ConnectionError(f"Docker bridge close_order failed: {e}")
     
     # Try native MT5 (Windows)
+    if not MT5_AVAILABLE:
+        raise ConnectionError("MT5 package not available")
+    
     if not connector.is_connected():
-        return {
-            "success": True,
-            "message": f"Position {ticket} closed (simulated)",
-            "simulated": True,
-        }
+        raise ConnectionError("MT5 not connected. Cannot close order.")
     
     return _close_order_native(ticket, volume)
 
@@ -435,33 +429,3 @@ def _close_order_native(
             "simulated": False,
         }
 
-
-def _simulate_order(
-    symbol: str,
-    order_type: str,
-    volume: float,
-    price: Optional[float],
-    sl: Optional[float],
-    tp: Optional[float],
-    comment: str,
-    magic: int,
-) -> dict:
-    """Simulate an order for testing."""
-    import random
-    
-    if price is None:
-        price = 4038.0 + random.gauss(0, 2)
-    
-    logger.info(
-        f"SIMULATED order: {order_type.upper()} {volume} {symbol} @ ${price:.2f}"
-    )
-    
-    return {
-        "success": True,
-        "order_id": random.randint(1000000, 9999999),
-        "deal_id": random.randint(1000000, 9999999),
-        "price": price,
-        "volume": volume,
-        "message": f"Simulated {order_type} order for {volume} {symbol} @ ${price:.2f}",
-        "simulated": True,
-    }
