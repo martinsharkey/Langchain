@@ -578,6 +578,7 @@ Respond with a JSON object ONLY (no markdown, no code blocks):
             "confidence": decision.get("confidence", 0),
             "strategy_used": decision.get("strategy_used", "unknown"),
             "symbol": "XAUUSD",
+            "position_size": decision.get("position_size", 0.1),  # FIX: Include position size
         }
         
         # We need indicators for the experience DB - store what we have
