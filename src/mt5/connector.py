@@ -75,14 +75,18 @@ class MT5Connector:
     """
     Manages the connection to MetaTrader 5.
     
-    On macOS, uses the silicon-metatrader5 Docker bridge (RPyC to container).
-    On Windows, connects directly via the MetaTrader5 package.
-    Falls back to simulation mode when neither is available.
+    REQUIRED: Must connect to live MT5 to operate.
+    Does NOT fall back to simulation mode.
+    
+    Tries:
+    1. silicon-metatrader5 Docker bridge (macOS with Docker + Wine)
+    2. Native MetaTrader5 package (Windows)
+    
+    Raises ConnectionError if unable to connect to live MT5.
     """
     
     def __init__(self):
         self._connected = False
-        self._simulation_mode = True  # Will be set to False if bridge/MT5 connects
         self._account_info = None
         self._silicon_mt5: Optional[SiliconMetaTrader5] = None
         self._bridge_available = False  # True if Docker bridge is reachable
@@ -96,26 +100,32 @@ class MT5Connector:
         elif MT5_AVAILABLE:
             logger.info("MetaTrader5 package available — will connect directly")
         else:
-            logger.info(
-                "MT5 not available — running in SIMULATION mode. "
-                "Trades will be simulated."
+            logger.critical(
+                "MT5 is not available on this system.\n"
+                "  - Silicon MT5 (Docker): Not available\n"
+                "  - Native MT5 package: Not installed\n"
+                "Ensure MetaTrader5 is installed on Windows or Docker bridge is available on macOS."
             )
     
     def initialize(self, retries: int = 3, delay: int = 2) -> bool:
         """
         Initialize connection to MetaTrader 5.
         
+        REQUIRED: Must connect to live MT5. Does NOT fall back to simulation.
+        
         Tries:
         1. silicon-metatrader5 Docker bridge (macOS with Docker + Wine)
         2. Native MetaTrader5 package (Windows)
-        3. Simulation mode (fallback)
         
         Args:
             retries: Number of connection retry attempts.
             delay: Delay between retries in seconds.
         
         Returns:
-            True if connected successfully (real or simulation).
+            True if connected successfully to live MT5.
+            
+        Raises:
+            ConnectionError: If unable to connect to live MT5
         """
         # Try Docker bridge first (macOS with silicon-metatrader5)
         if SILICON_MT5_AVAILABLE:
@@ -127,11 +137,24 @@ class MT5Connector:
             if self._connect_native(retries, delay):
                 return True
         
-        # Fall back to simulation mode
-        self._simulation_mode = True
-        self._connected = True
-        logger.info("Simulation mode: MT5 connection simulated")
-        return True
+        # FAIL HARD - NO SIMULATION MODE
+        error_msg = (
+            "CRITICAL: Cannot connect to MetaTrader 5.\n"
+            f"  - Account: {MT5_ACCOUNT}\n"
+            f"  - Server: {MT5_SERVER}\n"
+            f"  - Silicon MT5 available: {SILICON_MT5_AVAILABLE}\n"
+            f"  - Native MT5 available: {MT5_AVAILABLE}\n"
+            "\n"
+            "TROUBLESHOOTING:\n"
+            "  1. Ensure MetaTrader 5 terminal is running\n"
+            "  2. Verify account {MT5_ACCOUNT} is logged in to {MT5_SERVER}\n"
+            "  3. Check that MT5_ACCOUNT, MT5_PASSWORD, and MT5_SERVER are set in .env\n"
+            "  4. On macOS, ensure Docker bridge is running: docker run -d --name metatrader5 ...\n"
+            "\n"
+            "The bot ONLY operates with live MT5 connection. No simulation mode available."
+        )
+        logger.critical(error_msg)
+        raise ConnectionError(error_msg)
     
     def _remote_call_with_timeout(self, code: str, timeout: int = 5) -> Optional[Any]:
         """
@@ -288,9 +311,8 @@ _result = _init_result
                     except Exception:
                         info = None
                     
-                    if info is not None:
+                if info is not None:
                         self._connected = True
-                        self._simulation_mode = False
                         self._account_info = {
                             "balance": info.balance,
                             "equity": info.equity,
@@ -308,75 +330,22 @@ _result = _init_result
                         )
                         return True
                     else:
-                        # initialize() worked but no account — try login
-                        logger.info("initialize() OK but no account info — trying login...")
-                        try:
-                            login_result = silicon_mt5.login(
-                                login=MT5_ACCOUNT,
-                                password=MT5_PASSWORD,
-                                server=MT5_SERVER,
-                            )
-                        except Exception:
-                            login_result = False
-                        
-                        if login_result:
-                            self._connected = True
-                            self._simulation_mode = False
-                            self._account_info = self._get_account_info()
-                            logger.info("Logged into MT5 account via Docker bridge")
-                            return True
-                        else:
-                            logger.warning(
-                                "MT5 API available but no account logged in.\n"
-                                "To log in manually:\n"
-                                "  1. Open http://localhost:6081/vnc.html in a browser\n"
-                                "  2. In the MT5 window, go to File > Open an Account\n"
-                                "  3. Search for 'VTMarkets-Demo'\n"
-                                f"  4. Login with Account: {MT5_ACCOUNT}, "
-                                f"Password: [configured], Server: {MT5_SERVER}"
-                            )
-                            self._connected = True
-                            self._simulation_mode = True
-                            return True
-                else:
-                    # initialize() timed out or failed — MT5 API not available
-                    error_msg = init_result.get("error") if init_result else "timeout"
-                    logger.warning(
-                        f"Remote mt5.initialize() failed: {error_msg}. "
-                        f"Bridge is available but MT5 API functions won't work. "
-                        f"Will attempt to read .hcc files for market data."
-                    )
-                    
-                    # Bridge is connected but MT5 API is not available
-                    # We keep the bridge alive for .hcc file reading
-                    self._mt5_api_available = False
-                    self._connected = True
-                    self._simulation_mode = True
-                    
-                    # Try to get account info anyway (some functions might work)
-                    try:
-                        info = silicon_mt5.account_info()
-                    except Exception:
-                        info = None
-                    
-                    if info is not None:
-                        self._simulation_mode = False
-                        self._account_info = {
-                            "balance": info.balance,
-                            "equity": info.equity,
-                            "margin": info.margin,
-                            "free_margin": info.margin_free,
-                            "leverage": info.leverage,
-                            "currency": info.currency,
-                            "name": info.name,
-                            "server": info.server,
-                            "simulated": False,
-                        }
-                        logger.info(
-                            f"Bridge connected — Account: {info.name} (${info.balance:.2f})"
+                        # No account logged in on bridge
+                        raise ConnectionError(
+                            f"MT5 account not logged in on Docker bridge.\n"
+                            f"To log in:\n"
+                            f"  1. Open http://localhost:6081/vnc.html in a browser\n"
+                            f"  2. In the MT5 window, go to File > Open an Account\n"
+                            f"  3. Search for '{MT5_SERVER}'\n"
+                            f"  4. Login with Account: {MT5_ACCOUNT}"
                         )
-                    
-                    return True
+                else:
+                    # initialize() timed out or failed
+                    error_msg = init_result.get("error") if init_result else "timeout"
+                    raise ConnectionError(
+                        f"Remote MT5 initialize() failed: {error_msg}.\n"
+                        f"Ensure MT5 terminal is running in the Docker container."
+                    )
             
             except Exception as e:
                 logger.warning(f"Docker bridge connection failed: {e}")
@@ -412,7 +381,6 @@ _result = _init_result
             
             if initialized:
                 self._connected = True
-                self._simulation_mode = False
                 self._account_info = self._get_account_info()
                 logger.info(f"Connected to MT5 successfully")
                 return True
@@ -422,6 +390,9 @@ _result = _init_result
             
             if attempt < retries:
                 time.sleep(delay)
+        
+        logger.warning("Could not connect to MT5")
+        return False
         
         logger.error("Failed to connect to MT5 natively")
         return False
@@ -436,7 +407,7 @@ _result = _init_result
             self._silicon_mt5 = None
             self._bridge_available = False
         
-        if self._connected and not self._simulation_mode and MT5_AVAILABLE:
+        if self._connected and MT5_AVAILABLE:
             mt5.shutdown()
         
         self._connected = False
@@ -444,9 +415,6 @@ _result = _init_result
     
     def is_connected(self) -> bool:
         """Check if connected to MT5."""
-        if self._simulation_mode:
-            return self._connected
-        
         if self._silicon_mt5:
             try:
                 return self._silicon_mt5.ping()
@@ -459,10 +427,6 @@ _result = _init_result
         return self._connected
     
     @property
-    def in_simulation_mode(self) -> bool:
-        """Check if running in simulation mode."""
-        return self._simulation_mode
-    
     @property
     def bridge_available(self) -> bool:
         """Check if the Docker bridge is available (even if no account logged in)."""
@@ -507,19 +471,6 @@ _result = _init_result
     
     def _get_account_info(self) -> Optional[dict]:
         """Get account information from MT5."""
-        if self._simulation_mode:
-            return {
-                "balance": 10000.0,
-                "equity": 10000.0,
-                "margin": 0.0,
-                "free_margin": 10000.0,
-                "leverage": 100,
-                "currency": "USD",
-                "name": "Simulation Account",
-                "server": "Simulation",
-                "simulated": True,
-            }
-        
         if self._silicon_mt5:
             try:
                 info = self._silicon_mt5.account_info()

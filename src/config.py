@@ -133,12 +133,24 @@ def validate_config() -> list[str]:
             "Configure GROQ_API_KEY for better reliability."
         )
 
-    # MT5 warnings (optional - simulation mode works without these)
+    # MT5 configuration - REQUIRED (no simulation mode)
     if MT5_ACCOUNT == 0:
-        warnings.append("MT5_ACCOUNT is not set. Running in simulation mode.")
+        raise ValueError(
+            "CRITICAL: MT5_ACCOUNT environment variable is not set or invalid.\n"
+            "The trading bot requires a live MT5 account to operate.\n"
+            "Set MT5_ACCOUNT in your .env file (e.g., MT5_ACCOUNT=1176166)"
+        )
     if not MT5_PASSWORD:
-        warnings.append("MT5_PASSWORD is not set. Running in simulation mode.")
+        raise ValueError(
+            "CRITICAL: MT5_PASSWORD environment variable is not set.\n"
+            "The trading bot requires MT5 credentials to connect.\n"
+            "Set MT5_PASSWORD in your .env file."
+        )
     if not MT5_SERVER:
-        warnings.append("MT5_SERVER is not set. Running in simulation mode.")
+        raise ValueError(
+            "CRITICAL: MT5_SERVER environment variable is not set.\n"
+            "The trading bot requires MT5 server name to connect.\n"
+            "Set MT5_SERVER in your .env file (e.g., MT5_SERVER=VTMarkets-Demo)"
+        )
 
     return warnings

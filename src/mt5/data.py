@@ -69,10 +69,8 @@ def get_rates(
     """
     Get OHLCV (Open, High, Low, Close, Volume) rate data.
     
-    Priority:
-    1. silicon-metatrader5 Docker bridge (macOS with Docker + Wine)
-    2. Native MetaTrader5 package (Windows)
-    3. Simulated data (fallback)
+    REQUIRED: Must get live data from MT5.
+    Does NOT fall back to simulated data.
     
     Args:
         symbol: Trading symbol (default: XAUUSD).
@@ -81,8 +79,14 @@ def get_rates(
     
     Returns:
         List of candle dictionaries with o, h, l, c, v, time fields.
+        
+    Raises:
+        ConnectionError: If MT5 not connected or no data available
     """
     connector = get_connector()
+    
+    if not connector.is_connected():
+        raise ConnectionError("MT5 not connected. Cannot fetch rates.")
     
     # Try silicon-metatrader5 Docker bridge first (macOS)
     silicon_mt5 = _get_silicon_mt5()
@@ -111,28 +115,27 @@ def get_rates(
                     for r in rates
                 ]
             else:
-                logger.warning(
-                    f"No data for {symbol} {timeframe} via Docker bridge "
-                    f"(MT5 may not have account logged in)"
+                raise ConnectionError(
+                    f"No data for {symbol} {timeframe}. "
+                    f"Check MT5 terminal and market data availability."
                 )
+        except ConnectionError:
+            raise
         except Exception as e:
-            logger.warning(f"Docker bridge get_rates failed: {e}")
-    
-    # Fall back to simulation if in simulation mode
-    if connector.in_simulation_mode:
-        return _generate_simulated_rates(count)
+            raise ConnectionError(f"Docker bridge get_rates failed: {e}")
     
     # Try native MT5 (Windows)
-    if not connector.is_connected():
-        logger.warning("Not connected to MT5, using simulated data")
-        return _generate_simulated_rates(count)
+    if not MT5_AVAILABLE:
+        raise ConnectionError("MT5 package not available")
     
     tf = TIMEFRAMES.get(timeframe, mt5.TIMEFRAME_H1)
     rates = mt5.copy_rates_from_pos(symbol, tf, 0, count)
     
     if rates is None or len(rates) == 0:
-        logger.warning(f"No data for {symbol} {timeframe}, using simulation")
-        return _generate_simulated_rates(count)
+        raise ConnectionError(
+            f"No data for {symbol} {timeframe}. "
+            f"Check MT5 terminal and market data availability."
+        )
     
     result = []
     for rate in rates:
@@ -155,18 +158,22 @@ def get_last_price(symbol: str = "XAUUSD") -> Optional[dict]:
     """
     Get the latest price tick for a symbol.
     
-    Priority:
-    1. silicon-metatrader5 Docker bridge (macOS with Docker + Wine)
-    2. Native MetaTrader5 package (Windows)
-    3. Simulated tick (fallback)
+    REQUIRED: Must get live data from MT5.
+    Does NOT fall back to simulated data.
     
     Args:
         symbol: Trading symbol (default: XAUUSD).
     
     Returns:
-        Dict with bid, ask, spread, and time, or None if unavailable.
+        Dict with bid, ask, spread, and time
+        
+    Raises:
+        ConnectionError: If MT5 not connected or no tick available
     """
     connector = get_connector()
+    
+    if not connector.is_connected():
+        raise ConnectionError("MT5 not connected. Cannot fetch price.")
     
     # Try silicon-metatrader5 Docker bridge first (macOS)
     silicon_mt5 = _get_silicon_mt5()
@@ -184,20 +191,26 @@ def get_last_price(symbol: str = "XAUUSD") -> Optional[dict]:
                     "volume": tick.volume,
                     "real_time": True,
                 }
+            else:
+                raise ConnectionError(
+                    f"No tick data for {symbol}. "
+                    f"Check MT5 terminal and market availability."
+                )
+        except ConnectionError:
+            raise
         except Exception as e:
-            logger.warning(f"Docker bridge get_last_price failed: {e}")
-    
-    # Fall back to simulation if in simulation mode
-    if connector.in_simulation_mode:
-        return _generate_simulated_tick()
+            raise ConnectionError(f"Docker bridge get_last_price failed: {e}")
     
     # Try native MT5 (Windows)
-    if not connector.is_connected():
-        return _generate_simulated_tick()
+    if not MT5_AVAILABLE:
+        raise ConnectionError("MT5 package not available")
     
     tick = mt5.symbol_info_tick(symbol)
     if tick is None:
-        return _generate_simulated_tick()
+        raise ConnectionError(
+            f"No tick data for {symbol}. "
+            f"Check MT5 terminal and market availability."
+        )
     
     return {
         "symbol": symbol,
@@ -215,18 +228,22 @@ def get_symbol_info(symbol: str = "XAUUSD") -> Optional[dict]:
     """
     Get symbol information and specifications.
     
-    Priority:
-    1. silicon-metatrader5 Docker bridge (macOS with Docker + Wine)
-    2. Native MetaTrader5 package (Windows)
-    3. Simulated data (fallback)
+    REQUIRED: Must get live data from MT5.
+    Does NOT fall back to simulated data.
     
     Args:
         symbol: Trading symbol (default: XAUUSD).
     
     Returns:
-        Dict with symbol specifications, or None if unavailable.
+        Dict with symbol specifications
+        
+    Raises:
+        ConnectionError: If MT5 not connected or symbol not available
     """
     connector = get_connector()
+    
+    if not connector.is_connected():
+        raise ConnectionError("MT5 not connected. Cannot fetch symbol info.")
     
     # Try silicon-metatrader5 Docker bridge first (macOS)
     silicon_mt5 = _get_silicon_mt5()
@@ -249,33 +266,20 @@ def get_symbol_info(symbol: str = "XAUUSD") -> Optional[dict]:
                     "description": info.description,
                     "simulated": False,
                 }
+            else:
+                raise ConnectionError(f"Symbol {symbol} not found in MT5")
+        except ConnectionError:
+            raise
         except Exception as e:
-            logger.warning(f"Docker bridge get_symbol_info failed: {e}")
+            raise ConnectionError(f"Docker bridge get_symbol_info failed: {e}")
     
-    # Fall back to simulation
-    if connector.in_simulation_mode:
-        return {
-            "symbol": symbol,
-            "digits": 2,
-            "point": 0.01,
-            "spread": 25,
-            "trade_mode": "real",
-            "contract_size": 100.0,
-            "tick_size": 0.01,
-            "tick_value": 1.0,
-            "min_volume": 0.01,
-            "max_volume": 100.0,
-            "volume_step": 0.01,
-            "description": "Gold vs US Dollar (simulated)",
-            "simulated": True,
-        }
-    
-    if not connector.is_connected():
-        return None
+    # Try native MT5 (Windows)
+    if not MT5_AVAILABLE:
+        raise ConnectionError("MT5 package not available")
     
     info = mt5.symbol_info(symbol)
     if info is None:
-        return None
+        raise ConnectionError(f"Symbol {symbol} not found in MT5")
     
     return {
         "symbol": info.name,
@@ -293,61 +297,3 @@ def get_symbol_info(symbol: str = "XAUUSD") -> Optional[dict]:
         "simulated": False,
     }
 
-
-# ─── Simulated Data Generator ───────────────────────────────
-# Used when MT5 is not available (macOS without Docker bridge)
-
-# Current XAUUSD price (approximate, updated periodically)
-CURRENT_GOLD_PRICE = 4038.0  # As of July 2026
-
-
-def _generate_simulated_rates(count: int = 100) -> list[dict]:
-    """Generate simulated OHLCV data for testing."""
-    import random
-    import math
-    
-    base_price = CURRENT_GOLD_PRICE
-    rates = []
-    
-    for i in range(count):
-        # Random walk with realistic gold volatility (~0.5% daily)
-        change = random.gauss(0, base_price * 0.002)
-        open_price = base_price + change
-        high = open_price + abs(random.gauss(0, base_price * 0.003))
-        low = open_price - abs(random.gauss(0, base_price * 0.003))
-        close = random.uniform(low, high)
-        volume = random.randint(100, 10000)
-        
-        timestamp = int((datetime.now() - timedelta(hours=count - i)).timestamp())
-        
-        rates.append({
-            "time": str(datetime.fromtimestamp(timestamp)),
-            "timestamp": timestamp,
-            "open": round(open_price, 2),
-            "high": round(high, 2),
-            "low": round(low, 2),
-            "close": round(close, 2),
-            "volume": volume,
-            "spread": random.randint(20, 40),
-        })
-        
-        base_price = close
-    
-    return rates
-
-
-def _generate_simulated_tick() -> dict:
-    """Generate a simulated price tick."""
-    import random
-    base_price = CURRENT_GOLD_PRICE
-    spread = random.uniform(0.2, 0.5)
-    
-    return {
-        "symbol": "XAUUSD",
-        "bid": round(base_price + random.gauss(0, base_price * 0.0005), 2),
-        "ask": round(base_price + spread + random.gauss(0, base_price * 0.0005), 2),
-        "spread": round(spread * 100, 0),
-        "time": str(datetime.now()),
-        "last": round(base_price + random.gauss(0, base_price * 0.0005), 2),
-        "volume": random.randint(100, 5000),
-    }

@@ -45,20 +45,22 @@ def get_positions(symbol: Optional[str] = None) -> list[dict]:
     """
     Get open positions.
     
-    Priority:
-    1. silicon-metatrader5 Docker bridge (macOS with Docker + Wine)
-    2. Native MetaTrader5 package (Windows)
+    REQUIRED: Must get live positions from MT5.
+    Does NOT return simulated data.
     
     Args:
         symbol: Optional symbol filter (e.g., "XAUUSD").
     
     Returns:
-        List of position dictionaries.
+        List of position dictionaries
+        
+    Raises:
+        ConnectionError: If MT5 not connected
     """
     connector = get_connector()
     
-    if connector.in_simulation_mode:
-        return []  # No simulated positions
+    if not connector.is_connected():
+        raise ConnectionError("MT5 not connected. Cannot fetch positions.")
     
     # Try silicon-metatrader5 Docker bridge first (macOS)
     silicon_mt5 = _get_silicon_mt5()
@@ -77,7 +79,7 @@ def get_positions(symbol: Optional[str] = None) -> list[dict]:
             logger.warning(f"Docker bridge get_positions failed: {e}")
     
     if not connector.is_connected():
-        return [{"error": "Not connected to MT5"}]
+        raise ConnectionError("MT5 not connected")
     
     # Try native MT5 (Windows)
     if symbol:
@@ -131,20 +133,22 @@ def get_history(deals: int = 100) -> list[dict]:
     """
     Get recent trade history.
     
-    Priority:
-    1. silicon-metatrader5 Docker bridge (macOS with Docker + Wine)
-    2. Native MetaTrader5 package (Windows)
+    REQUIRED: Must get live history from MT5.
+    Does NOT return simulated data.
     
     Args:
         deals: Number of recent deals to fetch.
     
     Returns:
-        List of deal dictionaries.
+        List of deal dictionaries
+        
+    Raises:
+        ConnectionError: If MT5 not connected
     """
     connector = get_connector()
     
-    if connector.in_simulation_mode:
-        return []  # No simulated history
+    if not connector.is_connected():
+        raise ConnectionError("MT5 not connected. Cannot fetch trade history.")
     
     # Try silicon-metatrader5 Docker bridge first (macOS)
     silicon_mt5 = _get_silicon_mt5()
@@ -179,7 +183,7 @@ def get_history(deals: int = 100) -> list[dict]:
             logger.warning(f"Docker bridge get_history failed: {e}")
     
     if not connector.is_connected():
-        return [{"error": "Not connected to MT5"}]
+        raise ConnectionError("MT5 not connected")
     
     # Try native MT5 (Windows)
     import datetime
