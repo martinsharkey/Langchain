@@ -473,6 +473,70 @@ class ExperienceDatabase:
         conn.close()
         return count
     
+    # ← FIX #4: GET STRATEGY PERFORMANCE
+    def get_strategy_performance(self, strategy_name: str = None) -> dict:
+        """
+        Get historical performance metrics for strategies.
+        
+        Args:
+            strategy_name: If provided, get metrics for specific strategy.
+                          If None, get metrics for all strategies.
+        
+        Returns:
+            Dict with {strategy_name: {win_rate, avg_profit, loss_count, ...}}
+        """
+        try:
+            query = """
+                SELECT 
+                    strategy_used,
+                    COUNT(*) as trade_count,
+                    SUM(CASE WHEN outcome = 'win' THEN 1 ELSE 0 END) as win_count,
+                    SUM(CASE WHEN outcome = 'loss' THEN 1 ELSE 0 END) as loss_count,
+                    ROUND(100.0 * SUM(CASE WHEN outcome = 'win' THEN 1 ELSE 0 END) 
+                          / NULLIF(COUNT(*), 0), 2) as win_rate,
+                    ROUND(AVG(profit_loss), 2) as avg_profit,
+                    ROUND(SUM(profit_loss), 2) as total_profit,
+                    ROUND(MAX(profit_loss), 2) as max_profit,
+                    ROUND(MIN(profit_loss), 2) as max_loss
+                FROM trades
+                WHERE outcome IN ('win', 'loss')
+            """
+            
+            if strategy_name:
+                query += f" AND strategy_used = '{strategy_name}'"
+            
+            query += " GROUP BY strategy_used ORDER BY win_rate DESC"
+            
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+            cursor.execute(query)
+            rows = cursor.fetchall()
+            conn.close()
+            
+            if not rows:
+                return {}
+            
+            performance = {}
+            for row in rows:
+                strategy = row[0]
+                performance[strategy] = {
+                    "trade_count": row[1],
+                    "win_count": row[2],
+                    "loss_count": row[3],
+                    "win_rate": row[4],  # Percentage
+                    "avg_profit": row[5],
+                    "total_profit": row[6],
+                    "max_profit": row[7],
+                    "max_loss": row[8],
+                }
+            
+            logger.info(f"Retrieved performance for {len(performance)} strategies")
+            return performance
+        
+        except Exception as e:
+            logger.error(f"Error getting strategy performance: {e}")
+            return {}
+    
     def clear(self):
         """Clear all data (for testing)."""
         conn = sqlite3.connect(self.db_path)

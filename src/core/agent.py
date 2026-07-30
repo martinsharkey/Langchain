@@ -110,7 +110,7 @@ def create_main_agent():
                 break
         
         if last_human:
-            logger.info(f"🤔 Agent processing: \"{last_human}...\"")
+            logger.info(f"Agent processing: \"{last_human}...\"")
         
         # Try with retry on rate limit
         last_error = None
@@ -121,7 +121,7 @@ def create_main_agent():
                 # Log what the agent decided to do
                 if hasattr(response, 'tool_calls') and response.tool_calls:
                     for tc in response.tool_calls:
-                        logger.info(f"🔧 Agent decided to use tool: {tc['name']}")
+                        logger.info(f"Agent decided to use tool: {tc['name']}")
                         logger.info(f"   Args: {json.dumps(tc['args'], default=str)[:300]}")
                 elif hasattr(response, 'content') and response.content:
                     content = response.content
@@ -137,7 +137,7 @@ def create_main_agent():
                             elif isinstance(block, str):
                                 texts.append(block)
                         content = "\n".join(texts)
-                    logger.info(f"💬 Agent response: {str(content)[:200]}...")
+                    logger.info(f"Agent response: {str(content)[:200]}...")
                 
                 return {"messages": [response]}
                 
@@ -146,7 +146,7 @@ def create_main_agent():
                 last_error = error_str
                 
                 if "429" in error_str or "rate_limit" in error_str.lower():
-                    logger.warning(f"⏱️ Rate limit on attempt {attempt+1}/{MAX_RETRIES}")
+                    logger.warning(f"Rate limit on attempt {attempt+1}/{MAX_RETRIES}")
                     mark_provider_failed("main_agent")
                     if attempt < MAX_RETRIES - 1:
                         time.sleep(2 * (attempt + 1))
@@ -156,12 +156,12 @@ def create_main_agent():
                     continue
                 
                 # Non-rate-limit error
-                logger.error(f"❌ Agent error: {error_str[:200]}")
+                logger.error(f"Agent error: {error_str[:200]}")
                 raise
         
         # All retries exhausted
         error_msg = f"Rate limit exceeded after {MAX_RETRIES} retries: {last_error[:200]}"
-        logger.error(f"❌ {error_msg}")
+        logger.error(f"{error_msg}")
         return {"messages": [AIMessage(content=f"I encountered a rate limit error. Please try again later or configure additional API keys in .env. Error: {last_error[:100]}")]}
     
     # Build the graph
@@ -184,6 +184,6 @@ def create_main_agent():
     
     # Compile
     app = workflow.compile(checkpointer=memory)
-    logger.info("✅ Main agent created successfully")
+    logger.info("Main agent created successfully")
     
     return app

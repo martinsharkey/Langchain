@@ -25,6 +25,7 @@ Environment:
 
 import sys
 import os
+import json
 import time
 from datetime import datetime
 from typing import Optional
@@ -32,7 +33,7 @@ from typing import Optional
 # Add project root to path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from src.config import validate_config, SYMBOL
+from src.config import validate_config, SYMBOL, DATA_DIR
 from src.core.agent import create_main_agent
 from src.core.llm import get_groq_llm, get_configured_providers
 from src.mt5.connector import get_connector
@@ -58,6 +59,73 @@ from src.learning.curiosity_agent import CuriosityAgent
 logger = get_logger("main")
 
 
+# ─── FIX #3: OPEN POSITION CLASS ──────────────────────────────────────────
+class OpenPosition:
+    """
+    Track an open trading position for outcome calculation.
+    
+    Monitors whether trade has hit stop loss, take profit, or timeout.
+    Calculates real P&L when position closes.
+    """
+    
+    def __init__(self, 
+                 trade_id: str,
+                 action: str,  # "buy" or "sell"
+                 entry_price: float,
+                 entry_time: datetime,
+                 stop_loss: float,
+                 take_profit: float,
+                 position_size: float,
+                 decision: dict):
+        self.trade_id = trade_id
+        self.action = action
+        self.entry_price = entry_price
+        self.entry_time = entry_time
+        self.stop_loss = stop_loss
+        self.take_profit = take_profit
+        self.position_size = position_size
+        self.decision = decision
+        
+    def check_if_closed(self, current_price: float) -> tuple[bool, str, float]:
+        """
+        Check if position should be closed.
+        
+        Returns:
+            (is_closed, reason, profit_loss)
+            reason: "tp" (take profit), "sl" (stop loss), "timeout", or None
+            profit_loss: P&L in dollars
+        """
+        if self.action == "buy":
+            if current_price >= self.take_profit:
+                pnl = (current_price - self.entry_price) * self.position_size
+                return True, "tp", pnl
+            elif current_price <= self.stop_loss:
+                pnl = (current_price - self.entry_price) * self.position_size
+                return True, "sl", pnl
+        else:  # sell
+            if current_price <= self.take_profit:
+                pnl = (self.entry_price - current_price) * self.position_size
+                return True, "tp", pnl
+            elif current_price >= self.stop_loss:
+                pnl = (self.entry_price - current_price) * self.position_size
+                return True, "sl", pnl
+        
+        # Check timeout (24 hours)
+        elapsed = (datetime.now() - self.entry_time).total_seconds() / 3600
+        if elapsed > 24:
+            pnl = self._calculate_pnl(current_price)
+            return True, "timeout", pnl
+        
+        return False, None, 0.0
+    
+    def _calculate_pnl(self, exit_price: float) -> float:
+        """Calculate P&L for exit price."""
+        if self.action == "buy":
+            return (exit_price - self.entry_price) * self.position_size
+        else:
+            return (self.entry_price - exit_price) * self.position_size
+
+
 class TradingBot:
     """
     Main trading bot orchestrator.
@@ -78,6 +146,10 @@ class TradingBot:
         self.iteration = 0
         self.max_iterations = 100
         self.performance_history = []
+        self.status_path = os.path.join(DATA_DIR, "bot_status.json")
+        
+        # ← FIX #3: Position tracking
+        self.open_positions = []  # Track open trades for outcome calculation
         
         # Learning module instances
         self.vector_store = None
@@ -87,11 +159,11 @@ class TradingBot:
         self.knowledge_base = None    # NEW: Persistent knowledge store
         
         console.print("\n[bold cyan]╔══════════════════════════════════════════════════════════╗[/bold cyan]")
-        console.print("[bold cyan]║[/bold cyan]  [bold yellow]🤖 XAUUSD Trading Bot — Meta-Strategy Learning System[/bold yellow]  [bold cyan]║[/bold cyan]")
+        console.print("[bold cyan]║[/bold cyan]  [bold yellow]XAUUSD Trading Bot — Meta-Strategy Learning System[/bold yellow]  [bold cyan]║[/bold cyan]")
         console.print("[bold cyan]║[/bold cyan]  [bold]Mission:[/bold] Learn to trade Gold through curiosity       [bold cyan]║[/bold cyan]")
         console.print("[bold cyan]║[/bold cyan]  [bold]LLM:[/bold] LiteLLM multi-provider (Kilo Gateway, Groq)     [bold cyan]║[/bold cyan]")
         console.print("[bold cyan]║[/bold cyan]  [bold]Learning:[/bold] 7 strategies + RAG + SQLite + Curiosity    [bold cyan]║[/bold cyan]")
-        console.print("[bold cyan]║[/bold cyan]  [bold]⚠️  SIMULATION MODE:[/bold] No MT5 — synthetic data         [bold cyan]║[/bold cyan]")
+        console.print("[bold cyan]║[/bold cyan]  [bold]SIMULATION MODE:[/bold] No MT5 — synthetic data         [bold cyan]║[/bold cyan]")
         console.print("[bold cyan]╚══════════════════════════════════════════════════════════╝[/bold cyan]")
         console.print()
     
@@ -105,11 +177,11 @@ class TradingBot:
     
     def _print_agent_thought(self, thought: str):
         """Print the agent's reasoning/thinking."""
-        console.print(f"     [dim]💭 {thought}[/dim]")
+        console.print(f"     [dim]{thought}[/dim]")
     
     def _print_code_block(self, label: str, code: str):
         """Print a code block that the agent wrote."""
-        console.print(f"     [bold cyan]📝 {label}:[/bold cyan]")
+        console.print(f"     [bold cyan]{label}:[/bold cyan]")
         for line in code.split('\n')[:10]:
             console.print(f"       [dim]{line}[/dim]")
         if len(code.split('\n')) > 10:
@@ -117,7 +189,7 @@ class TradingBot:
     
     def _print_tool_call(self, tool_name: str, args: dict):
         """Print a tool call the agent is making."""
-        console.print(f"     [bold magenta]🔧 Tool:[/bold magenta] [yellow]{tool_name}[/yellow]")
+        console.print(f"     [bold magenta]Tool:[/bold magenta] [yellow]{tool_name}[/yellow]")
         for k, v in args.items():
             v_str = str(v)[:100]
             console.print(f"       [dim]{k}: {v_str}[/dim]")
@@ -125,11 +197,11 @@ class TradingBot:
     def _print_trade_decision(self, decision: dict):
         """Print a trading decision."""
         if decision.get("action") == "buy":
-            console.print(f"     [bold green]🟢 BUY SIGNAL[/bold green]")
+            console.print(f"     [bold green]BUY SIGNAL[/bold green]")
         elif decision.get("action") == "sell":
-            console.print(f"     [bold red]🔴 SELL SIGNAL[/bold red]")
+            console.print(f"     [bold red]SELL SIGNAL[/bold red]")
         else:
-            console.print(f"     [dim]⏸️  HOLD (no clear signal)[/dim]")
+            console.print(f"     [dim]HOLD (no clear signal)[/dim]")
         
         for k, v in decision.items():
             if v is not None and k != "action" and k not in ("all_strategy_signals", "rag_insights", "learning_insights", "ensemble_signal", "key_factors"):
@@ -137,7 +209,7 @@ class TradingBot:
     
     def _print_strategy_signals(self, signals: list[dict]):
         """Print all strategy signals in a compact table."""
-        console.print(f"\n  [bold]📊 All Strategy Signals:[/bold]")
+        console.print(f"\n  [bold]All Strategy Signals:[/bold]")
         for s in signals:
             action_color = {
                 "buy": "green",
@@ -153,38 +225,64 @@ class TradingBot:
     def _print_rag_insights(self, insights: list[str]):
         """Print RAG insights."""
         if insights:
-            console.print(f"\n  [bold]🧠 RAG Pattern Insights:[/bold]")
+            console.print(f"\n  [bold]RAG Pattern Insights:[/bold]")
             for insight in insights:
                 console.print(f"    [dim]• {insight}[/dim]")
+    
+    def _write_status(self, cycle_result: dict):
+        """Write bot status to JSON file for dashboard consumption."""
+        try:
+            status = {
+                "running": self.running,
+                "cycle": self.iteration,
+                "last_update": datetime.now().isoformat(),
+                "current_signal": cycle_result.get("signal"),
+                "account": None,
+                "mode": "simulation" if (self.connector and self.connector.in_simulation_mode) else "live",
+            }
+            
+            if self.connector:
+                try:
+                    acc = self.connector.get_account_info()
+                    if acc:
+                        status["account"] = acc
+                except Exception:
+                    pass
+            
+            os.makedirs(os.path.dirname(self.status_path), exist_ok=True)
+            with open(self.status_path, "w", encoding="utf-8") as f:
+                json.dump(status, f, indent=2, default=str)
+        except Exception as e:
+            logger.warning(f"Failed to write bot status: {e}")
     
     # ─── PHASES ─────────────────────────────────────────────
     
     def check_environment(self) -> bool:
         """Check if the environment is properly configured."""
-        console.print("\n[bold]📋 Phase 1: Environment Check[/bold]")
+        console.print("\n[bold]Phase 1: Environment Check[/bold]")
         console.print("  " + "─" * 50)
         self._print_step("Checking configuration...", "running")
         
         warnings = validate_config()
         if warnings:
             for w in warnings:
-                console.print(f"    [yellow]⚠️  {w}[/yellow]")
-            console.print("  [yellow]⚠️  Some config is missing (optional for simulation mode)[/yellow]")
+                console.print(f"    [yellow]{w}[/yellow]")
+            console.print("  [yellow]Some config is missing (optional for simulation mode)[/yellow]")
         else:
             self._print_step("Configuration OK", "done")
         
         # Show configured LLM providers
         providers = get_configured_providers()
         if providers:
-            console.print(f"  [green]✅ Configured LLM providers: {', '.join(providers)}[/green]")
+            console.print(f"  [green]Configured LLM providers: {', '.join(providers)}[/green]")
         else:
-            console.print(f"  [yellow]⚠️  No LLM providers configured. Set at least one API key in .env[/yellow]")
+            console.print(f"  [yellow]No LLM providers configured. Set at least one API key in .env[/yellow]")
         
         return True
     
     def setup_environment(self):
         """Run the environment setup agent to verify everything is ready."""
-        console.print("\n[bold]🔧 Phase 2: Environment Setup[/bold]")
+        console.print("\n[bold]Phase 2: Environment Setup[/bold]")
         console.print("  " + "─" * 50)
         self._print_step("Running environment setup agent...", "running")
         
@@ -206,7 +304,7 @@ class TradingBot:
     
     def build_team(self):
         """Create and initialize all sub-agents."""
-        console.print("\n[bold]👥 Phase 3: Building Agent Team[/bold]")
+        console.print("\n[bold]Phase 3: Building Agent Team[/bold]")
         console.print("  " + "─" * 50)
         
         self._print_step("Initializing sub-agents...", "running")
@@ -234,11 +332,11 @@ class TradingBot:
             
             self._print_step(f"{label} ready", "done")
         
-        console.print(f"\n  [bold green]✅ Team assembled: {len(self.team)} agents ready[/bold green]")
+        console.print(f"\n  [bold green]Team assembled: {len(self.team)} agents ready[/bold green]")
     
     def connect_mt5(self) -> bool:
         """Connect to MetaTrader 5."""
-        console.print("\n[bold]🔌 Phase 4: MT5 Connection[/bold]")
+        console.print("\n[bold]Phase 4: MT5 Connection[/bold]")
         console.print("  " + "─" * 50)
         self._print_step("Connecting to MetaTrader 5...", "running")
         
@@ -247,7 +345,7 @@ class TradingBot:
         
         if connected:
             if self.connector.in_simulation_mode:
-                console.print("  [bold yellow]⚠️  SIMULATION MODE[/bold yellow]")
+                console.print("  [bold yellow]SIMULATION MODE[/bold yellow]")
                 console.print("    MT5 not detected — using simulated market data")
                 console.print("    All trades will be logged but not executed on a live account")
                 if self.connector.bridge_available:
@@ -257,20 +355,20 @@ class TradingBot:
             else:
                 account = self.connector.get_account_info()
                 if account:
-                    console.print(f"  [bold green]✅ Connected to MT5[/bold green]")
+                    console.print(f"  [bold green]Connected to MT5[/bold green]")
                     console.print(f"    Account: {account.get('name', 'N/A')}")
                     console.print(f"    Balance: [bold]${account.get('balance', 0):,.2f}[/bold]")
                     console.print(f"    Equity: ${account.get('equity', 0):,.2f}")
                     console.print(f"    Leverage: 1:{account.get('leverage', 0)}")
         else:
-            console.print("  [bold yellow]⚠️  MT5 connection failed — using simulation[/bold yellow]")
+            console.print("  [bold yellow]MT5 connection failed — using simulation[/bold yellow]")
         
         self._print_step("MT5 connection handled", "done")
         return connected
     
     def initialize_strategy(self):
         """Initialize the trading strategy and learning system."""
-        console.print("\n[bold]📊 Phase 5: Strategy & Learning Initialization[/bold]")
+        console.print("\n[bold]Phase 5: Strategy & Learning Initialization[/bold]")
         console.print("  " + "─" * 50)
         
         # ─── 5a: Legacy Strategy (kept for backward compat) ───
@@ -293,7 +391,7 @@ class TradingBot:
         console.print()
         self._print_step("Initializing meta-strategy learning system...", "running")
         
-        console.print("  [bold]🧠 Learning Module Components:[/bold]")
+        console.print("  [bold]Learning Module Components:[/bold]")
         
         # Vector Store (ChromaDB)
         self._print_step("Pattern Vector Store (ChromaDB RAG)...", "running")
@@ -335,7 +433,7 @@ class TradingBot:
         console.print()
         self._print_step("Initializing curiosity-driven knowledge acquisition...", "running")
         
-        console.print("  [bold]🧠 Knowledge Base & Curiosity Engine:[/bold]")
+        console.print("  [bold]Knowledge Base & Curiosity Engine:[/bold]")
         
         # Knowledge Base (SQLite)
         self._print_step("Knowledge Base (SQLite Q&A store)...", "running")
@@ -352,7 +450,7 @@ class TradingBot:
         console.print(f"    [dim]Seed questions queued: {pending}[/dim]")
         self._print_step("Curiosity agent ready", "done")
         
-        console.print(f"\n  [bold green]✅ Learning system initialized: "
+        console.print(f"\n  [bold green]Learning system initialized: "
                       f"{self.strategy_registry.count} strategies, "
                       f"{self.vector_store.pattern_count} stored patterns, "
                       f"{trade_count} historical trades, "
@@ -360,7 +458,7 @@ class TradingBot:
     
     def run_research(self) -> dict:
         """Run market research phase."""
-        console.print("\n[bold cyan]📈 Phase 6a: Market Research[/bold cyan]")
+        console.print("\n[bold cyan]Phase 6a: Market Research[/bold cyan]")
         console.print("  " + "─" * 50)
         self._print_step("Fetching XAUUSD market data...", "running")
         
@@ -395,7 +493,7 @@ class TradingBot:
         if self.curiosity_agent:
             knowledge_context = self.curiosity_agent.get_knowledge_for_symbol(SYMBOL)
             if knowledge_context and "No knowledge acquired" not in knowledge_context:
-                console.print(f"\n  [bold]📚 Knowledge Base Context Available:[/bold]")
+                console.print(f"\n  [bold]Knowledge Base Context Available:[/bold]")
                 # Show a brief summary of what we know
                 kb_summary = self.knowledge_base.get_knowledge_summary()
                 console.print(f"    Topics: {kb_summary['total_topics']} | "
@@ -455,14 +553,14 @@ class TradingBot:
         This replaces the old single-strategy approach with the full
         meta-strategy pipeline: 7 strategies + RAG + LLM evaluation.
         """
-        console.print("\n[bold cyan]🎯 Phase 6b: Meta-Strategy Signal Generation[/bold cyan]")
+        console.print("\n[bold cyan]Phase 6b: Meta-Strategy Signal Generation[/bold cyan]")
         console.print("  " + "─" * 50)
         
         indicators = research.get("indicators", {})
         data = research.get("data", [])
         
         if not indicators or not self.meta_strategy:
-            console.print("  [yellow]⚠️  Meta-strategy not available, using legacy strategy[/yellow]")
+            console.print("  [yellow]Meta-strategy not available, using legacy strategy[/yellow]")
             return self._legacy_strategy_design(research)
         
         # ─── Stage 1: Run all strategies ──────────────────────
@@ -483,7 +581,7 @@ class TradingBot:
         
         # Show ensemble signal
         ensemble = self.strategy_registry.get_ensemble_signal(indicators, min_agreement=2)
-        console.print(f"\n  [bold]🤝 Ensemble Signal:[/bold] {ensemble.action.upper()} "
+        console.print(f"\n  [bold]Ensemble Signal:[/bold] {ensemble.action.upper()} "
                       f"(confidence={ensemble.confidence:.2f})")
         console.print(f"    [dim]{ensemble.reason}[/dim]")
         
@@ -506,7 +604,7 @@ class TradingBot:
         )
         
         # ─── Display Decision ─────────────────────────────────
-        console.print(f"\n  [bold]🧠 Meta-Strategy Decision:[/bold]")
+        console.print(f"\n  [bold]Meta-Strategy Decision:[/bold]")
         self._print_trade_decision(decision)
         
         if decision.get("reasoning"):
@@ -518,13 +616,14 @@ class TradingBot:
         # Also run the legacy strategy for comparison
         legacy_signal = self.strategy.generate_signals(data) if self.strategy else None
         if legacy_signal:
-            console.print(f"\n  [dim]📊 Legacy strategy comparison: {legacy_signal.action.upper()} "
+            console.print(f"\n  [dim]Legacy strategy comparison: {legacy_signal.action.upper()} "
                           f"(confidence={legacy_signal.confidence:.2f})[/dim]")
         
         self._print_step("Signal generation complete", "done")
         
         return {
             "signal": decision,  # The meta-strategy decision
+            "indicators": indicators,  # ← FIX #1: Pass full indicators
             "legacy_signal": legacy_signal,
             "all_signals": signals_display,
             "ensemble": {
@@ -543,7 +642,7 @@ class TradingBot:
         if self.strategy and research.get("data"):
             signal = self.strategy.generate_signals(research["data"])
             
-            console.print(f"\n  [bold]📊 Signal Decision:[/bold]")
+            console.print(f"\n  [bold]Signal Decision:[/bold]")
             self._print_trade_decision({
                 "action": signal.action,
                 "confidence": f"{signal.confidence:.1%}",
@@ -604,14 +703,14 @@ class TradingBot:
     
     def run_risk_check(self, strategy_result: dict) -> dict:
         """Run risk management phase."""
-        console.print("\n[bold cyan]🛡️ Phase 6c: Risk Management[/bold cyan]")
+        console.print("\n[bold cyan]Phase 6c: Risk Management[/bold cyan]")
         console.print("  " + "─" * 50)
         
         signal = strategy_result.get("signal", {})
         action = signal.get("action", "hold")
         
         if not signal or action == "hold":
-            console.print("  [dim]⏸️  No trade to assess — skipping risk check[/dim]")
+            console.print("  [dim]No trade to assess — skipping risk check[/dim]")
             return {"approved": False, "reason": "No trade signal"}
         
         self._print_step("Assessing trade risk...", "running")
@@ -664,9 +763,9 @@ class TradingBot:
             # Decision
             approved = rr_ratio >= 2.0 and confidence >= 0.5
             if approved:
-                console.print(f"\n  [bold green]✅ TRADE APPROVED[/bold green]")
+                console.print(f"\n  [bold green]TRADE APPROVED[/bold green]")
             else:
-                console.print(f"\n  [bold yellow]⏸️  TRADE REJECTED[/bold yellow]")
+                console.print(f"\n  [bold yellow]TRADE REJECTED[/bold yellow]")
                 if rr_ratio < 2.0:
                     console.print(f"    Reason: Risk:Reward ratio ({rr_ratio:.2f}) below minimum (2.0)")
                 if confidence < 0.5:
@@ -697,13 +796,72 @@ class TradingBot:
         
         return 0.01
     
+    
+    # ← FIX #3: CHECK CLOSED POSITIONS
+    def _check_closed_positions(self):
+        """Check if any open positions have hit TP, SL, or timeout."""
+        if not self.open_positions:
+            return
+        
+        console.print("\n[bold cyan]Checking for closed positions...[/bold cyan]")
+        
+        # Get current price
+        try:
+            current_price_data = get_last_price(SYMBOL)
+            if current_price_data:
+                current_price = current_price_data.get("bid", 0)
+            else:
+                current_price = 0
+        except Exception as e:
+            logger.error(f"Could not get current price: {e}")
+            return
+        
+        console.print(f"  Current {SYMBOL} price: ${current_price:.2f}")
+        
+        closed_positions = []
+        still_open = []
+        
+        for position in self.open_positions:
+            is_closed, reason, pnl = position.check_if_closed(current_price)
+            
+            if is_closed:
+                console.print(f"\n  [bold yellow]Position Closed:[/bold yellow] {position.trade_id}")
+                console.print(f"    Reason: {reason.upper()}")
+                console.print(f"    Entry: ${position.entry_price:.2f}")
+                console.print(f"    Exit: ${current_price:.2f}")
+                console.print(f"    P&L: ${pnl:.2f} ({'WIN' if pnl > 0 else 'LOSS' if pnl < 0 else 'BREAKEVEN'})")
+                
+                # Record the outcome in learning system
+                if self.meta_strategy:
+                    self.meta_strategy.record_outcome(
+                        decision=position.decision,
+                        profit_loss=pnl,
+                        exit_price=current_price,
+                        exit_reason=reason,
+                        indicators=position.decision.get("indicators"),
+                    )
+                
+                closed_positions.append(position)
+            else:
+                still_open.append(position)
+        
+        # Update tracking
+        self.open_positions = still_open
+        
+        if closed_positions:
+            console.print(f"\n  [bold green]Closed {len(closed_positions)} position(s)[/bold green]")
+        
+        # Summary
+        if self.open_positions:
+            console.print(f"  [dim]Still tracking {len(self.open_positions)} open position(s)[/dim]")
+    
     def execute_trade(self, risk_result: dict, strategy_result: dict) -> dict:
         """Execute the trade if approved."""
-        console.print("\n[bold cyan]⚡ Phase 6d: Trade Execution[/bold cyan]")
+        console.print("\n[bold cyan]Phase 6d: Trade Execution[/bold cyan]")
         console.print("  " + "─" * 50)
         
         if not risk_result.get("approved"):
-            console.print("  [yellow]⏭️  Trade not approved — skipping execution[/yellow]")
+            console.print("  [yellow]Trade not approved — skipping execution[/yellow]")
             return {"executed": False, "reason": "Risk check failed"}
         
         signal = strategy_result.get("signal", {})
@@ -752,7 +910,7 @@ class TradingBot:
         
         # In simulation mode, log the trade
         if self.connector and self.connector.in_simulation_mode:
-            console.print(f"\n  [bold magenta]📝 SIMULATED TRADE EXECUTED[/bold magenta]")
+            console.print(f"\n  [bold magenta]SIMULATED TRADE EXECUTED[/bold magenta]")
             console.print(f"    [dim]This is a simulation. No real order was placed.[/dim]")
         
         # Record the trade in the learning system
@@ -764,10 +922,26 @@ class TradingBot:
                 decision=signal,
                 profit_loss=0.0,  # Will be updated when trade closes
                 exit_reason="pending",
+                indicators=strategy_result.get("indicators"),  # ← FIX #1: Pass indicators
             )
             self._print_step("Trade recorded in learning database", "done")
         
         self._print_step("Trade execution complete", "done")
+        
+        # ← FIX #3: Track the open position
+        if trade_result.get("executed"):
+            position = OpenPosition(
+                trade_id=f"trade_{self.iteration}_{int(time.time())}",
+                action=action,
+                entry_price=price,
+                entry_time=datetime.now(),
+                stop_loss=stop_loss,
+                take_profit=take_profit,
+                position_size=risk_result.get("position_size", 0.01),
+                decision=signal,
+            )
+            self.open_positions.append(position)
+            console.print(f"  [bold cyan]Position tracked[/bold cyan]: {position.trade_id}")
         
         return {
             "executed": True,
@@ -782,7 +956,7 @@ class TradingBot:
     
     def reflect_and_improve(self, cycle_result: dict):
         """Reflect on the trading cycle and identify improvements."""
-        console.print("\n[bold cyan]🔄 Phase 7: Reflection & Improvement[/bold cyan]")
+        console.print("\n[bold cyan]Phase 7: Reflection & Improvement[/bold cyan]")
         console.print("  " + "─" * 50)
         
         self.performance_history.append(cycle_result)
@@ -799,13 +973,13 @@ class TradingBot:
         
         # Show learning system stats
         if self.vector_store:
-            console.print(f"\n  [bold]🧠 Learning System Status:[/bold]")
+            console.print(f"\n  [bold]Learning System Status:[/bold]")
             console.print(f"    Patterns stored: {self.vector_store.pattern_count}")
             console.print(f"    Trades in experience DB: {self.experience_db.get_trade_count() if self.experience_db else 0}")
         
         # Every 5 iterations, run deep reflection
         if self.iteration % 5 == 0 and self.iteration > 0:
-            console.print(f"\n  [bold]🔄 Deep Reflection Cycle (every 5 iterations)[/bold]")
+            console.print(f"\n  [bold]Deep Reflection Cycle (every 5 iterations)[/bold]")
             
             winning = sum(1 for t in trades if t.get("profit", 0) > 0)
             losing = sum(1 for t in trades if t.get("profit", 0) < 0)
@@ -835,25 +1009,25 @@ class TradingBot:
                 if win_rate < 40:
                     old_conf = self.strategy.params["min_confidence"]
                     self.strategy.params["min_confidence"] = max(old_conf - 0.05, 0.4)
-                    console.print(f"    [yellow]⚠️  Low win rate — adjusted min_confidence: {old_conf} → {self.strategy.params['min_confidence']}[/yellow]")
+                    console.print(f"    [yellow]Low win rate — adjusted min_confidence: {old_conf} → {self.strategy.params['min_confidence']}[/yellow]")
                 elif win_rate > 70:
                     old_conf = self.strategy.params["min_confidence"]
                     self.strategy.params["min_confidence"] = min(old_conf + 0.05, 0.8)
-                    console.print(f"    [green]✅ High win rate — tightened min_confidence: {old_conf} → {self.strategy.params['min_confidence']}[/green]")
+                    console.print(f"    [green]High win rate — tightened min_confidence: {old_conf} → {self.strategy.params['min_confidence']}[/green]")
         
         # ─── Phase 7b: Curiosity Learning Cycle ────────────────
         if self.curiosity_agent:
-            console.print(f"\n  [bold]🤔 Phase 7b: Curiosity-Driven Learning[/bold]")
+            console.print(f"\n  [bold]Phase 7b: Curiosity-Driven Learning[/bold]")
             console.print("  " + "─" * 50)
             self._print_step("Asking questions to build trading knowledge...", "running")
             
             curiosity_results = self.curiosity_agent.run_learning_cycle()
             
             if curiosity_results["questions_asked"] > 0:
-                console.print(f"    [green]✅ Asked {curiosity_results['questions_asked']} question(s)[/green]")
-                console.print(f"    [green]✅ Stored {curiosity_results['knowledge_stored']} knowledge entr(ies)[/green]")
+                console.print(f"    [green]Asked {curiosity_results['questions_asked']} question(s)[/green]")
+                console.print(f"    [green]Stored {curiosity_results['knowledge_stored']} knowledge entr(ies)[/green]")
                 if curiosity_results["follow_ups_generated"] > 0:
-                    console.print(f"    [yellow]🔍 Generated {curiosity_results['follow_ups_generated']} follow-up question(s)[/yellow]")
+                    console.print(f"    [yellow]Generated {curiosity_results['follow_ups_generated']} follow-up question(s)[/yellow]")
                 
                 # Show knowledge base stats
                 kb_summary = self.knowledge_base.get_knowledge_summary()
@@ -865,11 +1039,11 @@ class TradingBot:
                 if pending > 0:
                     console.print(f"    [dim]⏳ {pending} questions still pending in queue[/dim]")
                 else:
-                    console.print(f"    [dim]✅ All questions answered — knowledge base complete[/dim]")
+                    console.print(f"    [dim]All questions answered — knowledge base complete[/dim]")
             
             if curiosity_results["errors"]:
                 for err in curiosity_results["errors"][:2]:
-                    console.print(f"    [red]⚠️  {err[:100]}...[/red]")
+                    console.print(f"    [red]{err[:100]}...[/red]")
             
             self._print_step("Curiosity learning complete", "done")
         
@@ -880,10 +1054,13 @@ class TradingBot:
         self.iteration += 1
         
         console.print(f"\n{'='*60}")
-        console.print(f"[bold]🔄 TRADING CYCLE #{self.iteration}[/bold]")
+        console.print(f"[bold]TRADING CYCLE #{self.iteration}[/bold]")
         console.print(f"{'='*60}")
         console.print(f"  Time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
         console.print()
+        
+        # ← FIX #3: Check for closed positions at start of cycle
+        self._check_closed_positions()
         
         # Phase 6a: Research
         research = self.run_research()
@@ -908,6 +1085,7 @@ class TradingBot:
         }
         
         self.reflect_and_improve(cycle_result)
+        self._write_status(cycle_result)
         
         return cycle_result
     
@@ -915,11 +1093,11 @@ class TradingBot:
         """Main entry point — run the trading bot."""
         console.print("""
 [bold yellow]╔══════════════════════════════════════════════════════════╗
-║     🤖 XAUUSD Trading Bot — Meta-Strategy Learning     ║
+║     XAUUSD Trading Bot — Meta-Strategy Learning     ║
 ║     Mission: Learn to trade Gold through curiosity      ║
 ║     LLM: LiteLLM multi-provider (Kilo Gateway, Groq)   ║
 ║     Learning: 7 strategies + RAG + SQLite + Curiosity   ║
-║     ⚠️  SIMULATION MODE: No MT5 — synthetic data        ║
+║     SIMULATION MODE: No MT5 — synthetic data        ║
 ╚══════════════════════════════════════════════════════════╝
 [/bold yellow]        """)
         
@@ -942,7 +1120,7 @@ class TradingBot:
         
         # Phase 6-7: Trading loop
         self.running = True
-        console.print(f"\n[bold green]🚀 Trading bot started! Running up to {self.max_iterations} cycles...[/bold green]")
+        console.print(f"\n[bold green]Trading bot started! Running up to {self.max_iterations} cycles...[/bold green]")
         console.print(f"[dim]   Press Ctrl+C to stop at any time[/dim]")
         
         try:
@@ -956,17 +1134,17 @@ class TradingBot:
                     time.sleep(wait_time)
         
         except KeyboardInterrupt:
-            console.print("\n\n[yellow]⚠️  Bot stopped by user[/yellow]")
+            console.print("\n\n[yellow]Bot stopped by user[/yellow]")
         except Exception as e:
             logger.error(f"Fatal error: {str(e)}", exc_info=True)
-            console.print(f"\n[red]❌ Fatal error: {str(e)}[/red]")
+            console.print(f"\n[red]Fatal error: {str(e)}[/red]")
         finally:
             self.shutdown()
     
     def shutdown(self):
         """Gracefully shut down the bot with summary."""
         console.print(f"\n{'='*60}")
-        console.print("[bold]📊 SESSION SUMMARY[/bold]")
+        console.print("[bold]SESSION SUMMARY[/bold]")
         console.print(f"{'='*60}")
         
         self.running = False
@@ -989,7 +1167,7 @@ class TradingBot:
         
         # Learning system summary
         if self.vector_store:
-            console.print(f"\n  [bold]🧠 Learning System Summary:[/bold]")
+            console.print(f"\n  [bold]Learning System Summary:[/bold]")
             console.print(f"    Patterns in vector store: {self.vector_store.pattern_count}")
             console.print(f"    Trades in experience DB: {self.experience_db.get_trade_count() if self.experience_db else 0}")
             
@@ -1006,7 +1184,7 @@ class TradingBot:
         # Curiosity agent summary
         if self.curiosity_agent:
             curiosity_summary = self.curiosity_agent.get_learning_summary()
-            console.print(f"\n  [bold]🤔 Curiosity-Driven Learning Summary:[/bold]")
+            console.print(f"\n  [bold]Curiosity-Driven Learning Summary:[/bold]")
             console.print(f"    Questions asked: {curiosity_summary['total_questions_asked']}")
             console.print(f"    Knowledge entries: {curiosity_summary['knowledge_entries']}")
             console.print(f"    Topics covered: {curiosity_summary['topics_covered']}")
@@ -1020,9 +1198,9 @@ class TradingBot:
         
         console.print(f"\n  [bold]Agent Team:[/bold]")
         for name in self.team:
-            console.print(f"    ✅ {name.replace('_', ' ').title()} Agent")
+            console.print(f"    {name.replace('_', ' ').title()} Agent")
         
-        console.print(f"\n[green]✓ Bot shutdown complete[/green]")
+        console.print(f"\n[green]Bot shutdown complete[/green]")
         console.print(f"[dim]Logs saved to: logs/ directory[/dim]")
         console.print()
 

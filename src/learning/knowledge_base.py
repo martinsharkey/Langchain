@@ -561,6 +561,81 @@ class KnowledgeBase:
         conn.close()
         return topics
 
+    def add_research_finding(self, finding: dict) -> bool:
+        """
+        Add a research finding from the daily research cycle.
+        
+        Args:
+            finding: Dict with research data (event, analysis, recommendations, etc.)
+            
+        Returns:
+            True if added successfully
+        """
+        try:
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+            
+            # Store research finding as a special knowledge entry
+            cursor.execute("""
+                INSERT INTO knowledge_entries
+                    (topic, subtopic, question, answer, confidence, source, verified)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+            """, (
+                "research_findings",
+                finding.get("event_type", "market_event"),
+                finding.get("event_name", "Research finding"),
+                json.dumps(finding),
+                finding.get("confidence", 0.5),
+                "daily_research_cycle",
+                True  # Research cycle is authoritative
+            ))
+            
+            conn.commit()
+            conn.close()
+            
+            logger.info(f"Added research finding: {finding.get('event_name', 'Unknown')}")
+            return True
+            
+        except Exception as e:
+            logger.error(f"Error adding research finding: {e}")
+            return False
+    
+    def get_research_findings_for_date(self, date_str: str) -> list:
+        """
+        Get all research findings for a specific date.
+        
+        Args:
+            date_str: Date in ISO format (YYYY-MM-DD)
+            
+        Returns:
+            List of research findings
+        """
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        
+        cursor.execute("""
+            SELECT answer, confidence, created_at
+            FROM knowledge_entries
+            WHERE topic = 'research_findings'
+            AND created_at LIKE ?
+        """, (f"{date_str}%",))
+        
+        rows = cursor.fetchall()
+        conn.close()
+        
+        findings = []
+        for row in rows:
+            try:
+                findings.append({
+                    "data": json.loads(row[0]),
+                    "confidence": row[1],
+                    "timestamp": row[2]
+                })
+            except json.JSONDecodeError:
+                continue
+        
+        return findings
+
     def clear(self):
         """Clear all knowledge (for testing/reset)."""
         conn = sqlite3.connect(self.db_path)

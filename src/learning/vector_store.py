@@ -360,7 +360,8 @@ class PatternVectorStore:
         if results["ids"] and results["ids"][0]:
             for i in range(len(results["ids"][0])):
                 patterns.append({
-                    "id": results["ids"][0][i],
+                    "pattern_id": results["ids"][0][i],  # ← FIX #2: Explicit pattern_id
+                    "id": results["ids"][0][i],  # Keep for backward compat
                     "metadata": results["metadatas"][0][i],
                     "similarity": 1.0 - (results["distances"][0][i] if results.get("distances") else 0),
                 })

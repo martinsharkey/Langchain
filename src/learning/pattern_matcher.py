@@ -80,6 +80,11 @@ class PatternMatcher:
         winning = self.vector_store.find_winning_patterns(indicators, n_results=5)
         losing = self.vector_store.find_losing_patterns(indicators, n_results=5)
         
+        # ← FIX #2: Capture most similar pattern_id
+        most_similar_pattern_id = None
+        if similar:
+            most_similar_pattern_id = similar[0].get("pattern_id")
+        
         if not similar:
             return {
                 "similar_patterns_found": 0,
@@ -91,6 +96,7 @@ class PatternMatcher:
                 "recommended_action": "insufficient_data",
                 "confidence_adjustment": 0.0,
                 "insights": ["No historical patterns found for current market conditions"],
+                "pattern_id": None,  # ← FIX #2: Add pattern_id to return
             }
         
         # Analyze strategies used in similar patterns
@@ -163,6 +169,7 @@ class PatternMatcher:
             "recommended_action": recommended_action,
             "confidence_adjustment": confidence_adjustment,
             "insights": insights,
+            "pattern_id": most_similar_pattern_id,  # ← FIX #2: Include pattern_id
         }
     
     def get_historical_confidence(

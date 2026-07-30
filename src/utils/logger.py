@@ -3,6 +3,7 @@ Logging configuration with Rich console output.
 """
 
 import os
+import sys
 import logging
 from datetime import datetime
 from rich.console import Console
@@ -10,6 +11,11 @@ from rich.logging import RichHandler
 from rich.theme import Theme
 
 from src.config import LOGS_DIR
+
+# Force UTF-8 encoding on Windows consoles
+if sys.stdout.encoding != "utf-8":
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
 
 # Custom theme for the trading bot
 CUSTOM_THEME = Theme({
@@ -21,7 +27,16 @@ CUSTOM_THEME = Theme({
     "agent": "bold blue",
 })
 
-console = Console(theme=CUSTOM_THEME)
+class SafeRichHandler(RichHandler):
+    """RichHandler that gracefully handles Unicode encoding errors on Windows."""
+    
+    def emit(self, record):
+        try:
+            super().emit(record)
+        except UnicodeEncodeError:
+            self.handleError(record)
+
+console = Console(theme=CUSTOM_THEME, force_terminal=True)
 
 def setup_logger(name: str = "trading_bot") -> logging.Logger:
     """Set up a logger with both file and console handlers."""
@@ -51,7 +66,7 @@ def setup_logger(name: str = "trading_bot") -> logging.Logger:
     logger.addHandler(file_handler)
 
     # Console handler (Rich, INFO+)
-    console_handler = RichHandler(
+    console_handler = SafeRichHandler(
         console=console,
         rich_tracebacks=True,
         show_time=False,

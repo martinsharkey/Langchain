@@ -130,12 +130,21 @@ class MetaStrategyAgent:
         timestamp = datetime.now().isoformat()
         
         # ─── STAGE 1: ANALYZE ─────────────────────────────────
+        # ← FIX #4: Update strategy weights from historical performance
+        performance = self.exp_db.get_strategy_performance()
+        if performance:
+            self.registry.update_weights_from_performance(performance)
+            logger.debug(f"Updated strategy weights based on {len(performance)} strategies")
+        
         # Run all strategies in parallel
         all_signals = self.registry.run_all_strategies(indicators)
         ensemble = self.registry.get_ensemble_signal(indicators, min_agreement=2)
         
         # Get RAG-based pattern analysis
         rag_analysis = self.matcher.analyze_current_market(indicators)
+        
+        # ← FIX #2: Capture RAG pattern_id
+        rag_pattern_id = rag_analysis.get("pattern_id")
         
         # Get optimal strategy combination from historical data
         optimal_combo = self.matcher.find_optimal_strategy_combination(indicators)
@@ -182,6 +191,7 @@ class MetaStrategyAgent:
         
         # Add metadata
         decision["timestamp"] = timestamp
+        decision["rag_pattern_id"] = rag_pattern_id  # ← FIX #2: Include RAG pattern_id
         decision["rag_insights"] = rag_analysis.get("insights", [])
         decision["learning_insights"] = learning_insights
         decision["market_regime"] = regime
@@ -527,6 +537,7 @@ Respond with a JSON object ONLY (no markdown, no code blocks):
         profit_loss: float,
         exit_price: Optional[float] = None,
         exit_reason: Optional[str] = None,
+        indicators: Optional[dict] = None,  # ← FIX #1: Add indicators parameter
     ):
         """
         Record the outcome of a trade for learning.
@@ -570,11 +581,15 @@ Respond with a JSON object ONLY (no markdown, no code blocks):
         }
         
         # We need indicators for the experience DB - store what we have
-        indicators = {
-            "trend": decision.get("market_regime", "unknown"),
-            "rsi": None,
-            "atr": None,
-        }
+        # ← FIX #1: Use passed-in indicators, fallback to minimal if not provided
+        if indicators is None:
+            # Fallback: create minimal indicators from decision
+            indicators = {
+                "trend": decision.get("market_regime", "unknown"),
+                "rsi": None,
+                "atr": None,
+            }
+        # Otherwise use the full indicators dict that was passed in
         
         self.exp_db.record_trade(
             signal=signal_dict,

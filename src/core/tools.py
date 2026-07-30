@@ -30,13 +30,15 @@ def execute_shell_command_func(command: str, timeout: int = 60) -> str:
         command: The shell command to execute.
         timeout: Timeout in seconds (default: 60).
     """
-    logger.info(f"⚡ Executing shell command: {command[:200]}...")
+    logger.info(f"Executing shell command: {command[:200]}...")
     try:
         result = subprocess.run(
             command,
             shell=True,
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             timeout=timeout,
         )
         output = ""
@@ -46,13 +48,13 @@ def execute_shell_command_func(command: str, timeout: int = 60) -> str:
             output += f"\nSTDERR:\n{result.stderr[:2000]}"
         if result.returncode != 0:
             output += f"\nExit code: {result.returncode}"
-        logger.info(f"✅ Shell command completed (exit: {result.returncode})")
+        logger.info(f"Shell command completed (exit: {result.returncode})")
         return output or "(no output)"
     except subprocess.TimeoutExpired:
-        logger.warning(f"⏱️ Shell command timed out after {timeout}s")
+        logger.warning(f"Shell command timed out after {timeout}s")
         return f"Command timed out after {timeout}s"
     except Exception as e:
-        logger.error(f"❌ Shell command error: {str(e)}")
+        logger.error(f"Shell command error: {str(e)}")
         return f"Error: {str(e)}"
 
 
@@ -74,7 +76,7 @@ def python_repl_func(code: str) -> str:
     Args:
         code: Python code to execute.
     """
-    logger.info(f"🐍 Executing Python REPL ({len(code)} chars)")
+    logger.info(f"Executing Python REPL ({len(code)} chars)")
     try:
         import io
         import sys
@@ -101,10 +103,10 @@ def python_repl_func(code: str) -> str:
         if stderr_capture.getvalue():
             output += f"\nSTDERR:\n{stderr_capture.getvalue()}"
         
-        logger.info(f"✅ Python REPL completed ({len(output)} chars output)")
+        logger.info(f"Python REPL completed ({len(output)} chars output)")
         return output or "(no output)"
     except Exception as e:
-        logger.error(f"❌ Python REPL error: {str(e)}")
+        logger.error(f"Python REPL error: {str(e)}")
         return f"REPL Error: {str(e)}"
 
 
@@ -126,18 +128,18 @@ def read_file_func(path: str) -> str:
     Args:
         path: Path to the file to read.
     """
-    logger.info(f"📖 Reading file: {path}")
+    logger.info(f"Reading file: {path}")
     try:
-        with open(path, "r") as f:
+        with open(path, "r", encoding="utf-8", errors="replace") as f:
             content = f.read()
         truncated = len(content) > 5000
         result = content[:5000] if truncated else content
         if truncated:
             result += "\n... (truncated, file is larger)"
-        logger.info(f"✅ Read {len(content)} bytes from {path}")
+        logger.info(f"Read {len(content)} bytes from {path}")
         return result
     except Exception as e:
-        logger.error(f"❌ Error reading file: {str(e)}")
+        logger.error(f"Error reading file: {str(e)}")
         return f"Error reading file: {str(e)}"
 
 
@@ -158,15 +160,15 @@ def write_file_func(path: str, content: str) -> str:
         path: Path to write the file to.
         content: Content to write to the file.
     """
-    logger.info(f"✏️ Writing file: {path} ({len(content)} bytes)")
+    logger.info(f"Writing file: {path} ({len(content)} bytes)")
     try:
         os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
-        with open(path, "w") as f:
+        with open(path, "w", encoding="utf-8") as f:
             f.write(content)
-        logger.info(f"✅ Successfully wrote {len(content)} bytes to {path}")
+        logger.info(f"Successfully wrote {len(content)} bytes to {path}")
         return f"Successfully wrote {len(content)} bytes to {path}"
     except Exception as e:
-        logger.error(f"❌ Error writing file: {str(e)}")
+        logger.error(f"Error writing file: {str(e)}")
         return f"Error writing file: {str(e)}"
 
 
@@ -186,7 +188,7 @@ def list_files_func(path: str = ".") -> str:
     Args:
         path: Directory to list (default: current directory).
     """
-    logger.info(f"📂 Listing files in: {path}")
+    logger.info(f"Listing files in: {path}")
     try:
         files = os.listdir(path)
         files = [os.path.join(path, f) for f in files]
@@ -201,10 +203,10 @@ def list_files_func(path: str = ".") -> str:
                 result.append(f"📄 {f} ({size} bytes)")
         
         output = "\n".join(result) if result else "(empty directory)"
-        logger.info(f"✅ Listed {len(result)} items in {path}")
+        logger.info(f"Listed {len(result)} items in {path}")
         return output
     except Exception as e:
-        logger.error(f"❌ Error listing files: {str(e)}")
+        logger.error(f"Error listing files: {str(e)}")
         return f"Error listing files: {str(e)}"
 
 

@@ -747,8 +747,44 @@ class StrategyRegistry:
             action="hold",
             confidence=0.0,
             price=close,
-            reason=f"Ensemble: Buy={buys}, Sell={sells}, Hold={len(results)-buys-sells}",
+             reason=f"Ensemble: Buy={buys}, Sell={sells}, Hold={len(results)-buys-sells}",
         )
+    
+    # ← FIX #4: UPDATE WEIGHTS FROM PERFORMANCE
+    def update_weights_from_performance(self, performance_data: dict):
+        """
+        Update strategy weights based on historical performance.
+        
+        Win rate directly affects weight:
+        - 60% win rate → weight 1.2x (20% boost)
+        - 50% win rate → weight 1.0x (neutral)
+        - 40% win rate → weight 0.8x (20% penalty)
+        
+        Args:
+            performance_data: Dict from ExperienceDatabase.get_strategy_performance()
+        """
+        for strategy_name, metrics in performance_data.items():
+            if strategy_name not in self._strategies:
+                continue
+            
+            win_rate = metrics.get("win_rate", 50.0)
+            
+            # Calculate weight factor: (win_rate - 50) / 50 normalized
+            # This gives -1.0 to +1.0 range
+            factor = (win_rate - 50.0) / 50.0
+            
+            # Convert to weight multiplier: 0.5x to 1.5x
+            # 0% WR → 0.5x, 50% WR → 1.0x, 100% WR → 1.5x
+            weight = 1.0 + (factor * 0.5)
+            
+            # Clamp between 0.2x and 2.0x (allow significant variation)
+            weight = max(0.2, min(2.0, weight))
+            
+            self._strategies[strategy_name]["weight"] = weight
+            
+            logger.info(
+                f"Updated {strategy_name}: win_rate={win_rate:.1f}% → weight={weight:.2f}x"
+            )
     
     @property
     def count(self) -> int:
