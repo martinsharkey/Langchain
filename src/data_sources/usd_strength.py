@@ -30,6 +30,9 @@ class USDStrengthSource:
         """
         Collect USD strength data.
         
+        REQUIRED: Requires real USD data source (TradingView API, FRED, etc.).
+        Does NOT use mock data.
+        
         Returns:
             {
                 "timestamp": ISO timestamp,
@@ -42,61 +45,17 @@ class USDStrengthSource:
                 "gold_implication": "SELL|BUY|NEUTRAL",
                 "errors": [str, ...]
             }
+            
+        Raises:
+            ConnectionError: If USD data source not configured
         """
         logger.info("Collecting USD strength data...")
         
-        # In production, would fetch real data from:
-        # - TradingView API (DXY)
-        # - US Treasury (yields)
-        # - FRED (Federal Reserve Economic Data)
-        
-        # For now, return mock data
-        return await self._collect_mock()
-    
-    async def _collect_mock(self) -> Dict[str, Any]:
-        """Return mock USD strength data."""
-        logger.info("Using mock USD strength data")
-        
-        # Mock realistic data
-        dxy_level = 103.5
-        dxy_change = 0.25  # +0.25% today
-        real_yield = 2.1   # 2.1% real yield
-        
-        # Analyze trend
-        if dxy_change > 0.1:
-            trend = "up"
-            sentiment = "strong"
-            gold_implication = "SELL"
-        elif dxy_change < -0.1:
-            trend = "down"
-            sentiment = "weak"
-            gold_implication = "BUY"
-        else:
-            trend = "neutral"
-            sentiment = "neutral"
-            gold_implication = "HOLD"
-        
-        return {
-            "timestamp": datetime.now(timezone.utc).isoformat(),
-            "dxy": dxy_level,
-            "dxy_change": dxy_change,  # % today
-            "dxy_trend": trend,
-            "dxy_level_assessment": "elevated" if dxy_level > 103 else "moderate",
-            "real_yields": real_yield,
-            "yields_trend": "stable",  # or rising/falling
-            "usd_pairs": {
-                "eurusd": 1.095,
-                "gbpusd": 1.265,
-                "usdyen": 148.5,
-                "usdchf": 0.885
-            },
-            "usd_sentiment": sentiment,
-            "correlation_to_gold": -0.75,  # Historical correlation
-            "gold_implication": gold_implication,
-            "interpretation": (
-                "Strong USD pressures gold" if gold_implication == "SELL"
-                else "Weak USD supports gold" if gold_implication == "BUY"
-                else "Neutral USD-gold dynamics"
-            ),
-            "errors": ["Mock data - real financial data API not configured"]
-        }
+        raise ConnectionError(
+            "USD strength data source not configured.\n"
+            "Requires integration with:\n"
+            "  - TradingView API (for DXY/Dollar Index)\n"
+            "  - US Treasury API (for yields)\n"
+            "  - FRED API (Federal Reserve Economic Data)\n"
+            "Configure a real USD data API to enable this data source."
+        )

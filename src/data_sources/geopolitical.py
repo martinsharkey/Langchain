@@ -44,13 +44,14 @@ class GeopoliticalSource:
     
     def __init__(self):
         self.timeout = aiohttp.ClientTimeout(total=30)
-        # In production, could use GDELT or similar API
-        self.use_mock = True  # Default to mock until API configured
-        logger.info("GeopoliticalSource initialized")
+        logger.info("GeopoliticalSource initialized (requires external API)")
     
     async def collect(self) -> Dict[str, Any]:
         """
         Collect geopolitical events.
+        
+        REQUIRED: Requires real geopolitical API (GDELT, NewsAPI, etc.).
+        Does NOT use mock data.
         
         Returns:
             {
@@ -59,99 +60,22 @@ class GeopoliticalSource:
                 "sanctions": [...],
                 "elections": [...],
                 "trade_tensions": [...],
-                "safe_haven_demand": 0.5,  # 0.0-1.0
+                "safe_haven_demand": 0.0-1.0,
                 "crisis_level": "low|medium|high",
                 "errors": [str, ...]
             }
+            
+        Raises:
+            ConnectionError: If geopolitical API not configured
         """
         logger.info("Collecting geopolitical events...")
         
-        if self.use_mock:
-            return await self._collect_mock()
-        
-        try:
-            # Could integrate real APIs here (GDELT, NewsAPI, etc.)
-            # For now, returning structured format
-            return {
-                "timestamp": datetime.now(timezone.utc).isoformat(),
-                "wars": [],
-                "sanctions": [],
-                "elections": [],
-                "trade_tensions": [],
-                "safe_haven_demand": 0.5,
-                "crisis_level": "low",
-                "errors": ["Geopolitical API not configured"]
-            }
-        
-        except Exception as e:
-            logger.error(f"Error collecting geopolitical data: {e}")
-            return {
-                "timestamp": datetime.now(timezone.utc).isoformat(),
-                "wars": [],
-                "sanctions": [],
-                "elections": [],
-                "trade_tensions": [],
-                "safe_haven_demand": 0.5,
-                "crisis_level": "low",
-                "errors": [str(e)]
-            }
-    
-    async def _collect_mock(self) -> Dict[str, Any]:
-        """Return mock geopolitical data."""
-        logger.info("Using mock geopolitical data")
-        
-        mock_events = {
-            "timestamp": datetime.now(timezone.utc).isoformat(),
-            "wars": [
-                {
-                    "location": "Ukraine",
-                    "severity": 3,
-                    "impact": "bullish",
-                    "description": "Ongoing Russia-Ukraine conflict",
-                    "trend": "stable",
-                    "gold_impact_direction": "BUY"
-                }
-            ],
-            "sanctions": [
-                {
-                    "target": "Russia",
-                    "source": "Western nations",
-                    "severity": 2,
-                    "impact": "bullish",
-                    "recent": True,
-                    "gold_impact_direction": "BUY"
-                }
-            ],
-            "elections": [
-                {
-                    "country": "US",
-                    "date": (datetime.now(timezone.utc) + timedelta(days=200)).date().isoformat(),
-                    "severity": 1,
-                    "impact": "neutral",
-                    "uncertainty": True,
-                    "gold_impact_direction": "HOLD"
-                }
-            ],
-            "trade_tensions": [
-                {
-                    "parties": "US-China",
-                    "severity": 2,
-                    "impact": "bullish",
-                    "tariffs": True,
-                    "gold_impact_direction": "BUY"
-                }
-            ],
-            "safe_haven_demand": 0.6,  # Medium-high
-            "crisis_level": "medium",
-            "major_risks": [
-                "Persistent Russia-Ukraine conflict",
-                "Potential Taiwan tension escalation",
-                "US election uncertainty 2024"
-            ],
-            "errors": ["Mock data - real geopolitical API not configured"]
-        }
-        
-        return mock_events
+        raise ConnectionError(
+            "Geopolitical data source not configured.\n"
+            "Requires integration with GDELT API or similar geopolitical event service.\n"
+            "Current implementation only provides mock data which is disabled.\n"
+            "Configure a real geopolitical API to enable this data source."
+        )
     
     def calculate_safe_haven_pressure(
         self,

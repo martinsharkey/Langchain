@@ -63,14 +63,22 @@ class NewsAggregatorSource:
         self.timeout = aiohttp.ClientTimeout(total=30)
         self.has_api_key = bool(self.NEWSAPI_KEY)
         
-        if self.has_api_key:
-            logger.info("NewsAggregatorSource initialized with API key")
-        else:
-            logger.warning("NewsAggregatorSource initialized WITHOUT API key (mock mode)")
+        if not self.has_api_key:
+            raise ValueError(
+                "NEWSAPI_KEY environment variable is required.\n"
+                "NewsAggregatorSource requires real API key to operate.\n"
+                "Set NEWSAPI_KEY in your .env file to enable news collection.\n"
+                "Get a free key from https://newsapi.org/"
+            )
+        
+        logger.info("NewsAggregatorSource initialized with API key")
     
     async def collect(self) -> Dict[str, Any]:
         """
         Collect financial news relevant to XAUUSD.
+        
+        REQUIRED: NEWSAPI_KEY must be configured.
+        Does NOT use mock data.
         
         Returns:
             {
@@ -81,11 +89,16 @@ class NewsAggregatorSource:
                 "total_articles": int,
                 "errors": [str, ...]
             }
+            
+        Raises:
+            ConnectionError: If API key not configured or API call fails
         """
         logger.info("Collecting financial news...")
         
         if not self.has_api_key:
-            return await self._collect_mock()
+            raise ConnectionError(
+                "NEWSAPI_KEY not configured. Cannot collect news."
+            )
         
         try:
             async with aiohttp.ClientSession(timeout=self.timeout) as session:
@@ -178,43 +191,3 @@ class NewsAggregatorSource:
                 unique_articles[key] = article
         
         return list(unique_articles.values())[:20]  # Top 20 articles
-    
-    async def _collect_mock(self) -> Dict[str, Any]:
-        """Return mock news data."""
-        logger.info("Using mock news data (API key not available)")
-        
-        mock_articles = [
-            {
-                "title": "Gold prices rise amid Fed uncertainty",
-                "source": "Bloomberg",
-                "url": "https://example.com/news1",
-                "published_at": datetime.now(timezone.utc).isoformat(),
-                "category": "gold",
-                "keyword": "gold prices"
-            },
-            {
-                "title": "US dollar weakens as inflation concerns mount",
-                "source": "Reuters",
-                "url": "https://example.com/news2",
-                "published_at": (datetime.now(timezone.utc) - timedelta(hours=1)).isoformat(),
-                "category": "usd",
-                "keyword": "US dollar"
-            },
-            {
-                "title": "Market volatility increases: investors flee to safe havens",
-                "source": "CNBC",
-                "url": "https://example.com/news3",
-                "published_at": (datetime.now(timezone.utc) - timedelta(hours=2)).isoformat(),
-                "category": "sentiment",
-                "keyword": "market volatility"
-            }
-        ]
-        
-        return {
-            "timestamp": datetime.now(timezone.utc).isoformat(),
-            "gold_news": [mock_articles[0]],
-            "usd_news": [mock_articles[1]],
-            "sentiment_news": [mock_articles[2]],
-            "total_articles": 3,
-            "errors": ["Mock data - API key not configured"]
-        }
