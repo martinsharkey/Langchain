@@ -101,38 +101,108 @@ def api_readiness():
 
 @app.route("/api/trades")
 def api_trades():
-    """Get actual trades from database."""
-    limit = int(os.environ.get("DASHBOARD_TRADES_LIMIT", "50"))
-    rows = safe_query(DB_PATH, """
-        SELECT id, timestamp, symbol, action, entry_price, stop_loss,
-               take_profit, position_size, confidence, strategy_used,
-               outcome, profit_loss, exit_price, exit_reason,
-               market_regime, created_at
-        FROM trades
-        ORDER BY id DESC
-        LIMIT ?
-    """, (limit,), default=[])
-    return jsonify(rows or [])
+    """Get REAL trades from live MT5 account."""
+    try:
+        from src.mt5.account import get_history
+        from src.mt5.connector import get_connector
+        
+        # Verify MT5 is connected
+        c = get_connector()
+        if not c.is_connected():
+            return jsonify({"error": "MT5 not connected"}), 503
+        
+        # Fetch real trades from MT5
+        trades = get_history(deals=50)  # Get last 50 trades
+        
+        # Format for dashboard
+        formatted = []
+        for trade in trades:
+            formatted.append({
+                "id": trade.get("ticket"),
+                "timestamp": trade.get("time"),
+                "symbol": trade.get("symbol"),
+                "action": trade.get("type"),
+                "entry_price": trade.get("price"),
+                "position_size": trade.get("volume"),
+                "profit_loss": trade.get("profit"),
+                "outcome": "win" if trade.get("profit", 0) > 0 else "loss" if trade.get("profit", 0) < 0 else "breakeven",
+            })
+        
+        return jsonify(formatted)
+    
+    except Exception as e:
+        logger.error(f"Error fetching MT5 trades: {e}")
+        return jsonify({"error": str(e)}), 500
 
 
 @app.route("/api/performance")
 def api_performance():
-    """Get performance metrics."""
-    overall = safe_query(DB_PATH, """
-        SELECT 
-            COUNT(*) as total_trades,
-            SUM(CASE WHEN outcome='win' THEN 1 ELSE 0 END) as wins,
-            SUM(CASE WHEN outcome='loss' THEN 1 ELSE 0 END) as losses,
-            SUM(CASE WHEN outcome='pending' THEN 1 ELSE 0 END) as pending,
-            COALESCE(SUM(profit_loss), 0) as total_pnl,
-            AVG(CASE WHEN outcome IN ('win','loss') THEN confidence ELSE NULL END) as avg_confidence
-        FROM trades
-    """, default=[{}])
+    """Get performance metrics from REAL MT5 trades."""
+    try:
+        from src.mt5.account import get_history
+        from src.mt5.connector import get_connector
+        
+        # Verify MT5 is connected
+        c = get_connector()
+        if not c.is_connected():
+            return jsonify({
+                "overall": {
+                    "total_trades": 0,
+                    "wins": 0,
+                    "losses": 0,
+                    "pending": 0,
+                    "total_pnl": 0,
+                    "avg_confidence": 0
+                }
+            }), 503
+        
+        # Fetch real trades from MT5
+        trades = get_history(deals=500)  # Get last 500 trades for stats
+        
+        if not trades:
+            return jsonify({
+                "overall": {
+                    "total_trades": 0,
+                    "wins": 0,
+                    "losses": 0,
+                    "pending": 0,
+                    "total_pnl": 0,
+                    "avg_confidence": 0
+                }
+            })
+        
+        # Calculate metrics
+        total_trades = len(trades)
+        total_pnl = sum(t.get("profit", 0) for t in trades)
+        wins = sum(1 for t in trades if t.get("profit", 0) > 0)
+        losses = sum(1 for t in trades if t.get("profit", 0) < 0)
+        pending = sum(1 for t in trades if t.get("profit", 0) == 0)
+        
+        return jsonify({
+            "overall": {
+                "total_trades": total_trades,
+                "wins": wins,
+                "losses": losses,
+                "pending": pending,
+                "total_pnl": round(total_pnl, 2),
+                "avg_confidence": 0  # MT5 doesn't have confidence scores
+            },
+            "strategies": [],
+        })
     
-    return jsonify({
-        "overall": overall[0] if overall else {},
-        "strategies": [],
-    })
+    except Exception as e:
+        logger.error(f"Error fetching MT5 performance: {e}")
+        return jsonify({
+            "overall": {
+                "total_trades": 0,
+                "wins": 0,
+                "losses": 0,
+                "pending": 0,
+                "total_pnl": 0,
+                "avg_confidence": 0
+            },
+            "error": str(e)
+        }), 500
 
 
 # ═══════════════════════════════════════════════════════════════════
