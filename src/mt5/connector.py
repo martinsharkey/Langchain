@@ -311,7 +311,7 @@ _result = _init_result
                     except Exception:
                         info = None
                     
-                if info is not None:
+                    if info is not None:
                         self._connected = True
                         self._account_info = {
                             "balance": info.balance,
