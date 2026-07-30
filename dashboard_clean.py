@@ -61,12 +61,12 @@ def calculate_readiness() -> dict:
     try:
         from src.mt5.connector import get_connector
         c = get_connector()
-        if c.is_connected() and not c.in_simulation_mode:
+        if c.is_connected():
             connection_score = 100
             connection_status = "LIVE"
         else:
             connection_score = 0
-            connection_status = "SIMULATION/OFFLINE"
+            connection_status = "OFFLINE"
     except Exception:
         connection_score = 0
         connection_status = "ERROR"
@@ -75,7 +75,7 @@ def calculate_readiness() -> dict:
         "score": connection_score,
         "status": connection_status,
         "color": "#3fb950" if connection_score > 0 else "#f85149",
-        "message": "System connected to live MT5" if connection_score > 0 else "System in simulation/test mode",
+        "message": "System connected to live MT5" if connection_score > 0 else "System offline",
     }
 
 
@@ -86,7 +86,7 @@ def index():
 
 @app.route("/api/readiness")
 def api_readiness():
-    """Get readiness and real MT5 data."""
+    """Get readiness and live MT5 data."""
     readiness = calculate_readiness()
     
     try:
@@ -97,7 +97,7 @@ def api_readiness():
         c = get_connector()
         c.initialize()
         
-        if c.is_connected() and not c.in_simulation_mode:
+        if c.is_connected():
             acc = get_account_info()
             last = get_last_price("XAUUSD")
             

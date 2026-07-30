@@ -163,7 +163,7 @@ class TradingBot:
         console.print("[bold cyan]║[/bold cyan]  [bold]Mission:[/bold] Learn to trade Gold through curiosity       [bold cyan]║[/bold cyan]")
         console.print("[bold cyan]║[/bold cyan]  [bold]LLM:[/bold] LiteLLM multi-provider (Kilo Gateway, Groq)     [bold cyan]║[/bold cyan]")
         console.print("[bold cyan]║[/bold cyan]  [bold]Learning:[/bold] 7 strategies + RAG + SQLite + Curiosity    [bold cyan]║[/bold cyan]")
-        console.print("[bold cyan]║[/bold cyan]  [bold]SIMULATION MODE:[/bold] No MT5 — synthetic data         [bold cyan]║[/bold cyan]")
+        console.print("[bold cyan]║[/bold cyan]  [bold]Connection:[/bold] Live MT5 — Real market data             [bold cyan]║[/bold cyan]")
         console.print("[bold cyan]╚══════════════════════════════════════════════════════════╝[/bold cyan]")
         console.print()
     
@@ -238,7 +238,6 @@ class TradingBot:
                 "last_update": datetime.now().isoformat(),
                 "current_signal": cycle_result.get("signal"),
                 "account": None,
-                "mode": "simulation" if (self.connector and self.connector.in_simulation_mode) else "live",
             }
             
             if self.connector:
@@ -267,7 +266,7 @@ class TradingBot:
         if warnings:
             for w in warnings:
                 console.print(f"    [yellow]{w}[/yellow]")
-            console.print("  [yellow]Some config is missing (optional for simulation mode)[/yellow]")
+            console.print("  [red]Configuration errors detected[/red]")
         else:
             self._print_step("Configuration OK", "done")
         
@@ -341,18 +340,11 @@ class TradingBot:
         self._print_step("Connecting to MetaTrader 5...", "running")
         
         self.connector = get_connector()
-        connected = self.connector.initialize()
         
-        if connected:
-            if self.connector.in_simulation_mode:
-                console.print("  [bold yellow]SIMULATION MODE[/bold yellow]")
-                console.print("    MT5 not detected — using simulated market data")
-                console.print("    All trades will be logged but not executed on a live account")
-                if self.connector.bridge_available:
-                    console.print("    [dim]Docker bridge connected — log into MT5 via VNC: http://localhost:6081/vnc.html[/dim]")
-                else:
-                    console.print("    [dim]To trade live: start Docker container and set credentials in .env[/dim]")
-            else:
+        try:
+            connected = self.connector.initialize()
+            
+            if connected:
                 account = self.connector.get_account_info()
                 if account:
                     console.print(f"  [bold green]Connected to MT5[/bold green]")
@@ -360,10 +352,12 @@ class TradingBot:
                     console.print(f"    Balance: [bold]${account.get('balance', 0):,.2f}[/bold]")
                     console.print(f"    Equity: ${account.get('equity', 0):,.2f}")
                     console.print(f"    Leverage: 1:{account.get('leverage', 0)}")
-        else:
-            console.print("  [bold yellow]MT5 connection failed — using simulation[/bold yellow]")
+        except ConnectionError as e:
+            console.print(f"  [bold red]MT5 Connection Failed[/bold red]")
+            console.print(f"    {str(e)}")
+            return False
         
-        self._print_step("MT5 connection handled", "done")
+        self._print_step("MT5 connection established", "done")
         return connected
     
     def initialize_strategy(self):
@@ -908,21 +902,15 @@ class TradingBot:
             if line.strip():
                 console.print(f"    {line.strip()}")
         
-        # In simulation mode, log the trade
-        if self.connector and self.connector.in_simulation_mode:
-            console.print(f"\n  [bold magenta]SIMULATED TRADE EXECUTED[/bold magenta]")
-            console.print(f"    [dim]This is a simulation. No real order was placed.[/dim]")
         
         # Record the trade in the learning system
         if self.meta_strategy:
             self._print_step("Recording trade for learning...", "running")
-            # In simulation, we record with pending outcome
-            # In live mode, this would be updated when the trade closes
             self.meta_strategy.record_outcome(
                 decision=signal,
                 profit_loss=0.0,  # Will be updated when trade closes
                 exit_reason="pending",
-                indicators=strategy_result.get("indicators"),  # ← FIX #1: Pass indicators
+                indicators=strategy_result.get("indicators"),
             )
             self._print_step("Trade recorded in learning database", "done")
         
@@ -1097,7 +1085,7 @@ class TradingBot:
 ║     Mission: Learn to trade Gold through curiosity      ║
 ║     LLM: LiteLLM multi-provider (Kilo Gateway, Groq)   ║
 ║     Learning: 7 strategies + RAG + SQLite + Curiosity   ║
-║     SIMULATION MODE: No MT5 — synthetic data        ║
+║     Connection: Live MT5 — Real market data           ║
 ╚══════════════════════════════════════════════════════════╝
 [/bold yellow]        """)
         
@@ -1163,7 +1151,6 @@ class TradingBot:
         console.print(f"    Signals generated: {len(signals)}")
         console.print(f"    Trades executed: {len(trades)}")
         console.print(f"    Team members: {len(self.team)}")
-        console.print(f"    Mode: {'SIMULATION' if self.connector and self.connector.in_simulation_mode else 'LIVE'}")
         
         # Learning system summary
         if self.vector_store:

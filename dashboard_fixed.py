@@ -57,7 +57,7 @@ def index():
 
 @app.route("/api/readiness")
 def api_readiness():
-    """Get readiness and real MT5 data."""
+    """Get readiness and live MT5 data."""
     try:
         from src.mt5.connector import get_connector
         from src.mt5.account import get_account_info
@@ -66,7 +66,7 @@ def api_readiness():
         c = get_connector()
         c.initialize()
         
-        if c.is_connected() and not c.in_simulation_mode:
+        if c.is_connected():
             acc = get_account_info()
             last = get_last_price("XAUUSD")
             
