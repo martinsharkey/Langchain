@@ -112,10 +112,13 @@ TRADING_SYMBOLS = [
 SCALP_MODE = os.getenv("SCALP_MODE", "true").lower() in ("true", "1", "yes")
 SCALP_LOT = float(os.getenv("SCALP_LOT", "0.01"))
 SCALP_TP_POINTS = int(os.getenv("SCALP_TP_POINTS", "400"))   # take-profit distance in points
-SCALP_SL_POINTS = int(os.getenv("SCALP_SL_POINTS", "300"))   # stop-loss distance in points
-# Take-profit as a MULTIPLE of stop distance (risk:reward). Backtest showed
-# RR ~2.5-3.0 lifts profit factor markedly (let winners run). Default 2.5.
-SCALP_TP_RR = float(os.getenv("SCALP_TP_RR", "2.5"))
+SCALP_SL_POINTS = int(os.getenv("SCALP_SL_POINTS", "300"))   # stop-loss floor (points) when ATR unavailable
+# Backtest-tuned exit system (focused pockets, WITH manager, out-of-sample):
+# SL = 1.0*ATR, RR = 2.0, giveback = 0.55  ->  PF 1.35 @ 50% WR. These three
+# were tuned TOGETHER because the manager's giveback and the TP interact.
+SCALP_SL_ATR_MULT = float(os.getenv("SCALP_SL_ATR_MULT", "1.0"))
+SCALP_TP_RR = float(os.getenv("SCALP_TP_RR", "2.0"))
+SCALP_GIVEBACK_FRAC = float(os.getenv("SCALP_GIVEBACK_FRAC", "0.55"))
 # FOCUSED mode: trade only validated high-edge (strategy x regime) pockets
 # instead of the broad ensemble vote. Backtest: PF 1.24 vs 1.04.
 FOCUSED_MODE = os.getenv("FOCUSED_MODE", "true").lower() in ("true", "1", "yes")

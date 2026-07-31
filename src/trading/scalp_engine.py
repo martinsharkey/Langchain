@@ -901,12 +901,15 @@ class ScalpEngine:
             stops_level, spread_pts = 0, 0
 
         min_dist_pts = (stops_level + spread_pts) * 1.5 + 5      # safety buffer
-        pct_pts = (price * 0.0015) / pt if pt else 0             # 0.15% of price
-        sl_pts = max(config.SCALP_SL_POINTS, min_dist_pts, pct_pts)
-        # PAYOFF LEVER (backtest-proven): set TP as a MULTIPLE of the actual SL
-        # distance rather than a fixed cap. Letting winners run (RR ~2.5-3.0)
-        # lifted PF 1.04 -> 1.46 even as win rate fell to ~33% — payoff beats
-        # win-rate at a 40%-WR system.
+        # SL sized to volatility (ATR) — backtest-tuned to ~1.0 ATR. This is what
+        # the manager+SL/TP system was validated with (PF 1.35 @ SL=1.0ATR, RR=2.0,
+        # giveback 0.55). Floor at the broker minimum distance for safety.
+        atr_pts = (indicators.get("atr", 0) or 0) / pt if pt else 0
+        sl_pts = max(config.SCALP_SL_ATR_MULT * atr_pts, min_dist_pts) if atr_pts > 0 \
+            else max(config.SCALP_SL_POINTS, min_dist_pts)
+        # PAYOFF LEVER (backtest-proven): TP as a MULTIPLE of the actual SL.
+        # Letting winners run (RR ~2.0) with giveback loosened to 0.55 lifted
+        # PF to 1.35 @ 50% WR out-of-sample — payoff beats win-rate at ~40-50% WR.
         tp_pts = sl_pts * config.SCALP_TP_RR
 
         if signal.action == "buy":

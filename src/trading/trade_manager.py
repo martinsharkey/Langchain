@@ -102,10 +102,15 @@ class TradeManager:
             return float(p["giveback_frac"])
         style = p.get("style")
         if style == "aggressive_scalper":
-            return 0.35
+            return 0.45
         if style == "trend_rider":
-            return 0.6
-        return 0.45  # neutral default
+            return 0.7
+        # neutral default: backtest-tuned (loosening giveback from 0.45 lifted PF)
+        try:
+            from src import config
+            return config.SCALP_GIVEBACK_FRAC
+        except Exception:
+            return 0.55
 
     def giveback_arm_points(self, st) -> float:
         """Minimum peak profit (points) before the giveback guard activates."""
