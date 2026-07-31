@@ -816,28 +816,42 @@ class ScalpEngine:
                 )
                 if any(summary.get(k) for k in ("promoted", "rejected", "synthesized")):
                     logger.info(f"Adaptive pass: {summary}")
-                # DATA-DRIVEN SELF-REFLECTION: post-mortem the recent closed trades
-                # (real M1/M15 bars before+after, excursion analysis) to surface
-                # recurring failure modes (exit-too-early / entered-late / SL-too-tight).
+                # DATA-DRIVEN SELF-REFLECTION -> AUTONOMOUS TUNING (closed loop):
+                # 1) post-mortem each symbol's real bars -> failure modes + directives
+                # 2) feed those directives into the optimizer so reflection STEERS
+                #    the parameter search, then walk-forward VALIDATES before keeping.
+                # This is the full reflect -> adjust -> validate -> keep cycle, automatic.
+                self._postmortem_cache = {}
+                per_symbol_directives = {}
                 if self.post_mortem is not None:
+                    # overall pass (for dashboard/knowledge base)
                     try:
                         self._postmortem_cache = self.post_mortem.analyze(limit=40)
-                        pm = self._postmortem_cache
-                        if pm.get("findings"):
-                            logger.info(f"[POST-MORTEM] {pm['findings']}")
+                        if self._postmortem_cache.get("findings"):
+                            logger.info(f"[POST-MORTEM] {self._postmortem_cache['findings']}")
                     except Exception as e:
                         logger.debug(f"post-mortem skip: {e}")
-                # AUTONOMOUS PARAMETER TUNING: hill-climb indicator params per
-                # symbol on real history, keep only validated (walk-forward)
-                # improvements. This is the self-learning micro-adjustment loop.
+                    # per-symbol reflection -> directives that steer that symbol's tuning
+                    for base, adapter in self.adapters.items():
+                        sym = adapter.resolved_symbol
+                        try:
+                            pm = self.post_mortem.analyze(symbol=sym, limit=40)
+                            if pm and pm.get("directives"):
+                                per_symbol_directives[sym] = pm["directives"]
+                        except Exception as e:
+                            logger.debug(f"post-mortem {sym} skip: {e}")
+
+                # AUTONOMOUS PARAMETER TUNING guided by reflection, gated by walk-forward.
                 if self.param_optimizer is not None and config.OPTIMIZER_ENABLED:
                     for base, adapter in self.adapters.items():
                         sym = adapter.resolved_symbol
                         try:
                             r = self.param_optimizer.optimize(
-                                sym, iterations=config.OPTIMIZER_ITERATIONS)
+                                sym, iterations=config.OPTIMIZER_ITERATIONS,
+                                directives=per_symbol_directives.get(sym))
                             if r.get("improved"):
-                                logger.info(f"[OPTIMIZER] {sym} improved: "
+                                src = "reflection-guided" if r.get("from_reflection") else "random-search"
+                                logger.info(f"[OPTIMIZER] {sym} improved ({src}): "
                                             f"min-PF {r['score']} params {r['params']}")
                         except Exception as e:
                             logger.debug(f"optimizer {sym} skip: {e}")

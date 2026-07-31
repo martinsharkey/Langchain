@@ -105,10 +105,34 @@ class ParameterOptimizer:
             cand["osma_slow"] = cand["osma_fast"] + 8
         return cand
 
-    def optimize(self, symbol: str, iterations: int = 12, candidates_per_iter: int = 1) -> dict:
+    def _apply_directives(self, params: dict, directives: dict) -> dict:
+        """
+        Build a candidate GUIDED by post-mortem directives (e.g. {'sl_atr': +0.2,
+        'tp_rr': +0.5, 'giveback': +0.15}). Reflection steers the search; the
+        walk-forward gate still decides whether to keep it.
+        """
+        cand = dict(params)
+        for k, delta in (directives or {}).items():
+            if k not in PARAM_SPACE:
+                continue  # e.g. 'entry_extension_filter' handled elsewhere
+            lo, hi, step, kind = PARAM_SPACE[k]
+            cur = cand.get(k, DEFAULTS[k])
+            cand[k] = _clamp(cur + delta, lo, hi, kind)
+        if cand["ema_fast"] >= cand["ema_slow"]:
+            cand["ema_slow"] = cand["ema_fast"] + 4
+        if cand["osma_fast"] >= cand["osma_slow"]:
+            cand["osma_slow"] = cand["osma_fast"] + 8
+        return cand
+
+    def optimize(self, symbol: str, iterations: int = 12, candidates_per_iter: int = 1,
+                 directives: dict = None) -> dict:
         """
         Hill-climb: start from current best, try mutations, keep any that
         generalize AND beat the incumbent's score (min-PF across windows).
+
+        If `directives` are supplied (from the post-mortem self-reflection), the
+        FIRST candidate is guided in that direction — so the bot's reflection on
+        its own failures actively steers the tuning, then walk-forward validates.
         Returns a summary of what changed.
         """
         key = self._key(symbol)
@@ -121,9 +145,14 @@ class ParameterOptimizer:
         best_res = base_res
         improved = False
         tried = 0
+        directive_worked = False
 
-        for _ in range(iterations):
-            cand = self._mutate(best_params)
+        # candidate list: reflection-guided first (if any), then random mutations
+        guided = [self._apply_directives(base, directives)] if directives else []
+
+        for idx in range(iterations + len(guided)):
+            cand = guided[idx] if idx < len(guided) else self._mutate(best_params)
+            is_guided = idx < len(guided)
             tried += 1
             res = self.backtest_fn(symbol, cand, cand.get("sl_atr", 1.0), cand.get("tp_rr", 2.0))
             if not res or not res.get("generalizes"):
@@ -133,6 +162,8 @@ class ParameterOptimizer:
             if res["score"] > best_score + 0.01:
                 best_score = res["score"]; best_params = cand; best_res = res
                 improved = True
+                if is_guided:
+                    directive_worked = True
 
         if improved:
             self.tuned[key] = {
@@ -145,9 +176,10 @@ class ParameterOptimizer:
             }
             self._persist()
             logger.info(f"[OPTIMIZER] {symbol}: IMPROVED -> min-PF {best_score:.2f} "
-                        f"params={best_params} (tried {tried})")
+                        f"params={best_params} (tried {tried}, from_reflection={directive_worked})")
             return {"symbol": symbol, "improved": True, "score": best_score,
-                    "params": best_params, "pfs": best_res.get("pfs"), "tried": tried}
+                    "params": best_params, "pfs": best_res.get("pfs"), "tried": tried,
+                    "from_reflection": directive_worked}
 
         logger.info(f"[OPTIMIZER] {symbol}: no improvement over min-PF {best_score:.2f} (tried {tried})")
         return {"symbol": symbol, "improved": False, "score": best_score, "tried": tried}

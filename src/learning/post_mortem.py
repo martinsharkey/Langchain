@@ -211,19 +211,28 @@ class TradePostMortem:
 
         findings = []
         recs = []
+        # structured directives: {param: signed step} the optimizer can act on.
+        # These BIAS the optimizer's search toward what reflection found, then
+        # the walk-forward gate decides whether to keep it.
+        directives = {}
         if exited_early / n_loss >= 0.4:
             findings.append(f"{exited_early}/{n_loss} losers had price run >=1.5 ATR our way after — EXITING TOO EARLY or SL too tight.")
             recs.append("widen TP / loosen giveback / widen SL slightly")
+            directives["tp_rr"] = +0.5
+            directives["giveback"] = +0.15
         if stopped_recovered / n_loss >= 0.35:
             findings.append(f"{stopped_recovered}/{n_loss} losers were STOPPED THEN RECOVERED — SL too tight for the volatility.")
             recs.append("increase sl_atr")
+            directives["sl_atr"] = +0.2
         if entered_late / n_loss >= 0.35:
             findings.append(f"{entered_late}/{n_loss} losers had immediate adverse move — ENTERING LATE (move already extended).")
             recs.append("add pre-entry extension filter; avoid entries when move already >2 ATR")
+            directives["entry_extension_filter"] = True
         if extended_entries / len(reflections) >= 0.4:
             findings.append(f"{extended_entries}/{len(reflections)} entries were into already-extended moves.")
         if avg_win_mfe and avg_loss_mfe and avg_loss_mfe >= avg_win_mfe * 0.8:
             findings.append(f"Losers reach nearly as much favourable excursion (MFE {avg_loss_mfe} ATR) as winners ({avg_win_mfe}) before failing — exit timing, not entry, is the leak.")
+            directives.setdefault("tp_rr", +0.5)
 
         result = {
             "analyzed": len(reflections), "losers": n_loss, "wins": len(wins),
@@ -232,7 +241,7 @@ class TradePostMortem:
             "entered_late_pct": round(entered_late / n_loss * 100, 0),
             "avg_win_mfe_atr": avg_win_mfe, "avg_loss_mfe_atr": avg_loss_mfe,
             "avg_loss_mae_atr": avg_loss_mae,
-            "findings": findings, "recommendations": recs,
+            "findings": findings, "recommendations": recs, "directives": directives,
             "symbol": symbol or "ALL",
         }
         self._persist(result)
