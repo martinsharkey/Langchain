@@ -200,6 +200,13 @@ class ScalpEngine:
         except Exception as e:
             logger.warning(f"HTFContext unavailable: {e}")
             self.htf = None
+        # Self-managing TRAINING/LIVE mode per symbol (removes manual loosen/tighten)
+        try:
+            from src.learning.operating_mode import OperatingModeManager
+            self.mode_mgr = OperatingModeManager(self.experience_db)
+        except Exception as e:
+            logger.warning(f"OperatingModeManager unavailable: {e}")
+            self.mode_mgr = None
         # observability counters (learning-health, per Grok review)
         self._rag_lookups = 0
         self._rag_hits = 0
@@ -1013,15 +1020,31 @@ class ScalpEngine:
 
         # FOCUSED mode: prefer validated high-edge (strategy x regime) pockets,
         # which backtest far better than the broad ensemble (PF 1.24 vs 1.04).
-        # Fall back to the weighted ensemble when the symbol has no focused rules.
+        # Fall back to the weighted ensemble when there's no focused rule OR the
+        # current regime doesn't match a pocket (so the symbol still trades and we
+        # keep accumulating a learning sample instead of going silent).
         signal = None
         if config.FOCUSED_MODE:
-            signal = self.registry.get_focused_signal(indicators)
+            fs = self.registry.get_focused_signal(indicators)
+            if fs is not None and fs.action != "hold":
+                signal = fs
         if signal is None:
             signal = self.registry.get_ensemble_signal(indicators, min_agreement=2)
         if signal.action == "hold":
             return
 
+        # Self-managing mode: per-symbol TRAINING (loose, gather sample) vs LIVE
+        # (tight, proven-edge only). Gives the effective entry thresholds so the
+        # bot regulates its own selectivity — no manual loosen/tighten needed.
+        eff_conf_min = config.SCALP_CONFIDENCE_MIN
+        eff_ct_penalty = config.MTF_COUNTERTREND_PENALTY
+        if self.mode_mgr is not None:
+            try:
+                mp = self.mode_mgr.params_for(resolved)
+                eff_conf_min = mp.confidence_min
+                eff_ct_penalty = mp.countertrend_penalty
+            except Exception as e:
+                logger.debug(f"mode params skip: {e}")
         # ── RAG: adjust confidence from similar historical patterns (C2) ──
         # The vector store is now READ at entry (not just written on close): if
         # similar past setups mostly lost, confidence is cut (or the trade vetoed);
@@ -1049,7 +1072,7 @@ class ScalpEngine:
             except Exception as e:
                 logger.debug(f"RAG analyze skip: {e}")
 
-        if signal.confidence < config.SCALP_CONFIDENCE_MIN:
+        if signal.confidence < eff_conf_min:
             return
 
         # ── Multi-timeframe alignment as a QUALITY MODIFIER (not a hard block) ──
@@ -1062,7 +1085,7 @@ class ScalpEngine:
         if config.MTF_ALIGNMENT_ENABLED:
             aligned, detail, oppose = self._mtf_aligned(adapter, signal.action)
             if not aligned:
-                penalty = config.MTF_COUNTERTREND_PENALTY * max(oppose, 1)
+                penalty = eff_ct_penalty * max(oppose, 1)
                 before = signal.confidence
                 signal.confidence = max(0.0, signal.confidence - penalty)
                 logger.info(f"{base}: counter-trend {signal.action} penalised "
@@ -1081,7 +1104,7 @@ class ScalpEngine:
                 logger.debug(f"HTF read skip: {e}")
 
         # Final confidence gate (after MTF + HTF quality adjustment)
-        if signal.confidence < config.SCALP_CONFIDENCE_MIN:
+        if signal.confidence < eff_conf_min:
             return
 
         # scalp SL/TP — adaptive to each symbol's spread & minimum stop distance.
@@ -1305,6 +1328,7 @@ class ScalpEngine:
                 "symbol_governance": (self.governor.snapshot() if self.governor else {}),
                 "post_mortem": (getattr(self, "_postmortem_cache", {}) or {}),
                 "learning_health": self._learning_health(),
+                "operating_modes": (self.mode_mgr.snapshot() if self.mode_mgr else {}),
                 "performance_research": (self.perf_researcher.status() if self.perf_researcher else {}),
                 "edge": (self._edge_cache or {}),
                 "algo_trading": {

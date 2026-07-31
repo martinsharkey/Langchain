@@ -149,6 +149,7 @@
         <div class="tab" data-tab="cryptorti">CryptoRTI Signals</div>
         <div class="tab" data-tab="learning">Learning & Sessions</div>
         <div class="tab" data-tab="adaptive">Adaptive AI</div>
+        <div class="tab" data-tab="autopilot">Autopilot</div>
         <div class="tab" data-tab="account">Account</div>
       </div>
       <div class="tabpane active" id="tab-history">
@@ -191,6 +192,13 @@
         <h2 style="margin-bottom:8px">Hypotheses (reflection -> synthesis -> backtest)</h2>
         <div class="scroll"><table id="t-hypotheses"><thead><tr>
           <th>ID</th><th>Symbol</th><th>Hypothesis</th><th>Strategies</th><th>Filter</th><th>Status</th>
+        </tr></thead><tbody><tr><td>Loading…</td></tr></tbody></table></div>
+      </div>
+      <div class="tabpane" id="tab-autopilot">
+        <div id="autopilot-health" class="muted" style="margin-bottom:8px"></div>
+        <h2 style="margin-bottom:8px">Self-managing mode per symbol (TRAINING = gathering &amp; loose; LIVE = proven &amp; tight)</h2>
+        <div class="scroll"><table id="t-autopilot"><thead><tr>
+          <th>Symbol</th><th>Mode</th><th>Closed</th><th>Win%</th><th>PF</th><th>PF&nbsp;stdev</th><th>Conf&nbsp;min</th><th>Reason</th>
         </tr></thead><tbody><tr><td>Loading…</td></tr></tbody></table></div>
       </div>
     </div>
@@ -324,6 +332,25 @@ async function refresh(){
       }).join('')
       :'<tr><td colspan="6" class="muted">No hypotheses yet — the bot forms these after enough losing trades to learn from</td></tr>';
   }
+
+  // Autopilot: per-symbol self-managing mode + learning health
+  const modes = status.operating_modes || {};
+  const lh = status.learning_health || {};
+  document.getElementById('autopilot-health').innerHTML =
+    `Learning health — pending: <b>${lh.pending_trades ?? '?'}</b> | `+
+    `RAG hit-rate: <b>${lh.rag_hit_rate ?? 0}%</b> | last weight refresh: <b>${lh.last_weight_refresh || '—'}</b> | `+
+    `stalled: <b style="color:${lh.stalled?'#f85149':'#3fb950'}">${lh.stalled?'YES':'no'}</b>`+
+    (lh.last_learning_error?` | <span style="color:#f85149">err: ${lh.last_learning_error}</span>`:'');
+  const mrows = Object.entries(modes);
+  document.getElementById('t-autopilot').querySelector('tbody').innerHTML =
+    mrows.length ? mrows.map(([sym,m])=>{
+      const col = m.mode==='live' ? '#3fb950' : '#d29922';
+      return `<tr><td>${sym}</td><td style="color:${col};font-weight:600">${(m.mode||'').toUpperCase()}</td>`+
+        `<td>${m.closed ?? ''}</td><td>${m.win_rate ?? ''}</td><td>${m.pf ?? ''}</td>`+
+        `<td>${m.pf_stdev ?? ''}</td><td>${m.confidence_min ?? ''}</td>`+
+        `<td class="muted" style="font-size:11px">${m.reason||''}</td></tr>`;
+    }).join('')
+    : '<tr><td colspan="8" class="muted">Modes populate once symbols start trading</td></tr>';
   document.getElementById('s-updated').textContent='updated '+new Date().toLocaleTimeString();
 
   // news + research chips
