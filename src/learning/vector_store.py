@@ -18,6 +18,7 @@ This is the core RAG component that allows the bot to:
 import os
 import json
 import time
+import math
 import hashlib
 import logging
 from typing import Optional
@@ -217,30 +218,42 @@ class PatternVectorStore:
         dist_to_resistance = (nearest_resistance - close) / max(close, 1)
         resistance_norm = min(max(dist_to_resistance * 10, 0), 1)
         
-        # 9: Volume (default to 0.5 if not available)
-        volume_norm = 0.5
-        
-        # 10-11: Price changes (defaults)
-        price_change_5 = 0.5
-        price_change_10 = 0.5
-        
-        # 12: Volatility ratio
-        volatility_norm = 0.5
-        
-        # 13-14: Stochastic (defaults)
-        stoch_k = 0.5
-        stoch_d = 0.5
-        
-        # 15: Trend strength
-        trend_strength = 0.5
-        
-        # 16: SMA position
-        sma_position = 0.5
-        
-        # 17-19: Candle ratios (defaults)
-        body_ratio = 0.5
-        upper_wick = 0.5
-        lower_wick = 0.5
+        # 9: Volume relative to its moving average
+        vol = indicators.get("volume", 0) or 0
+        vol_sma = indicators.get("volume_sma", 0) or 0
+        if vol_sma > 0:
+            volume_norm = min(max((vol / vol_sma) / 2.0, 0.0), 1.0)  # 1.0 avg -> 0.5
+        else:
+            volume_norm = 0.5
+
+        # 10-11: Price changes over last 5 / 10 candles (tanh-normalized to 0-1)
+        pc5 = indicators.get("price_change_5", 0.0) or 0.0
+        pc10 = indicators.get("price_change_10", 0.0) or 0.0
+        price_change_5 = (math.tanh(pc5 * 50) + 1) / 2
+        price_change_10 = (math.tanh(pc10 * 50) + 1) / 2
+
+        # 12: Volatility ratio (current ATR / slow ATR), 1.0 -> 0.5
+        vr = indicators.get("volatility_ratio", 1.0) or 1.0
+        volatility_norm = min(max(vr / 2.0, 0.0), 1.0)
+
+        # 13-14: Stochastic %K / %D (0-100 -> 0-1)
+        stoch_k = min(max((indicators.get("stoch_k", 50.0) or 50.0) / 100.0, 0.0), 1.0)
+        stoch_d = min(max((indicators.get("stoch_d", 50.0) or 50.0) / 100.0, 0.0), 1.0)
+
+        # 15: Trend strength via ADX (0-100 -> 0-1)
+        trend_strength = min(max((indicators.get("adx", 20.0) or 20.0) / 100.0, 0.0), 1.0)
+
+        # 16: Price position relative to 50-period SMA (above=>1, below=>0)
+        sma_50 = indicators.get("sma_50", close) or close
+        if sma_50 > 0:
+            sma_position = min(max((close / sma_50 - 0.98) / 0.04, 0.0), 1.0)  # ±2% band
+        else:
+            sma_position = 0.5
+
+        # 17-19: Candle body / wick ratios (already 0-1)
+        body_ratio = min(max(indicators.get("body_ratio", 0.5) or 0.5, 0.0), 1.0)
+        upper_wick = min(max(indicators.get("upper_wick", 0.5) or 0.5, 0.0), 1.0)
+        lower_wick = min(max(indicators.get("lower_wick", 0.5) or 0.5, 0.0), 1.0)
         
         # Build the vector
         vector = [

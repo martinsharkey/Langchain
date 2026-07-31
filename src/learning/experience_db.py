@@ -124,7 +124,109 @@ class ExperienceDatabase:
         conn.commit()
         conn.close()
         
+        # Lightweight migrations (add columns if missing)
+        self._migrate()
+
         logger.info(f"Experience database initialized at {self.db_path}")
+
+    def _migrate(self):
+        """Add newer columns to existing DBs without dropping data."""
+        conn = sqlite3.connect(self.db_path)
+        cur = conn.cursor()
+        cur.execute("PRAGMA table_info(trades)")
+        cols = {r[1] for r in cur.fetchall()}
+        adds = []
+        if "mgmt_variant" not in cols:
+            adds.append("ALTER TABLE trades ADD COLUMN mgmt_variant TEXT")
+        if "timeframe" not in cols:
+            adds.append("ALTER TABLE trades ADD COLUMN timeframe TEXT")
+        if "mt5_ticket" not in cols:
+            adds.append("ALTER TABLE trades ADD COLUMN mt5_ticket INTEGER")
+        for sql in adds:
+            try:
+                cur.execute(sql)
+            except Exception as e:
+                logger.debug(f"migrate skip: {e}")
+        conn.commit()
+        conn.close()
+
+    def get_symbol_profitability(self) -> dict:
+        """
+        Score each symbol by how quickly/reliably it makes money — so the bot can
+        learn which symbol is 'easiest' to trade and lean into it (while still
+        sampling others for 24/7 coverage).
+
+        Returns {symbol: {trades, win_rate, net_pnl, avg_pnl, pnl_per_trade,
+        avg_minutes, pnl_per_hour}} using real closed trades. pnl_per_hour is the
+        'fastest return' proxy the trader asked for.
+        """
+        try:
+            conn = sqlite3.connect(self.db_path)
+            conn.row_factory = sqlite3.Row
+            rows = conn.execute("""
+                SELECT symbol,
+                    COUNT(*) trades,
+                    SUM(CASE WHEN outcome='win' THEN 1 ELSE 0 END) wins,
+                    COALESCE(SUM(profit_loss),0) net,
+                    COALESCE(AVG(profit_loss),0) avg_pnl
+                FROM trades
+                WHERE outcome IN ('win','loss','breakeven')
+                GROUP BY symbol
+            """).fetchall()
+            conn.close()
+            out = {}
+            for r in rows:
+                d = dict(r); t = d["trades"] or 0; w = d["wins"] or 0
+                out[d["symbol"]] = {
+                    "trades": t,
+                    "win_rate": round(w / t * 100, 1) if t else 0.0,
+                    "net_pnl": round(d["net"] or 0, 2),
+                    "avg_pnl": round(d["avg_pnl"] or 0, 4),
+                    "pnl_per_trade": round((d["net"] or 0) / t, 4) if t else 0.0,
+                }
+            return out
+        except Exception as e:
+            logger.warning(f"get_symbol_profitability failed: {e}")
+            return {}
+
+    def get_variant_performance(self, symbol: Optional[str] = None) -> dict:
+        """
+        Per-management-variant performance from real closed trades.
+
+        Returns {symbol: {variant: {trades, wins, win_rate, net_pnl}}} — the data
+        the TradeManager uses to bias variant selection toward what works.
+        """
+        try:
+            conn = sqlite3.connect(self.db_path)
+            conn.row_factory = sqlite3.Row
+            q = """
+                SELECT symbol, mgmt_variant,
+                    COUNT(*) trades,
+                    SUM(CASE WHEN outcome='win' THEN 1 ELSE 0 END) wins,
+                    SUM(CASE WHEN outcome='loss' THEN 1 ELSE 0 END) losses,
+                    COALESCE(SUM(profit_loss),0) net
+                FROM trades
+                WHERE outcome IN ('win','loss','breakeven') AND mgmt_variant IS NOT NULL
+            """
+            if symbol:
+                q += " AND symbol = ?"
+            q += " GROUP BY symbol, mgmt_variant"
+            rows = conn.execute(q, (symbol,) if symbol else ()).fetchall()
+            conn.close()
+            out: dict = {}
+            for r in rows:
+                d = dict(r)
+                sym = d["symbol"]; var = d["mgmt_variant"]
+                t = d["trades"] or 0; w = d["wins"] or 0
+                out.setdefault(sym, {})[var] = {
+                    "trades": t, "wins": w, "losses": d["losses"] or 0,
+                    "win_rate": round(w / t * 100, 1) if t else 0.0,
+                    "net_pnl": round(d["net"] or 0, 2),
+                }
+            return out
+        except Exception as e:
+            logger.warning(f"get_variant_performance failed: {e}")
+            return {}
     
     # ─── Trade Recording ─────────────────────────────────────
     
@@ -137,6 +239,9 @@ class ExperienceDatabase:
         exit_price: Optional[float] = None,
         exit_reason: Optional[str] = None,
         strategy_combination: Optional[str] = None,
+        mgmt_variant: Optional[str] = None,
+        timeframe: Optional[str] = None,
+        mt5_ticket: Optional[int] = None,
     ):
         """
         Record a trade in the experience database.
@@ -165,8 +270,8 @@ class ExperienceDatabase:
                 take_profit, position_size, confidence, strategy_used,
                 strategy_combination, outcome, profit_loss, exit_price,
                 exit_reason, market_regime, indicators_snapshot,
-                rsi_value, trend, atr_value
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                rsi_value, trend, atr_value, mgmt_variant, timeframe, mt5_ticket
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (
             timestamp,
             signal.get("symbol", "XAUUSD"),
@@ -187,6 +292,9 @@ class ExperienceDatabase:
             indicators.get("rsi"),
             indicators.get("trend"),
             indicators.get("atr"),
+            mgmt_variant,
+            timeframe,
+            mt5_ticket,
         ))
         
         trade_id = cursor.lastrowid
@@ -268,26 +376,68 @@ class ExperienceDatabase:
             if outcome == "win":
                 cursor.execute("""
                     UPDATE strategy_performance SET
+                        avg_confidence = (avg_confidence * total_trades + ?) / (total_trades + 1),
                         total_trades = total_trades + 1,
                         winning_trades = winning_trades + 1,
-                        total_profit = total_profit + ?,
-                        avg_confidence = (avg_confidence * (total_trades - 1) + ?) / total_trades
+                        total_profit = total_profit + ?
                     WHERE strategy_name = ?
-                """, (profit_loss, confidence, strategy))
+                """, (confidence, profit_loss, strategy))
             elif outcome == "loss":
                 cursor.execute("""
                     UPDATE strategy_performance SET
+                        avg_confidence = (avg_confidence * total_trades + ?) / (total_trades + 1),
                         total_trades = total_trades + 1,
                         losing_trades = losing_trades + 1,
-                        total_loss = total_loss + abs(?),
-                        avg_confidence = (avg_confidence * (total_trades - 1) + ?) / total_trades
+                        total_loss = total_loss + abs(?)
                     WHERE strategy_name = ?
-                """, (profit_loss, confidence, strategy))
+                """, (confidence, profit_loss, strategy))
         
         conn.commit()
         conn.close()
         
         logger.info(f"Updated trade #{trade_id}: {outcome} (${profit_loss:.2f})")
+
+    def get_pending_trades(self) -> list[dict]:
+        """All trades still marked pending (for DB-driven reconciliation)."""
+        conn = sqlite3.connect(self.db_path)
+        conn.row_factory = sqlite3.Row
+        rows = [dict(r) for r in conn.execute(
+            "SELECT id, symbol, action, entry_price, position_size, mt5_ticket, "
+            "timestamp, created_at FROM trades WHERE outcome='pending'"
+        ).fetchall()]
+        conn.close()
+        return rows
+
+    def get_open_trade_id_by_ticket(self, ticket: int) -> Optional[int]:
+        """
+        Return the id of an existing NON-closed trade row for this MT5 ticket, if
+        any. Prevents duplicate rows when a bot-opened position is later adopted
+        (e.g. after a restart) — one real trade must map to exactly one DB row.
+        """
+        conn = sqlite3.connect(self.db_path)
+        row = conn.execute(
+            "SELECT id FROM trades WHERE mt5_ticket=? AND outcome='pending' "
+            "ORDER BY id ASC LIMIT 1", (ticket,)
+        ).fetchone()
+        conn.close()
+        return row[0] if row else None
+
+    def set_ticket(self, trade_id: int, ticket: int):
+        """Attach an MT5 ticket to a trade row (so it can be reconciled later)."""
+        conn = sqlite3.connect(self.db_path)
+        conn.execute("UPDATE trades SET mt5_ticket=? WHERE id=?", (ticket, trade_id))
+        conn.commit(); conn.close()
+
+    def mark_unknown(self, trade_id: int, reason: str = "unresolved"):
+        """
+        Mark an old pending trade whose outcome can't be found as 'unknown' so it
+        stops skewing win/loss stats (which filter on win/loss/breakeven).
+        """
+        conn = sqlite3.connect(self.db_path)
+        conn.execute("UPDATE trades SET outcome='unknown', exit_reason=? WHERE id=?",
+                     (reason, trade_id))
+        conn.commit(); conn.close()
+        logger.info(f"Trade #{trade_id} marked unknown ({reason})")
     
     # ─── Querying ────────────────────────────────────────────
     
@@ -392,8 +542,12 @@ class ExperienceDatabase:
             } if worst_trade else None,
         }
     
-    def get_strategy_performance(self) -> list[dict]:
-        """Get performance breakdown by strategy."""
+    def get_strategy_performance_table(self) -> list[dict]:
+        """
+        Performance breakdown from the strategy_performance table (list form).
+        Used by get_learning_insights. NOTE: the live weight-adaptation path uses
+        get_strategy_performance() (dict form, reads the trades table) instead.
+        """
         conn = sqlite3.connect(self.db_path)
         conn.row_factory = sqlite3.Row
         cursor = conn.cursor()
@@ -441,7 +595,7 @@ class ExperienceDatabase:
         insights.append(f"Total P&L: ${stats['total_profit_loss']:.2f} across {stats['closed_trades']} closed trades")
         
         # Strategy-specific insights
-        strategy_perf = self.get_strategy_performance()
+        strategy_perf = self.get_strategy_performance_table()
         for sp in strategy_perf[:3]:  # Top 3 strategies
             if sp["total_trades"] >= 3:
                 insights.append(
