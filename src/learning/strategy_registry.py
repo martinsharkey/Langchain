@@ -1025,10 +1025,11 @@ class StrategyRegistry:
         # per-symbol edge multipliers (edge is symbol-specific — a combo that
         # wins on gold can lose on an index), applied on top of learned weights.
         _sym = indicators.get("symbol", "")
+        _regime = self._detect_market_regime(indicators)
         try:
-            from src.learning.edge_weights import edge_weight
+            from src.learning.edge_weights import edge_weight, regime_edge_weight
         except Exception:
-            edge_weight = None
+            edge_weight = regime_edge_weight = None
 
         for name, signal in results:
             strat = self._strategies.get(name)
@@ -1039,7 +1040,8 @@ class StrategyRegistry:
                 continue
             w = getattr(strat, "weight", 1.0) if strat else 1.0
             if edge_weight is not None and _sym:
-                w *= edge_weight(_sym, name)
+                # symbol edge x regime-conditioned edge (edge often lives in one regime)
+                w *= edge_weight(_sym, name) * regime_edge_weight(_sym, name, _regime)
             if signal.action == "buy":
                 buys += 1
                 w_buy += w

@@ -57,3 +57,34 @@ def edge_weight(symbol: str, strategy: str) -> float:
         if su.startswith(key):
             return float(table.get(strategy, 1.0))
     return 1.0
+
+
+# ── Regime-conditioned edge (from _regime_sweep, XAUUSD-ECN M15) ──
+# A strategy's edge often lives in ONE regime. Volume_Breakout is PF 2.1 in
+# VOLATILE but weaker elsewhere; BB_Bounce is PF 1.54 in RANGING but ~1.0
+# trending. This nested map {symbol: {strategy: {regime: mult}}} lets the
+# ensemble boost a strategy in its proven regime and cut it in bad ones.
+REGIME_EDGE = {
+    "XAUUSD": {
+        "Volume_Breakout":            {"volatile": 1.6, "trending": 1.2, "ranging": 0.5, "quiet": 0.6},
+        "BB_Bounce":                  {"ranging": 1.6,  "volatile": 1.0, "trending": 0.8, "quiet": 1.0},
+        "CCI_Breakout":               {"volatile": 1.2, "trending": 1.2, "ranging": 1.0, "quiet": 0.9},
+        "RSI_MeanReversion":          {"trending": 1.2, "volatile": 1.0, "ranging": 0.9, "quiet": 0.9},
+        "ADX_TrendStrength":          {"trending": 1.3, "volatile": 0.7, "ranging": 0.7, "quiet": 0.8},
+        "MACD_OsMA_Power_Confluence": {"trending": 1.3, "ranging": 0.8, "volatile": 0.7, "quiet": 0.8},
+    },
+}
+
+
+def regime_edge_weight(symbol: str, strategy: str, regime: str) -> float:
+    """Multiplier for a strategy in a given regime on a symbol; 1.0 if unknown."""
+    if not symbol or not regime:
+        return 1.0
+    su = symbol.upper()
+    for key, table in REGIME_EDGE.items():
+        if su.startswith(key):
+            r = table.get(strategy)
+            if r:
+                return float(r.get(regime, 1.0))
+    return 1.0
+
