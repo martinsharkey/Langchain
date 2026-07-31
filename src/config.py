@@ -219,9 +219,14 @@ OPTIMIZER_ITERATIONS = int(os.getenv("OPTIMIZER_ITERATIONS", "8"))
 
 # ─── Researcher -> action feedback ──────────────────────────
 # Pause new entries on a symbol the PerformanceResearcher flags as bleeding.
-SYMBOL_PAUSE_MIN_TRADES = int(os.getenv("SYMBOL_PAUSE_MIN_TRADES", "12"))
-SYMBOL_PAUSE_PNL = float(os.getenv("SYMBOL_PAUSE_PNL", "-8"))        # net pnl <= this -> pause
-SYMBOL_PAUSE_WINRATE = float(os.getenv("SYMBOL_PAUSE_WINRATE", "35"))  # OR win rate < this -> pause
+# Symbol auto-pause: judged on a RECENT window (not polluted all-time pool), and
+# only when BOTH signals are bad (poor recent win rate AND negative recent P&L).
+# Prevents quarantining healthy symbols / stopping trading entirely.
+SYMBOL_PAUSE_WINDOW = int(os.getenv("SYMBOL_PAUSE_WINDOW", "20"))    # last N closed trades
+SYMBOL_PAUSE_MIN_TRADES = int(os.getenv("SYMBOL_PAUSE_MIN_TRADES", "15"))
+SYMBOL_PAUSE_PNL = float(os.getenv("SYMBOL_PAUSE_PNL", "-15"))       # recent pnl <= this -> pause (bleeding)
+SYMBOL_PAUSE_WINRATE = float(os.getenv("SYMBOL_PAUSE_WINRATE", "25"))  # recent WR < this -> pause (catastrophic)
+SYMBOL_PAUSE_HEALTHY_WR = float(os.getenv("SYMBOL_PAUSE_HEALTHY_WR", "45"))  # never pause if WR >= this
 # Persisted kill switch file — create/toggle from dashboard or by touching the file.
 KILL_SWITCH_FILE = os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data", "KILL_SWITCH"

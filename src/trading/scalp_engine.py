@@ -546,30 +546,43 @@ class ScalpEngine:
     def _symbol_paused(self, base_symbol: str) -> bool:
         """
         ACT on the PerformanceResearcher's findings: pause new entries on a symbol
-        that is clearly bleeding (enough sample, negative P&L, poor win rate).
+        that is genuinely bleeding — judged on RECENT trades (not the polluted
+        all-time pool) and only when it is clearly bad, so we never quarantine a
+        healthy symbol and accidentally stop trading everything.
         Config: SYMBOL_PAUSE_MIN_TRADES, SYMBOL_PAUSE_PNL, SYMBOL_PAUSE_WINRATE.
         """
-        if self.perf_researcher is None:
+        try:
+            import sqlite3
+            conn = sqlite3.connect(self.experience_db.db_path)
+            conn.row_factory = sqlite3.Row
+            # RECENT window only: last N closed trades for this symbol (prefix match)
+            rows = conn.execute(
+                "SELECT outcome, profit_loss FROM trades "
+                "WHERE symbol LIKE ? AND outcome IN ('win','loss','breakeven') "
+                "ORDER BY id DESC LIMIT ?",
+                (base_symbol.upper() + "%", config.SYMBOL_PAUSE_WINDOW),
+            ).fetchall()
+            conn.close()
+        except Exception:
             return False
-        rep = getattr(self.perf_researcher, "last_report", {}) or {}
-        by_sym = rep.get("by_symbol") or {}
-        # match resolved symbol keys by prefix
-        for sym, m in by_sym.items():
-            if not sym.upper().startswith(base_symbol.upper()):
-                continue
-            n = m.get("n", 0)
-            if n < config.SYMBOL_PAUSE_MIN_TRADES:
-                continue
-            wr = m.get("win_rate", 100)
-            pnl = m.get("pnl", 0)
-            # Pause if EITHER failure signal is clear (OR, not AND): a badly
-            # negative P&L OR a very poor win rate. The previous AND-logic let
-            # bleeders through (e.g. ETHUSD 9% WR but tiny -0.69 pnl; XAGUSD
-            # -38.86 pnl but ~47% WR — neither tripped both conditions).
-            if pnl <= config.SYMBOL_PAUSE_PNL or wr < config.SYMBOL_PAUSE_WINRATE:
-                logger.info(f"{base_symbol}: PAUSED by researcher "
-                            f"(pnl {pnl}, WR {wr}%, n {n}) — bleeding, no new entries")
-                return True
+
+        n = len(rows)
+        if n < config.SYMBOL_PAUSE_MIN_TRADES:
+            return False
+        wins = sum(1 for r in rows if r["outcome"] == "win")
+        wr = wins / n * 100
+        pnl = sum((r["profit_loss"] or 0) for r in rows)
+        # Never pause a symbol with a healthy recent win rate — protects winners
+        # and prevents quarantining everything (which halts all trading).
+        if wr >= config.SYMBOL_PAUSE_HEALTHY_WR:
+            return False
+        # Pause if EITHER: catastrophic win rate (e.g. ETH 5%), OR meaningfully
+        # bleeding recent P&L. Judged on the recent window only.
+        catastrophic_wr = wr < config.SYMBOL_PAUSE_WINRATE
+        bleeding_pnl = pnl <= config.SYMBOL_PAUSE_PNL
+        if catastrophic_wr or bleeding_pnl:
+            logger.info(f"{base_symbol}: PAUSED (recent {n}: WR {wr:.0f}%, pnl {pnl:.2f}) — bleeding")
+            return True
         return False
 
     def _symbol_personality_for(self, base_symbol: str) -> dict:
