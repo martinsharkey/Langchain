@@ -199,9 +199,9 @@ ADAPTIVE_MIN_SAMPLE = int(os.getenv("ADAPTIVE_MIN_SAMPLE", "10"))
 
 # ─── Researcher -> action feedback ──────────────────────────
 # Pause new entries on a symbol the PerformanceResearcher flags as bleeding.
-SYMBOL_PAUSE_MIN_TRADES = int(os.getenv("SYMBOL_PAUSE_MIN_TRADES", "10"))
-SYMBOL_PAUSE_PNL = float(os.getenv("SYMBOL_PAUSE_PNL", "-15"))       # net pnl <= this
-SYMBOL_PAUSE_WINRATE = float(os.getenv("SYMBOL_PAUSE_WINRATE", "30"))  # AND win rate < this
+SYMBOL_PAUSE_MIN_TRADES = int(os.getenv("SYMBOL_PAUSE_MIN_TRADES", "12"))
+SYMBOL_PAUSE_PNL = float(os.getenv("SYMBOL_PAUSE_PNL", "-8"))        # net pnl <= this -> pause
+SYMBOL_PAUSE_WINRATE = float(os.getenv("SYMBOL_PAUSE_WINRATE", "35"))  # OR win rate < this -> pause
 # Persisted kill switch file — create/toggle from dashboard or by touching the file.
 KILL_SWITCH_FILE = os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data", "KILL_SWITCH"

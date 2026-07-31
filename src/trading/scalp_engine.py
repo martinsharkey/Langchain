@@ -543,11 +543,18 @@ class ScalpEngine:
         for sym, m in by_sym.items():
             if not sym.upper().startswith(base_symbol.upper()):
                 continue
-            if (m.get("n", 0) >= config.SYMBOL_PAUSE_MIN_TRADES
-                    and m.get("pnl", 0) <= config.SYMBOL_PAUSE_PNL
-                    and m.get("win_rate", 100) < config.SYMBOL_PAUSE_WINRATE):
-                logger.info(f"{base_symbol}: paused by researcher "
-                            f"(pnl {m['pnl']}, WR {m['win_rate']}%, n {m['n']})")
+            n = m.get("n", 0)
+            if n < config.SYMBOL_PAUSE_MIN_TRADES:
+                continue
+            wr = m.get("win_rate", 100)
+            pnl = m.get("pnl", 0)
+            # Pause if EITHER failure signal is clear (OR, not AND): a badly
+            # negative P&L OR a very poor win rate. The previous AND-logic let
+            # bleeders through (e.g. ETHUSD 9% WR but tiny -0.69 pnl; XAGUSD
+            # -38.86 pnl but ~47% WR — neither tripped both conditions).
+            if pnl <= config.SYMBOL_PAUSE_PNL or wr < config.SYMBOL_PAUSE_WINRATE:
+                logger.info(f"{base_symbol}: PAUSED by researcher "
+                            f"(pnl {pnl}, WR {wr}%, n {n}) — bleeding, no new entries")
                 return True
         return False
 
@@ -699,7 +706,8 @@ class ScalpEngine:
         try:
             llm = get_llm(temperature=0.2)
             resp = llm.invoke(prompt)
-            text = (getattr(resp, "content", None) or str(resp)).strip().upper()
+            from src.core.llm import extract_text
+            text = extract_text(resp).upper()
         except Exception as e:
             logger.info(f"[HYBRID_LLM] #{st.ticket}: LLM review failed ({e}) — rules-only")
             return

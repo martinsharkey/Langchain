@@ -51,4 +51,31 @@ __all__ = [
     "get_configured_providers",
     "get_provider_count",
     "PROVIDERS",
+    "extract_text",
 ]
+
+
+def extract_text(resp) -> str:
+    """
+    Robustly extract plain text from an LLM response, regardless of provider.
+
+    Some providers (e.g. Anthropic-style) return `.content` as a LIST of content
+    blocks (dicts with a 'text' key) rather than a string. Calling .strip() on
+    that list crashes ('list' object has no attribute 'strip'). This normalises
+    all shapes to a single string.
+    """
+    if resp is None:
+        return ""
+    content = getattr(resp, "content", resp)
+    if isinstance(content, str):
+        return content.strip()
+    if isinstance(content, list):
+        parts = []
+        for block in content:
+            if isinstance(block, dict):
+                parts.append(str(block.get("text", block.get("content", ""))))
+            else:
+                parts.append(str(block))
+        return " ".join(p for p in parts if p).strip()
+    return str(content).strip()
+

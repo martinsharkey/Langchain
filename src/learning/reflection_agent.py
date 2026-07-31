@@ -181,10 +181,8 @@ class ReflectionAgent:
         )
         try:
             resp = llm.invoke(prompt)
-            raw = resp.content if hasattr(resp, "content") else str(resp)
-            if isinstance(raw, list):  # some providers return structured content
-                raw = " ".join(str(x.get("text", x)) if isinstance(x, dict) else str(x) for x in raw)
-            raw = raw.strip()
+            from src.core.llm import extract_text
+            raw = extract_text(resp)
             # strip markdown code fences if present (```json ... ```)
             if "```" in raw:
                 import re
@@ -194,11 +192,23 @@ class ReflectionAgent:
             # extract JSON object
             start = raw.find("{"); end = raw.rfind("}")
             if start >= 0 and end > start:
-                data = json.loads(raw[start:end + 1])
-                # keep only valid strategy names
-                strat = [s for s in (data.get("strategies") or []) if s in available]
-                data["strategies"] = strat
-                return data
+                blob = raw[start:end + 1]
+                data = None
+                try:
+                    data = json.loads(blob)
+                except Exception:
+                    # tolerate single-quoted / Python-dict-style JSON from the LLM
+                    try:
+                        import ast
+                        data = ast.literal_eval(blob)
+                    except Exception:
+                        data = None
+                if isinstance(data, dict):
+                    # keep only valid strategy names
+                    strat = [s for s in (data.get("strategies") or []) if s in available]
+                    data["strategies"] = strat
+                    return data
+            logger.info(f"Reflection[{symbol}] no parseable hypothesis in LLM response")
         except Exception as e:
             logger.warning(f"Reflection[{symbol}] LLM parse failed: {e}")
         return None
