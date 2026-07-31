@@ -108,3 +108,25 @@ is built (MACD_OsMA_Power_Confluence, correct zero-line math). STILL TO BUILD:
 the multi-timeframe MACD/OsMA agreement scorer and the early OsMA-histogram-slope
 entry trigger (point 4) — these should become a high-weight learned pattern once
 validated on the Jan-onward history via the backtester.
+
+
+## Walk-forward validation (2026-07-31) — guard against overfit
+
+Reconciled exit system (SL=1.0 ATR, RR=2.0, giveback=0.55) tested across 3
+sequential time windows per symbol/timeframe. GENERALIZES = PF>=1.0 all windows:
+
+  XAUUSD-ECN M15: PF [1.16, 1.00, 1.34]  WR ~47-50%  -> GENERALIZES (primary)
+  XAUUSD-ECN M5:  PF [1.15, 1.04, 1.13]  -> GENERALIZES
+  GER40 M5:       PF [1.01, 1.16, 1.06]  -> GENERALIZES (M5 only)
+  XAUUSD H1:      PF [0.99, 1.10, 0.91]  -> INCONSISTENT (do not trust)
+  GER40 M15:      PF [0.94, 1.13, 1.01]  -> INCONSISTENT
+  GER40 H1:       PF [1.17, 1.08, 0.94]  -> INCONSISTENT
+
+Verdict: the reconciled config is NOT overfit for XAUUSD M15 — edge is consistent
+across time (strongest validated evidence to date). BUT the edge is MARGINAL
+(PF ~1.1-1.3) and only reliable on XAUUSD M15/M5 and GER40 M5. H1 and GER40 M15
+are noise. Engine trades M15 => XAUUSD-ECN M15 is the validated primary.
+
+Implication: concentrate on XAUUSD M15; treat GER40 M15 as unvalidated (auto-pause
+governs it). A marginal PF ~1.2 is a real but thin edge — position sizing and
+discipline matter more than ever; do NOT over-trust it.

@@ -94,13 +94,23 @@ def regime_edge_weight(symbol: str, strategy: str, regime: str) -> float:
 # strategy×regime pockets gives PF 1.24 (vs 1.04 for the full ensemble), and
 # PF 1.46 / R 94 with a wide 3.0-ATR take-profit. Concentration + letting
 # winners run beats voting everything. {symbol_prefix: [(strategy, {regimes})]}
+#
+# WALK-FORWARD VALIDATION (reconciled system SL=1.0ATR/RR=2.0/giveback=0.55,
+# 3 sequential windows). GENERALIZES = PF>=1.0 in all 3 windows:
+#   XAUUSD-ECN M15: PF [1.16, 1.00, 1.34]  -> GENERALIZES (primary, robust)
+#   XAUUSD-ECN M5:  PF [1.15, 1.04, 1.13]  -> GENERALIZES
+#   GER40 M5:       PF [1.01, 1.16, 1.06]  -> GENERALIZES (M5 only)
+#   XAUUSD H1, GER40 M15, GER40 H1         -> INCONSISTENT (do not trust)
+# Engine trades M15, so XAUUSD-ECN M15 is the validated primary. GER40 M15 is
+# NOT validated — its focused rules stay but the researcher auto-pause governs
+# it (quarantines if it bleeds live).
 FOCUSED_EDGE = {
     "XAUUSD": [
         ("Volume_Breakout", {"volatile", "trending"}),
         ("BB_Bounce", {"ranging"}),
         ("CCI_Breakout", {"volatile", "trending"}),
     ],
-    # GER40 pockets (from sweep): BB_SqueezeBreakout, CCI, MACD in trend/volatile
+    # GER40: unvalidated on M15 (walk-forward inconsistent); kept but auto-pause-governed
     "GER40": [
         ("BB_SqueezeBreakout", {"volatile", "trending"}),
         ("CCI_Breakout", {"trending", "volatile"}),
