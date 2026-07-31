@@ -121,6 +121,15 @@ class ScalpEngine:
         except Exception as e:
             logger.warning(f"SymbolGovernor unavailable: {e}")
             self.governor = None
+        # Trade post-mortem: data-driven self-reflection on each closed trade
+        try:
+            from src.learning.post_mortem import TradePostMortem
+            _kb = getattr(self.governor, "kb", None)
+            self.post_mortem = TradePostMortem(self.experience_db, knowledge_base=_kb)
+        except Exception as e:
+            logger.warning(f"TradePostMortem unavailable: {e}")
+            self.post_mortem = None
+        self._postmortem_cache = {}
         self._edge_cache = {}
         self._symbol_profit_cache = {}
 
@@ -807,6 +816,17 @@ class ScalpEngine:
                 )
                 if any(summary.get(k) for k in ("promoted", "rejected", "synthesized")):
                     logger.info(f"Adaptive pass: {summary}")
+                # DATA-DRIVEN SELF-REFLECTION: post-mortem the recent closed trades
+                # (real M1/M15 bars before+after, excursion analysis) to surface
+                # recurring failure modes (exit-too-early / entered-late / SL-too-tight).
+                if self.post_mortem is not None:
+                    try:
+                        self._postmortem_cache = self.post_mortem.analyze(limit=40)
+                        pm = self._postmortem_cache
+                        if pm.get("findings"):
+                            logger.info(f"[POST-MORTEM] {pm['findings']}")
+                    except Exception as e:
+                        logger.debug(f"post-mortem skip: {e}")
                 # AUTONOMOUS PARAMETER TUNING: hill-climb indicator params per
                 # symbol on real history, keep only validated (walk-forward)
                 # improvements. This is the self-learning micro-adjustment loop.
@@ -1164,6 +1184,7 @@ class ScalpEngine:
                 "adaptive": (self.adaptive.status() if self.adaptive else {}),
                 "tuned_params": (self.param_optimizer.status() if self.param_optimizer else {}),
                 "symbol_governance": (self.governor.snapshot() if self.governor else {}),
+                "post_mortem": (getattr(self, "_postmortem_cache", {}) or {}),
                 "performance_research": (self.perf_researcher.status() if self.perf_researcher else {}),
                 "edge": (self._edge_cache or {}),
                 "algo_trading": {

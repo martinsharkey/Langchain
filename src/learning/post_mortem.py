@@ -1,0 +1,258 @@
+"""
+TradePostMortem — data-driven self-reflection on each closed trade.
+
+For a closed trade this reconstructs the REAL market around it and answers
+concrete, actionable questions instead of reasoning over summary stats:
+
+  1. HTF CONTEXT: what was the M15 trend/regime at entry?
+  2. LEAD-UP: minute-by-minute M1 bars BEFORE entry — was the move already
+     extended, or just starting?
+  3. AFTER: M1 bars for the SAME duration after entry — MFE (max favourable
+     excursion) and MAE (max adverse excursion) in ATR units. This reveals:
+        * exited too EARLY  (price ran far our way after we closed)
+        * stopped too TIGHT (price recovered after hitting our stop)
+        * entered too LATE  (immediate adverse move / move already done)
+  4. COUNTERFACTUALS on THIS trade:
+        * would a wider TP (2x/3x) have captured more?
+        * would a tighter/wider SL have avoided the loss / survived the wick?
+        * would exiting-later (trail) have helped, given the actual MFE?
+
+Aggregated across many losers, recurring failure modes become concrete findings
+(e.g. "62% of losers had MFE > 1.5 ATR before reversing -> we exit too early")
+that feed the knowledge base and the parameter optimizer. Deterministic maths
+first; an optional LLM summarises the dominant pattern.
+"""
+
+from __future__ import annotations
+
+import os
+import json
+import sqlite3
+from collections import defaultdict
+from datetime import datetime, timedelta, timezone
+from dataclasses import dataclass, field
+from typing import Optional
+
+from src import config
+from src.utils.logger import get_logger
+
+logger = get_logger("post_mortem")
+
+
+@dataclass
+class TradeReflection:
+    trade_id: int
+    symbol: str
+    action: str
+    outcome: str
+    pnl: float
+    htf_trend: str = "?"           # M15 trend at entry
+    entry_extended: bool = False   # was the pre-entry move already extended?
+    mfe_atr: float = 0.0           # max favourable excursion (ATR units) after entry
+    mae_atr: float = 0.0           # max adverse excursion (ATR units) after entry
+    exited_early: bool = False     # winner cut short (MFE >> captured)
+    stopped_then_recovered: bool = False
+    entered_late: bool = False
+    notes: list = field(default_factory=list)
+
+
+class TradePostMortem:
+    def __init__(self, experience_db, knowledge_base=None):
+        self.experience_db = experience_db
+        self.kb = knowledge_base
+        self._srv_offset = None   # server_time - local_time (seconds)
+
+    def _server_offset(self) -> float:
+        """
+        MT5 stamps bar times in SERVER timezone (often several hours ahead of
+        local). Trade timestamps are local. copy_rates_range expects server time,
+        so we must shift the window by (server - local) or the bars won't align
+        with the trade. Computed once from a live tick.
+        """
+        if self._srv_offset is not None:
+            return self._srv_offset
+        try:
+            import MetaTrader5 as mt5
+            import datetime as _dt
+            # use any active symbol's tick
+            t = mt5.symbol_info_tick("XAUUSD-ECN") or mt5.symbol_info_tick("EURUSD-ECN")
+            if t:
+                self._srv_offset = (_dt.datetime.fromtimestamp(t.time) - _dt.datetime.now()).total_seconds()
+            else:
+                self._srv_offset = 0.0
+        except Exception:
+            self._srv_offset = 0.0
+        return self._srv_offset
+
+    # ── bar access ──
+    def _bars_range(self, symbol, tf_const, start_dt, end_dt):
+        try:
+            import MetaTrader5 as mt5
+            rr = mt5.copy_rates_range(symbol, tf_const, start_dt, end_dt)
+            if rr is None:
+                return []
+            return [{"time": int(r["time"]), "open": float(r["open"]), "high": float(r["high"]),
+                     "low": float(r["low"]), "close": float(r["close"])} for r in rr]
+        except Exception as e:
+            logger.debug(f"bars_range failed {symbol}: {e}")
+            return []
+
+    def _atr_estimate(self, bars):
+        if len(bars) < 5:
+            return 0.0
+        trs = [b["high"] - b["low"] for b in bars]
+        return sum(trs) / len(trs)
+
+    # ── per-trade reflection ──
+    def reflect_trade(self, trade: dict, window_min: int = 60) -> Optional[TradeReflection]:
+        import MetaTrader5 as mt5
+        sym = trade["symbol"]; action = trade["action"]
+        ts = trade.get("timestamp")
+        try:
+            entry_dt = datetime.fromisoformat(str(ts).replace("Z", ""))
+        except Exception:
+            return None
+        entry_price = trade.get("entry_price") or 0
+        if not entry_price:
+            return None
+
+        # Shift entry time into SERVER time so copy_rates_range returns the bars
+        # that actually correspond to the trade (server tz != local tz).
+        offset = timedelta(seconds=self._server_offset())
+        srv_entry = entry_dt + offset
+        before = self._bars_range(sym, mt5.TIMEFRAME_M1,
+                                  srv_entry - timedelta(minutes=window_min),
+                                  srv_entry + timedelta(minutes=1))
+        after = self._bars_range(sym, mt5.TIMEFRAME_M1,
+                                 srv_entry, srv_entry + timedelta(minutes=window_min))
+        htf = self._bars_range(sym, mt5.TIMEFRAME_M15,
+                               srv_entry - timedelta(hours=8), srv_entry + timedelta(minutes=15))
+
+        r = TradeReflection(trade_id=trade["id"], symbol=sym, action=action,
+                            outcome=trade["outcome"], pnl=trade.get("profit_loss") or 0)
+
+        # HTF trend at entry (simple EMA slope on M15 closes)
+        if len(htf) >= 20:
+            closes = [b["close"] for b in htf]
+            ema_fast = sum(closes[-9:]) / 9
+            ema_slow = sum(closes[-21:]) / 21 if len(closes) >= 21 else sum(closes) / len(closes)
+            r.htf_trend = "bullish" if ema_fast > ema_slow * 1.0005 else \
+                          "bearish" if ema_fast < ema_slow * 0.9995 else "neutral"
+
+        atr = self._atr_estimate(before) or self._atr_estimate(after)
+        if atr <= 0:
+            return r
+
+        # pre-entry extension: how far did price already move toward entry direction
+        if len(before) >= 10:
+            start_price = before[0]["close"]
+            pre_move = (entry_price - start_price) if action == "buy" else (start_price - entry_price)
+            r.entry_extended = pre_move > 2.0 * atr   # move already ran >2 ATR before we entered
+
+        # after-entry excursions (the key signal)
+        if after:
+            if action == "buy":
+                mfe = max(b["high"] for b in after) - entry_price
+                mae = entry_price - min(b["low"] for b in after)
+            else:
+                mfe = entry_price - min(b["low"] for b in after)
+                mae = max(b["high"] for b in after) - entry_price
+            r.mfe_atr = round(mfe / atr, 2)
+            r.mae_atr = round(mae / atr, 2)
+
+            # exited too early: trade was a loss/small win but price ran >1.5 ATR our way
+            if r.outcome != "win" and r.mfe_atr >= 1.5:
+                r.exited_early = True
+                r.notes.append(f"price ran {r.mfe_atr} ATR our way after a non-win — likely exited early / SL too tight")
+            # stopped then recovered: loss but MFE afterwards decent
+            if r.outcome == "loss" and r.mfe_atr >= 1.0 and r.mae_atr >= 1.0:
+                r.stopped_then_recovered = True
+            # entered late: immediate adverse move dominates, little favourable
+            if r.mae_atr >= 1.5 and r.mfe_atr < 0.5:
+                r.entered_late = True
+                r.notes.append(f"immediate {r.mae_atr} ATR adverse move, little favourable — entered late/wrong")
+        return r
+
+    def _recent_closed(self, limit=40, only_losers=False) -> list[dict]:
+        conn = sqlite3.connect(self.experience_db.db_path); conn.row_factory = sqlite3.Row
+        q = ("SELECT id, timestamp, symbol, action, entry_price, outcome, profit_loss, "
+             "mgmt_variant, strategy_used FROM trades WHERE outcome IN ('win','loss','breakeven') ")
+        if only_losers:
+            q += "AND outcome='loss' "
+        q += "ORDER BY id DESC LIMIT ?"
+        rows = [dict(r) for r in conn.execute(q, (limit,)).fetchall()]
+        conn.close()
+        return rows
+
+    # ── aggregate the recurring patterns (the intelligence) ──
+    def analyze(self, symbol: Optional[str] = None, limit: int = 40) -> dict:
+        rows = self._recent_closed(limit=limit)
+        if symbol:
+            rows = [r for r in rows if r["symbol"].upper().startswith(symbol.upper())]
+        reflections = []
+        for t in rows:
+            ref = self.reflect_trade(t)
+            if ref:
+                reflections.append(ref)
+        if len(reflections) < 8:
+            return {"analyzed": len(reflections), "insufficient": True}
+
+        losers = [r for r in reflections if r.outcome == "loss"]
+        wins = [r for r in reflections if r.outcome == "win"]
+        n_loss = len(losers) or 1
+
+        exited_early = sum(1 for r in losers if r.exited_early)
+        stopped_recovered = sum(1 for r in losers if r.stopped_then_recovered)
+        entered_late = sum(1 for r in losers if r.entered_late)
+        extended_entries = sum(1 for r in reflections if r.entry_extended)
+        avg_win_mfe = round(sum(r.mfe_atr for r in wins) / len(wins), 2) if wins else 0
+        avg_loss_mfe = round(sum(r.mfe_atr for r in losers) / n_loss, 2)
+        avg_loss_mae = round(sum(r.mae_atr for r in losers) / n_loss, 2)
+
+        findings = []
+        recs = []
+        if exited_early / n_loss >= 0.4:
+            findings.append(f"{exited_early}/{n_loss} losers had price run >=1.5 ATR our way after — EXITING TOO EARLY or SL too tight.")
+            recs.append("widen TP / loosen giveback / widen SL slightly")
+        if stopped_recovered / n_loss >= 0.35:
+            findings.append(f"{stopped_recovered}/{n_loss} losers were STOPPED THEN RECOVERED — SL too tight for the volatility.")
+            recs.append("increase sl_atr")
+        if entered_late / n_loss >= 0.35:
+            findings.append(f"{entered_late}/{n_loss} losers had immediate adverse move — ENTERING LATE (move already extended).")
+            recs.append("add pre-entry extension filter; avoid entries when move already >2 ATR")
+        if extended_entries / len(reflections) >= 0.4:
+            findings.append(f"{extended_entries}/{len(reflections)} entries were into already-extended moves.")
+        if avg_win_mfe and avg_loss_mfe and avg_loss_mfe >= avg_win_mfe * 0.8:
+            findings.append(f"Losers reach nearly as much favourable excursion (MFE {avg_loss_mfe} ATR) as winners ({avg_win_mfe}) before failing — exit timing, not entry, is the leak.")
+
+        result = {
+            "analyzed": len(reflections), "losers": n_loss, "wins": len(wins),
+            "exited_early_pct": round(exited_early / n_loss * 100, 0),
+            "stopped_recovered_pct": round(stopped_recovered / n_loss * 100, 0),
+            "entered_late_pct": round(entered_late / n_loss * 100, 0),
+            "avg_win_mfe_atr": avg_win_mfe, "avg_loss_mfe_atr": avg_loss_mfe,
+            "avg_loss_mae_atr": avg_loss_mae,
+            "findings": findings, "recommendations": recs,
+            "symbol": symbol or "ALL",
+        }
+        self._persist(result)
+        logger.info(f"PostMortem [{symbol or 'ALL'}]: {findings if findings else 'no dominant failure mode'}")
+        return result
+
+    def _persist(self, result):
+        try:
+            path = os.path.join(config.DATA_DIR, "post_mortem.json")
+            with open(path + ".tmp", "w") as f:
+                json.dump({"updated_at": datetime.now(timezone.utc).isoformat(), **result}, f, indent=2, default=str)
+            os.replace(path + ".tmp", path)
+        except Exception as e:
+            logger.debug(f"post-mortem persist skip: {e}")
+        if self.kb and result.get("findings"):
+            try:
+                self.kb.store_knowledge(
+                    question=f"What is the recurring failure mode for {result.get('symbol')}?",
+                    answer=" | ".join(result["findings"])[:2000],
+                    topic="trade_postmortem", subtopic="failure_modes",
+                    priority=8, confidence=0.75, tags=["postmortem", result.get("symbol", "ALL")])
+            except Exception:
+                pass
