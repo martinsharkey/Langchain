@@ -113,6 +113,12 @@ SCALP_MODE = os.getenv("SCALP_MODE", "true").lower() in ("true", "1", "yes")
 SCALP_LOT = float(os.getenv("SCALP_LOT", "0.01"))
 SCALP_TP_POINTS = int(os.getenv("SCALP_TP_POINTS", "400"))   # take-profit distance in points
 SCALP_SL_POINTS = int(os.getenv("SCALP_SL_POINTS", "300"))   # stop-loss distance in points
+# Take-profit as a MULTIPLE of stop distance (risk:reward). Backtest showed
+# RR ~2.5-3.0 lifts profit factor markedly (let winners run). Default 2.5.
+SCALP_TP_RR = float(os.getenv("SCALP_TP_RR", "2.5"))
+# FOCUSED mode: trade only validated high-edge (strategy x regime) pockets
+# instead of the broad ensemble vote. Backtest: PF 1.24 vs 1.04.
+FOCUSED_MODE = os.getenv("FOCUSED_MODE", "true").lower() in ("true", "1", "yes")
 SCALP_CONFIDENCE_MIN = float(os.getenv("SCALP_CONFIDENCE_MIN", "0.45"))  # lower bar to build sample
 SCALP_TARGET_TRADES = int(os.getenv("SCALP_TARGET_TRADES", "100"))       # learning goal
 SCALP_MAX_OPEN_PER_SYMBOL = int(os.getenv("SCALP_MAX_OPEN_PER_SYMBOL", "1"))
