@@ -147,6 +147,20 @@ class ScalpEngine:
             logger.warning(f"ParameterOptimizer unavailable: {e}")
             self.param_optimizer = None
 
+        # Config checkpointer (#27/#25): revert-to-best-config + learn-from-failure.
+        # Keeps a per-symbol best-known config (by REALISED expectancy) and reverts
+        # when a change degrades live results, recording the failed direction.
+        # KnowledgeStore is optional/lazy (heavy MiniLM load) — failure records
+        # still persist to disk even without it.
+        try:
+            from src.learning.config_checkpointer import ConfigCheckpointer
+            self.checkpointer = ConfigCheckpointer(knowledge_store=None)
+        except Exception as e:
+            logger.warning(f"ConfigCheckpointer unavailable: {e}")
+            self.checkpointer = None
+        # per-symbol giveback override applied by a revert (None = use normal logic)
+        self._giveback_override: dict[str, float] = {}
+
         # Phase 3 — master risk gate
         from src.trading.risk_manager import RiskManager
         self.risk = RiskManager(
@@ -518,6 +532,14 @@ class ScalpEngine:
                 self._refresh_directional_winrate()
             except Exception as e:
                 logger.debug(f"directional winrate refresh skip: {e}")
+            # ReAct revert+learn (#27/#25): checkpoint best config / revert on
+            # degradation / remember failed directions. Runs even when adaptation
+            # is frozen (it's the safety mechanism that MAKES learning safe).
+            if config.LEARNING_AUTO_REVERT_ENABLED:
+                try:
+                    self._run_checkpointer()
+                except Exception as e:
+                    logger.debug(f"checkpointer run skip: {e}")
             # proactive self-performance research (what's working?)
             if self.perf_researcher is not None:
                 try:
@@ -682,10 +704,17 @@ class ScalpEngine:
         with the profitability cache. Returns {} (neutral defaults) until enough data.
         """
         stats = getattr(self, "_symbol_personality_cache", {}) or {}
+        base_p = {}
         for sym, p in stats.items():
             if sym.upper().startswith(base_symbol.upper()):
-                return p
-        return {}
+                base_p = dict(p)
+                break
+        # A revert (#27) pins giveback to the best-known value; it overrides any
+        # learned personality giveback so the profitable config is what runs.
+        ov = getattr(self, "_giveback_override", {}).get(base_symbol.upper())
+        if ov is not None:
+            base_p["giveback_frac"] = ov
+        return base_p
 
     def _directional_winrate(self, base_symbol: str) -> dict:
         """
@@ -752,6 +781,80 @@ class ScalpEngine:
             }
         if out:
             self._dir_winrate_cache = out
+
+    def _current_symbol_config(self, base_symbol: str) -> dict:
+        """The tunable config that affects this symbol's live behaviour: the
+        optimizer's tuned indicator/exit params + the effective giveback."""
+        resolved = self.adapters[base_symbol].resolved_symbol if base_symbol in self.adapters else base_symbol
+        params = self._tuned_params(resolved)
+        cfg = dict(params) if params else {}
+        cfg["giveback"] = self._giveback_override.get(base_symbol.upper(),
+                                                       config.SCALP_GIVEBACK_FRAC)
+        return cfg
+
+    def _recent_expectancy(self, base_symbol: str, limit: int = 30) -> tuple:
+        """(expectancy_per_trade, n) over this symbol's most recent closed trades."""
+        import sqlite3
+        try:
+            conn = sqlite3.connect(self.experience_db.db_path)
+            conn.row_factory = sqlite3.Row
+            rows = conn.execute(
+                "SELECT profit_loss FROM trades WHERE symbol LIKE ? "
+                "AND outcome IN ('win','loss','breakeven') "
+                "AND (exit_reason IS NULL OR exit_reason<>'pre_rebuild_synthetic') "
+                "ORDER BY id DESC LIMIT ?",
+                (base_symbol.upper() + "%", limit),
+            ).fetchall()
+            conn.close()
+        except Exception as e:
+            logger.debug(f"recent expectancy skip {base_symbol}: {e}")
+            return 0.0, 0
+        n = len(rows)
+        if n == 0:
+            return 0.0, 0
+        return round(sum((r[0] or 0) for r in rows) / n, 4), n
+
+    def _run_checkpointer(self):
+        """
+        ReAct revert+learn (#27/#25): for each active symbol, checkpoint the
+        best-known config by REALISED expectancy and REVERT when the current
+        config has degraded, recording the failed direction so it isn't repeated.
+        """
+        if self.checkpointer is None:
+            return
+        for base in self.adapters:
+            try:
+                exp, n = self._recent_expectancy(base)
+                if n < self.checkpointer.min_sample:
+                    continue
+                cfg = self._current_symbol_config(base)
+                decision = self.checkpointer.evaluate(base, cfg, exp, n)
+                if decision.get("action") == "revert":
+                    self._apply_reverted_config(base, decision.get("best_config") or {})
+            except Exception as e:
+                logger.debug(f"checkpointer skip {base}: {e}")
+
+    def _apply_reverted_config(self, base_symbol: str, best_cfg: dict):
+        """Restore a best-known config live: tuned params -> optimizer, giveback -> override."""
+        if not best_cfg:
+            return
+        resolved = self.adapters[base_symbol].resolved_symbol if base_symbol in self.adapters else base_symbol
+        if self.param_optimizer is not None:
+            try:
+                param_keys = {k: v for k, v in best_cfg.items() if k != "giveback"}
+                if param_keys:
+                    key = resolved.upper()
+                    entry = self.param_optimizer.tuned.get(key, {})
+                    entry["params"] = {**entry.get("params", {}), **param_keys}
+                    entry["reverted_at"] = datetime.now(timezone.utc).isoformat()
+                    self.param_optimizer.tuned[key] = entry
+                    self.param_optimizer._persist()
+            except Exception as e:
+                logger.debug(f"revert params apply skip {base_symbol}: {e}")
+        if "giveback" in best_cfg:
+            self._giveback_override[base_symbol.upper()] = float(best_cfg["giveback"])
+        logger.warning(f"[REVERT-APPLIED] {base_symbol}: restored best-known config "
+                       f"{best_cfg} (live). Future trades use this until it is beaten.")
 
     def _refresh_personalities(self):
         """Compute per-symbol personality from closed trades (called on a cadence)."""
@@ -1494,6 +1597,7 @@ class ScalpEngine:
                 "symbol_governance": (self.governor.snapshot() if self.governor else {}),
                 "post_mortem": (getattr(self, "_postmortem_cache", {}) or {}),
                 "learning_health": self._learning_health(),
+                "config_checkpoints": (self.checkpointer.snapshot() if self.checkpointer else {}),
                 "operating_modes": (self.mode_mgr.snapshot() if self.mode_mgr else {}),
                 "performance_research": (self.perf_researcher.status() if self.perf_researcher else {}),
                 "edge": (self._edge_cache or {}),
