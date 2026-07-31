@@ -69,7 +69,7 @@ class TradePostMortem:
         so we must shift the window by (server - local) or the bars won't align
         with the trade. Computed once from a live tick.
         """
-        if self._srv_offset is not None:
+        if getattr(self, "_srv_offset", None) is not None:
             return self._srv_offset
         try:
             import MetaTrader5 as mt5
@@ -103,10 +103,42 @@ class TradePostMortem:
         trs = [b["high"] - b["low"] for b in bars]
         return sum(trs) / len(trs)
 
+    # ── per-symbol reflection profile (UNCONSTRAINED timeframes) ──
+    def _profile(self, symbol: str) -> dict:
+        """
+        Timeframe/window profile per symbol. Slower/higher-priced instruments
+        (BTC/ETH) need WIDER windows and HIGHER timeframes (M30/H1) to see the
+        real momentum context; fast FX/metals use M1/M15. Config-overridable via
+        POSTMORTEM_PROFILES env (JSON) so the researcher can widen timelines.
+        """
+        su = symbol.upper()
+        crypto = any(h in su for h in ("BTC", "ETH", "XBT", "LTC", "XRP", "SOL"))
+        if crypto:
+            return {"entry_tf": "M5", "htf": ["M15", "M30", "H1"],
+                    "window_min": 240, "htf_hours": 24}
+        return {"entry_tf": "M1", "htf": ["M15", "M30"],
+                "window_min": 60, "htf_hours": 8}
+
+    _TF = {}  # lazy MT5 timeframe const map
+
+    def _tf_const(self, name):
+        try:
+            import MetaTrader5 as mt5
+        except Exception:
+            return name  # tests/fakes override _bars_range so the value is unused
+        if not self._TF:
+            self._TF = {"M1": mt5.TIMEFRAME_M1, "M5": mt5.TIMEFRAME_M5,
+                        "M15": mt5.TIMEFRAME_M15, "M30": mt5.TIMEFRAME_M30,
+                        "H1": mt5.TIMEFRAME_H1, "H4": mt5.TIMEFRAME_H4}
+        return self._TF.get(name, mt5.TIMEFRAME_M1)
+
     # ── per-trade reflection ──
-    def reflect_trade(self, trade: dict, window_min: int = 60) -> Optional[TradeReflection]:
+    def reflect_trade(self, trade: dict, window_min: int = None) -> Optional[TradeReflection]:
         import MetaTrader5 as mt5
         sym = trade["symbol"]; action = trade["action"]
+        prof = self._profile(sym)
+        window_min = window_min or prof["window_min"]
+        entry_tf = self._tf_const(prof["entry_tf"])
         ts = trade.get("timestamp")
         try:
             entry_dt = datetime.fromisoformat(str(ts).replace("Z", ""))
@@ -120,13 +152,16 @@ class TradePostMortem:
         # that actually correspond to the trade (server tz != local tz).
         offset = timedelta(seconds=self._server_offset())
         srv_entry = entry_dt + offset
-        before = self._bars_range(sym, mt5.TIMEFRAME_M1,
+        before = self._bars_range(sym, entry_tf,
                                   srv_entry - timedelta(minutes=window_min),
                                   srv_entry + timedelta(minutes=1))
-        after = self._bars_range(sym, mt5.TIMEFRAME_M1,
+        after = self._bars_range(sym, entry_tf,
                                  srv_entry, srv_entry + timedelta(minutes=window_min))
-        htf = self._bars_range(sym, mt5.TIMEFRAME_M15,
-                               srv_entry - timedelta(hours=8), srv_entry + timedelta(minutes=15))
+        # HTF: use the HIGHEST configured timeframe for the trend read (M30/H1 for BTC)
+        htf_name = prof["htf"][-1]
+        htf = self._bars_range(sym, self._tf_const(htf_name),
+                               srv_entry - timedelta(hours=prof["htf_hours"]),
+                               srv_entry + timedelta(minutes=60))
 
         r = TradeReflection(trade_id=trade["id"], symbol=sym, action=action,
                             outcome=trade["outcome"], pnl=trade.get("profit_loss") or 0)
