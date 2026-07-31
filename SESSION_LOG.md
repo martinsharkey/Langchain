@@ -156,3 +156,47 @@ python app.py LIVE_MICRO     # real 0.01-lot demo trading + dashboard at :5000
 - Phase 3: RiskManager (daily-loss halt, max positions, spread ceiling, kill switch).
 - Phase 4: wire research/sentiment into decisions.
 - Phase 5: no-look-ahead backtest + readiness gate before any real capital.
+
+
+---
+
+## Session 2026-07-31 (evening) — LLM fix, whale RAG, portable knowledge store, GitHub handoff
+
+Context recovered from disk + memory (prior session context was large; do not rely
+on chat scrollback — use AGENTS.md + this log + GitHub Issues).
+
+### Fixed
+- **LLM/Bedrock unsupported-params bug** (`litellm_providers/provider_router.py`).
+  `modify_params`/`drop_params` set as `litellm` module globals at import (the
+  nested `model_kwargs={"litellm_settings":{...}}` form was silently ignored, so
+  Bedrock kept failing "tool calling without tools="). Live LLM reviews now work.
+
+### Built
+- **Whale RAG** `src/cryptorti/whale_rag.py` — ChromaDB `whale_wave_patterns`.
+  Ingests 37 mined profiles + the human-CONFIRMED ~$6M?~6×$1M?~6 M1-candle pattern.
+  `lookup(usd, exchange, direction)`; retrieval matches on event identity, response
+  in metadata. Confirmed observation retrieves at similarity 1.00.
+- **Knowledge store** `src/learning/knowledge_store.py` — portable, embedded,
+  offline semantic memory (local MiniLM). finding/correction/decision/note.
+  Stored: the corrected whale finding, WebSocket decision, LLM-fix note.
+
+### Corrected (important)
+- Earlier "no whale wallet movement ? successful BTCUSD move" was WRONG. Whale tx
+  dates/times DO map to real (chunked) 1m BTCUSD trades. Now in the knowledge RAG.
+
+### Decisions
+- Danny: authoritative feed = mTLS WebSocket, event-driven push only (no S3 polling).
+  Recorded in `cryptorti/martin_qna.md` (Q11 + Decision Log).
+- Storage: embedded ChromaDB (no server) — must stay portable for a standalone
+  app that lives OUTSIDE VS Code.
+- **GitHub Issues = single source of truth** for issues/features/bugs/todos.
+
+### Live bot
+- Running `python -m src.trading.scalp_engine` (standalone, no council). It adopted
+  the 2 open positions after reboot and is trailing them into profit. LLM TIGHTEN
+  reviews firing cleanly.
+- KNOWN ISSUE: manager "rolling winner" exits log `OBSERVE close (no real order)`
+  even in LIVE_MICRO — needs a GitHub issue + decision.
+
+### Next
+See AGENTS.md "TODO" — mirror into GitHub Issues.

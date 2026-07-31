@@ -54,6 +54,31 @@ from langchain_litellm import ChatLiteLLM
 
 logger = logging.getLogger("litellm_providers")
 
+# ─────────────────────────────────────────────────────────────────────────────
+#  GLOBAL LiteLLM COMPATIBILITY SETTINGS
+# ─────────────────────────────────────────────────────────────────────────────
+# LiteLLM only honours `modify_params` / `drop_params` from the `litellm` module
+# globals (or a top-level call kwarg). Passing them nested inside
+# ChatLiteLLM(model_kwargs={"litellm_settings": {...}}) is SILENTLY IGNORED, which
+# is why Bedrock kept raising:
+#   "Bedrock doesn't support tool calling without `tools=` param specified.
+#    Pass `tools=` param OR set `litellm.modify_params = True`."
+#
+# Setting these once at import fixes it for every provider:
+#   modify_params=True -> LiteLLM injects a dummy tool when a provider requires
+#                         `tools=` for tool-calling (Bedrock/Anthropic style).
+#   drop_params=True   -> LiteLLM drops params a given provider doesn't support
+#                         instead of erroring (e.g. temperature/top_p on models
+#                         that reject them).
+try:
+    import litellm as _litellm
+
+    _litellm.modify_params = True
+    _litellm.drop_params = True
+    logger.info("LiteLLM compatibility set: modify_params=True, drop_params=True")
+except Exception as _e:  # pragma: no cover - litellm always present via langchain_litellm
+    logger.warning(f"Could not set litellm global compatibility flags: {_e}")
+
 # ═══════════════════════════════════════════════════════════════════════════════
 #  CONFIGURATION
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -239,7 +264,6 @@ def get_llm(
             model=model,
             temperature=temperature,
             max_tokens=max_tokens,
-            model_kwargs={"litellm_settings": {"modify_params": True}},
         )
 
     if provider_override:
@@ -275,7 +299,6 @@ def get_llm(
             "model": model_name,
             "temperature": temperature,
             "max_tokens": max_tokens,
-            "model_kwargs": {"litellm_settings": {"modify_params": True}},
         }
         if api_key:
             kwargs["api_key"] = api_key
@@ -294,7 +317,6 @@ def get_llm(
         "model": model_name,
         "temperature": temperature,
         "max_tokens": max_tokens,
-        "model_kwargs": {"litellm_settings": {"modify_params": True}},
     }
     if api_key:
         kwargs["api_key"] = api_key
