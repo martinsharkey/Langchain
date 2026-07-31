@@ -628,7 +628,7 @@ class ScalpEngine:
                 # is this position aligned with the higher-TF trend? (enables ride mode)
                 trend_aligned = False
                 try:
-                    trend_aligned, _ = self._mtf_aligned(adapter, pos.action)
+                    trend_aligned, _, _ = self._mtf_aligned(adapter, pos.action)
                 except Exception:
                     pass
                 st = self.trade_manager.register(pos, atr_points=atr_pts,
@@ -782,7 +782,7 @@ class ScalpEngine:
         if s is None and adapter.spec:
             s = self.stats_engine.compute(resolved, adapter.spec.point, adapter.spec.digits)
         if not s:
-            return True, "no stats (allow)"
+            return True, "no stats (allow)", 0
 
         want = "bullish" if action == "buy" else "bearish"
         higher_tfs = config.MTF_ALIGNMENT_TFS
@@ -792,14 +792,13 @@ class ScalpEngine:
             if d:
                 dirs.append(d)
         if not dirs:
-            return True, "no higher-tf dirs (allow)"
+            return True, "no higher-tf dirs (allow)", 0
 
         agree = sum(1 for d in dirs if d == want)
         against = sum(1 for d in dirs if d != "neutral" and d != want)
-        # block only if the higher TFs clearly oppose the trade
         if against > agree:
-            return False, f"{against} higher TFs oppose {want} vs {agree} agree ({dirs})"
-        return True, f"aligned ({agree}/{len(dirs)} agree)"
+            return False, f"{against} higher TFs oppose {want} vs {agree} agree ({dirs})", against
+        return True, f"aligned ({agree}/{len(dirs)} agree)", 0
 
     def _evaluate_and_trade(self, base: str, adapter: BrokerAdapter):
         # don't open when the market is closed for this symbol
@@ -855,22 +854,25 @@ class ScalpEngine:
         if signal.confidence < config.SCALP_CONFIDENCE_MIN:
             return
 
-        # ── Multi-timeframe directional alignment gate ──
-        # A 1m scalp against the higher-timeframe trend is usually low-quality, so
-        # we normally require alignment. BUT a HIGH-CONVICTION counter-trend signal
-        # (e.g. strong mean-reversion at an extreme) is allowed through — otherwise,
-        # in a persistent trend, the bot can NEVER take the other side even when
-        # the setup is excellent. This keeps trend-following as the default while
-        # letting genuine counter-trend opportunities trade.
+        # ── Multi-timeframe alignment as a QUALITY MODIFIER (not a hard block) ──
+        # A counter-trend 1m scalp is lower quality, so instead of a binary block
+        # we PENALISE its confidence proportionally to how many higher TFs oppose
+        # it. A genuinely strong counter-trend signal can still clear the entry
+        # threshold after the penalty; a weak one falls below it and is skipped.
+        # This fixes both failure modes: crypto blocked 100% in a trend, AND weak
+        # counter-trend trades slipping through.
         if config.MTF_ALIGNMENT_ENABLED:
-            aligned, detail = self._mtf_aligned(adapter, signal.action)
+            aligned, detail, oppose = self._mtf_aligned(adapter, signal.action)
             if not aligned:
-                if signal.confidence >= config.MTF_COUNTERTREND_MIN_CONF:
-                    logger.info(f"{base}: counter-trend {signal.action} allowed "
-                                f"(conf {signal.confidence:.2f} >= {config.MTF_COUNTERTREND_MIN_CONF}) [{detail}]")
-                else:
-                    logger.info(f"{base}: entry blocked by MTF misalignment ({detail})")
-                    return
+                penalty = config.MTF_COUNTERTREND_PENALTY * max(oppose, 1)
+                before = signal.confidence
+                signal.confidence = max(0.0, signal.confidence - penalty)
+                logger.info(f"{base}: counter-trend {signal.action} penalised "
+                            f"{before:.2f}->{signal.confidence:.2f} ({detail})")
+
+        # Final confidence gate (after MTF quality penalty)
+        if signal.confidence < config.SCALP_CONFIDENCE_MIN:
+            return
 
         # scalp SL/TP — adaptive to each symbol's spread & minimum stop distance.
         # Fixed point targets work for gold but not for high-priced/wide-spread

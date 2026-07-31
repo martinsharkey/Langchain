@@ -126,6 +126,10 @@ MTF_ALIGNMENT_TFS = [s.strip() for s in os.getenv("MTF_ALIGNMENT_TFS", "M15,H1,H
 # A counter-trend signal this confident is allowed through the MTF gate, so the
 # bot can take the other side on strong setups instead of only ever trend-trading.
 MTF_COUNTERTREND_MIN_CONF = float(os.getenv("MTF_COUNTERTREND_MIN_CONF", "0.7"))
+# Confidence penalty applied PER opposing higher timeframe when a signal is
+# counter-trend (quality modifier instead of a hard block). A strong signal can
+# still clear SCALP_CONFIDENCE_MIN after the penalty; a weak one is filtered out.
+MTF_COUNTERTREND_PENALTY = float(os.getenv("MTF_COUNTERTREND_PENALTY", "0.12"))
 
 # ─── Trading Mode ───────────────────────────────────────────
 # Controls how far the bot is allowed to act on its decisions.

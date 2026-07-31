@@ -626,7 +626,7 @@ class StrategyRegistry:
     def __init__(self):
         self._strategies: dict[str, StrategyDefinition] = {}
         self._register_defaults()
-    
+
     def _register_defaults(self):
         """Register all built-in strategies."""
         self.register(StrategyDefinition(
@@ -1022,6 +1022,14 @@ class StrategyRegistry:
         total_confidence_sell = 0.0
         reasons = []
 
+        # per-symbol edge multipliers (edge is symbol-specific — a combo that
+        # wins on gold can lose on an index), applied on top of learned weights.
+        _sym = indicators.get("symbol", "")
+        try:
+            from src.learning.edge_weights import edge_weight
+        except Exception:
+            edge_weight = None
+
         for name, signal in results:
             strat = self._strategies.get(name)
             # Skip disabled AND testing strategies — synthesized candidates
@@ -1030,6 +1038,8 @@ class StrategyRegistry:
             if strat is not None and getattr(strat, "status", "active") in ("disabled", "testing"):
                 continue
             w = getattr(strat, "weight", 1.0) if strat else 1.0
+            if edge_weight is not None and _sym:
+                w *= edge_weight(_sym, name)
             if signal.action == "buy":
                 buys += 1
                 w_buy += w
