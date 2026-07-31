@@ -130,3 +130,33 @@ are noise. Engine trades M15 => XAUUSD-ECN M15 is the validated primary.
 Implication: concentrate on XAUUSD M15; treat GER40 M15 as unvalidated (auto-pause
 governs it). A marginal PF ~1.2 is a real but thin edge — position sizing and
 discipline matter more than ever; do NOT over-trust it.
+
+
+## Gold obsession — WR/PF frontier (2026-07-31, walk-forward)
+
+Tested XAUUSD-ECN M15 focused pockets across SL/RR/filters, 3 time windows.
+HONEST CEILING found — the 70% win-rate question is settled by data:
+
+  RR=0.5 (tiny TP):  WR 65-69%  but PF 0.85-1.10  -> WINS OFTEN, LOSES MONEY
+  RR=0.75:           WR 55-59%  PF 0.91-1.10
+  RR=1.0:            WR 48-53%  PF 0.94-1.15
+  RR=1.5:            WR 40-45%  PF 0.98-1.23
+  RR=2.0:            WR 33-37%  PF 0.99-1.19  (best payoff)
+
+Entry filters (ADX>=25/30, ATR band) did NOT lift win rate materially; they cut
+trade count and often broke one window (overfit).
+
+CONCLUSIONS:
+1. 70% win rate IS reachable (RR<=0.5) but is UNPROFITABLE (PF<1) — the tight-TP
+   trap: many small wins wiped out by full-SL losses. Do NOT chase it.
+2. Gold M15 genuine edge ceiling: PF ~1.1-1.3 at 40-50% WR. That's what the
+   market offers; effort can't manufacture more without curve-fitting.
+3. The MIDDLE time window fails (PF ~0.9) in nearly every config — a real
+   low/no-edge regime for gold M15. This is the true risk, not win rate.
+4. Best robust choice remains ~SL1.0/RR2.0/giveback0.55 (payoff-driven), the
+   current live config. Baseline (no filter) is the most consistent.
+
+Strategic implication: a single symbol/timeframe caps at a thin edge. Real
+improvement comes from (a) trading MORE validated edges (other symbols/TFs that
+independently generalize) to diversify the thin gold edge, and (b) regime
+avoidance for the middle-window type conditions, NOT from chasing win rate.
