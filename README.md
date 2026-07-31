@@ -1,160 +1,149 @@
-# 🤖 LangChain ReAct Agent — XAUUSD MetaTrader 5 Trading Bot
+# Agentic Trader — MT5 (XAUUSD, BTCUSD, extensible)
 
-An autonomous **LangChain ReAct agent** powered by **Groq's free Llama 3 70B API** that builds its own team of sub-agents to trade **XAUUSD (Gold vs USD)** on **MetaTrader 5**.
+A self-learning, multi-strategy trading system that connects to a live
+**MetaTrader 5** account (VT Markets flavour), trades on a **demo account** to
+accumulate real outcomes, and learns from them. It ships with a live dashboard
+showing **only real data**.
 
-## 🎯 Mission
+> Current status: places **real orders on the demo account** in `LIVE_MICRO`
+> mode (0.01 lots), reconciles closed trades against real MT5 deal history, and
+> records genuine win/loss outcomes for learning. Goal: reach ~100 closed
+> trades to build a statistically meaningful learning base.
 
-> *"Build the most intelligent team of AI agents to trade XAUUSD using MetaTrader 5."*
+---
 
-The agent:
-1. **Builds its environment** — Creates venv, installs dependencies
-2. **Recruits a team** — Spawns specialized sub-agents (Research, Strategy, Risk, Execution)
-3. **Analyzes markets** — Fetches XAUUSD data, calculates technical indicators
-4. **Designs strategies** — Creates and backtests trading strategies
-5. **Executes trades** — Places orders on MT5 with proper risk management
-6. **Self-improves** — Reflects on performance and adjusts strategy
-
-## 🏗️ Architecture
-
-```
-src/
-├── main.py                    # Entry point — boots the main agent
-├── config.py                  # Configuration (symbols, timeframes, API keys)
-├── core/
-│   ├── agent.py               # Main ReAct agent (LangGraph)
-│   ├── graph.py               # State graph definition
-│   ├── tools.py               # Shared tool definitions
-│   └── llm.py                 # Groq LLM client
-├── agents/
-│   ├── base_agent.py          # Base sub-agent class
-│   ├── env_setup_agent.py     # Environment setup specialist
-│   ├── research_agent.py      # Market research specialist
-│   ├── strategy_agent.py      # Strategy design specialist
-│   ├── risk_agent.py          # Risk management specialist
-│   └── execution_agent.py     # Order execution specialist
-├── mt5/
-│   ├── connector.py           # MT5 connection (Wine bridge on macOS)
-│   ├── account.py             # Account info & positions
-│   ├── data.py                # Market data (OHLCV, ticks)
-│   └── orders.py              # Order placement & management
-├── strategies/
-│   ├── base.py                # Base strategy class
-│   ├── indicators.py          # Technical indicators (EMA, RSI, MACD, etc.)
-│   └── xauusd_strategy.py     # XAUUSD-specific strategy
-└── utils/
-    ├── logger.py              # Rich console logging
-    └── helpers.py             # Utility functions
-```
-
-## 🚀 Quick Start
-
-### Prerequisites
-
-1. **Python 3.10+** installed
-2. **Groq API key** (free) — sign up at [console.groq.com](https://console.groq.com)
-3. **MetaTrader 5** running under Wine (macOS) or natively (Windows)
-
-### Setup
+## Quick start
 
 ```bash
-# 1. Clone the repository
-git clone https://github.com/martinsharkey/langchain.git
-cd langchain
+# 1. Ensure MT5 terminal is running, logged into the demo account,
+#    and the "Algo Trading" button is GREEN (enabled).
 
-# 2. Run the setup script (creates venv, installs deps)
-chmod +x setup.sh
-./setup.sh
+# 2. Start everything (dashboard + trading engine) in one command:
+python app.py OBSERVE       # analyze only, no orders (safe default)
+python app.py PAPER         # simulated fills at live prices
+python app.py LIVE_MICRO    # REAL demo orders, 0.01 lots  ← use this to trade & learn
+python app.py LIVE          # REAL orders, full sizing
 
-# 3. Edit the .env file with your API keys
-nano .env
-
-# 4. Run the bot
-python src/main.py
+# 3. Open the dashboard:
+#    http://localhost:5000
 ```
 
-### Environment Variables (`.env`)
-
-| Variable | Description | Required |
-|----------|-------------|----------|
-| `GROQ_API_KEY` | Your Groq API key (free at console.groq.com) | ✅ Yes |
-| `MT5_ACCOUNT` | MetaTrader 5 account number | Optional |
-| `MT5_PASSWORD` | MetaTrader 5 password | Optional |
-| `MT5_SERVER` | MetaTrader 5 broker server | Optional |
-| `XAUUSD_RISK_PERCENT` | Risk per trade (default: 1.0) | Optional |
-| `XAUUSD_MAX_POSITION_SIZE` | Max position size (default: 0.1) | Optional |
-
-## 🤖 Agent Team
-
-| Agent | Role | Tools |
-|-------|------|-------|
-| **Orchestrator** (main) | Leads the team, delegates tasks | Shell, Python, File I/O |
-| **Environment Setup** | Creates venv, installs deps | Shell, File I/O |
-| **Research** | Analyzes market data, identifies patterns | Python, Data analysis |
-| **Strategy** | Designs & backtests strategies | Python, Backtesting |
-| **Risk Management** | Calculates position sizing, SL/TP | Python, Calculations |
-| **Execution** | Places & manages MT5 orders | Python, MT5 bridge |
-
-## 📊 Trading Strategy
-
-The default strategy combines multiple technical indicators for XAUUSD:
-
-- **EMA Crossover** (9/21) — Trend direction
-- **RSI** (14) — Momentum and overbought/oversold
-- **MACD** (12/26/9) — Trend confirmation
-- **Bollinger Bands** (20, 2σ) — Volatility context
-- **ATR** (14) — Volatility-based SL/TP
-- **Support/Resistance** — Key price levels
-
-### Risk Management
-- 1% risk per trade (configurable)
-- Minimum 1:2 risk-reward ratio
-- ATR-based stop loss placement
-- Maximum 2 concurrent positions
-
-## 🖥️ macOS + Wine Setup
-
-Since `MetaTrader5` is a Windows-native Python package, on macOS you need:
-
-1. Install Wine: `brew install --cask wine-stable`
-2. Install MetaTrader 5 under Wine
-3. The bot will automatically detect and handle the Wine bridge
-
-**Without MT5**, the bot runs in **simulation mode** with generated data — perfect for testing!
-
-## 💰 Costs
-
-**Completely free to run:**
-- **Groq API**: Free tier (30 req/min, 6M tokens/day, Llama 3 70B)
-- **No paid API keys required**
-- **Open-source** — all code is MIT licensed
-
-## 🔄 Trading Cycle
-
-```
-1. Research → Fetch data, calculate indicators, analyze market
-2. Strategy → Generate signals, evaluate opportunities
-3. Risk Check → Calculate position size, validate risk parameters
-4. Execute → Place order on MT5 with SL/TP
-5. Reflect → Analyze performance, adjust strategy
-```
-
-## 🛠️ Development
+You can also run the engine alone:
 
 ```bash
-# Activate venv
-source venv/bin/activate
-
-# Run tests
-pytest tests/
-
-# Run a single cycle (no trading)
-python -c "from src.strategies.xauusd_strategy import XAUUSDStrategy; s = XAUUSDStrategy(); print('Strategy ready')"
+python run_trader.py LIVE_MICRO
 ```
 
-## ⚠️ Disclaimer
+---
 
-**This software is for educational and research purposes only.** Trading financial markets involves substantial risk of loss. Past performance does not guarantee future results. Always test strategies in a demo account before trading with real money.
+## Trading modes (master safety gate)
 
-## 📝 License
+Set via `TRADING_MODE` in `.env`, or as the first CLI arg to `app.py` / `run_trader.py`.
 
-MIT License — see [LICENSE](LICENSE) for details.
+| Mode         | Orders?            | Learning data | Use for |
+|--------------|--------------------|---------------|---------|
+| `OBSERVE`    | none               | none          | Dry-run, verify signals |
+| `PAPER`      | simulated @ live   | tagged PAPER  | Realistic no-risk test |
+| `LIVE_MICRO` | REAL, 0.01 lots    | real outcomes | **Demo learning (recommended)** |
+| `LIVE`       | REAL, full sizing  | real outcomes | Only after readiness gate |
+
+---
+
+## How it works
+
+Each cycle (default every 15s), for each configured symbol:
+
+1. **Fetch live candles** from MT5 (`XAUUSD-ECN`, `BTCUSD`, …).
+2. **Compute indicators** (RSI, EMA, MACD, Bollinger, ATR, S/R).
+3. **Ensemble signal** from 7 real strategies (voting).
+4. **Adaptive SL/TP** sized to each symbol's spread & minimum stop distance
+   (fixed points for gold; percentage-based for high-priced BTC).
+5. **Place a real order** via the `BrokerAdapter` (0.01 lots in LIVE_MICRO).
+6. **Track** the position by its real MT5 ticket.
+7. **Reconcile on close**: match the ticket to MT5 deal history, compute the
+   real net P&L, and write the true outcome (win/loss/breakeven) to the
+   experience DB + pattern store — this is how it *actually* learns.
+
+The **BrokerAdapter** is the single execution boundary. It:
+- resolves a base symbol (`XAUUSD`) to the broker's **tradable** variant
+  (`XAUUSD-ECN`, skipping the disabled `XAUUSD.crp`),
+- sizes lots correctly from live `tick_value` (no gold-specific magic numbers),
+- checks the **Algo Trading** terminal flag and refuses to trade (with a clear
+  reason) when it's disabled,
+- is symbol-agnostic, so adding crypto/other symbols is a config change.
+
+---
+
+## Configuration (`.env`)
+
+```env
+# MT5 (required)
+MT5_ACCOUNT=1176166
+MT5_PASSWORD=...
+MT5_SERVER=VTMarkets-Demo
+
+# Trading
+TRADING_MODE=OBSERVE            # OBSERVE | PAPER | LIVE_MICRO | LIVE
+TRADING_SYMBOLS=XAUUSD,BTCUSD   # base symbols; suffixes resolved automatically
+SCALP_TARGET_TRADES=100         # learning goal
+SCALP_LOT=0.01
+SCALP_CYCLE_SECONDS=15
+
+# Optional research
+NEWSAPI_KEY=                    # set to enable live news (else shown "unavailable")
+USE_KILO_GATEWAY=true           # API-key-free LLM for research/analysis
+```
+
+See `src/config.py` for all options.
+
+---
+
+## Dashboard (http://localhost:5000)
+
+Shows **only real data**, auto-refreshing every ~4s:
+
+- **Account & Algo Trading** — live balance/equity/margin + green/red Algo light
+- **Trading Readiness** — score from real closed trades + connection + win rate
+- **Learning Progress** — closed trades vs target, wins/losses, net P&L
+- **Live Open Positions** — currently open trades by ticket
+- **Symbols Learned** — per-symbol trade counts & P&L
+- **Research & News** — news status, knowledge topics
+- **Strategy Performance** — per-strategy win rate & P&L from real trades
+- **Best Strategy per Symbol** — which strategy performs best where
+- **Bot Trades** — trades the agent placed, with outcomes
+- **MT5 Account Deal History** — live deal history straight from MT5
+
+---
+
+## Project layout (current)
+
+```
+langchain/
+├── app.py                       # Unified launcher (dashboard + engine)
+├── run_trader.py                # Trading engine only
+├── dashboard/app.py             # Dashboard (Flask, real-data endpoints + UI)
+├── src/
+│   ├── config.py                # Config incl. TRADING_MODE, symbols, scalp params
+│   ├── mt5/
+│   │   ├── broker_adapter.py    # ← Single execution boundary (real orders, sizing, algo guard)
+│   │   ├── connector.py         # MT5 connection
+│   │   ├── data.py              # Live rates / prices / symbol info
+│   │   ├── account.py           # Account, positions, deal history
+│   │   └── orders.py            # Low-level order_send helpers
+│   ├── trading/
+│   │   └── scalp_engine.py      # ← The real trading loop + outcome reconciliation
+│   ├── strategies/              # Indicator math + XAUUSD strategy
+│   ├── learning/                # Strategy registry, experience DB, vector store, knowledge base
+│   ├── data_sources/            # News / economic / central-bank sources (research)
+│   ├── agents/                  # LLM sub-agents (research, etc.)
+│   └── orchestration/           # Research scheduler/orchestrator (best-effort)
+└── data/                        # SQLite DBs, ChromaDB, bot_status.json
+```
+
+## Key docs
+
+- `REPAIR_PLAN.md` — full phased plan (what's done, what's next).
+- `LEARNING_ARCHITECTURE.md` — how learning works vs Hermes/TradingAgents + plan to improve accuracy.
+- `PHASE_1_BROKER_ADAPTER_DESIGN.md` — execution-layer design.
+- `BACKTEST_STRATEGY.md` — planned no-look-ahead backtest (future phase).
+- `SESSION_LOG.md` — build log.

@@ -93,3 +93,66 @@
 
 ## Session End
 **Status:** MT5 connected, dependencies installed, end-to-end test pending.
+
+---
+
+## Session 2 — Real Execution, Learning Loop & New Dashboard
+**Date:** 2026-07-30
+
+### Full-codebase review (Opus 4.8)
+Found the system was a sophisticated **analysis engine disconnected at 3 seams**:
+1. Execution was fake — an LLM narrated trades; the real `place_order` was orphaned.
+2. Learning loop never closed — a `NameError` killed position tracking; outcomes were synthetic.
+3. Sentiment/research pipeline was orphaned and un-importable.
+Plus critical safety gaps (wrong gold lot math, no algo/kill/spread checks, no symbol-suffix handling).
+See `REPAIR_PLAN.md`.
+
+### Phase 0 — Stabilize (done)
+- Fixed dead `EconomicCalendarSourceMock`/`CentralBankSourceMock` imports (app now boots).
+- Fixed `main.py` `trade_result` NameError; connector double-`@property` + unreachable code.
+- Added `TRADING_MODE` (OBSERVE|PAPER|LIVE_MICRO|LIVE), default OBSERVE.
+- `NewsAggregatorSource` degrades gracefully (no boot crash without NEWSAPI_KEY).
+- Reordered `app.py` so dashboard starts first; research is non-fatal.
+
+### Diagnosis of "why it never traded" (verified with live MT5)
+- The tradable gold symbol is **`XAUUSD-ECN`** (`trade_mode=4`, order_check "Done").
+- `XAUUSD.crp` is **trade-disabled** (`trade_mode=0`, retcode 10017) — must be skipped.
+- `BTCUSD` is tradable (viable for crypto phase).
+- **Algo Trading** flag is readable via `terminal_info().trade_allowed` (green/red button).
+
+### Phase 1 — Real execution (done)
+- Built `src/mt5/broker_adapter.py`: resolves tradable symbol, correct `tick_value`-based
+  sizing, Algo-Trading guard, real `order_send`, mode-gated.
+- **Placed & closed a REAL demo order**: BUY XAUUSD-ECN 0.01 @ 4088.13, ticket 551306623, retcode 10009.
+
+### Phase 2 (partial) — Real learning loop (done)
+- Built `src/trading/scalp_engine.py`: multi-symbol loop (XAUUSD, BTCUSD), 0.01-lot scalping,
+  adaptive SL/TP per symbol spread, tracks positions by real ticket, and **reconciles closed
+  trades against real MT5 deal history** → writes true win/loss to experience DB + vector store.
+- Adopts pre-existing open positions on restart (no orphans).
+- Fixed `get_rates` native bug (`numpy.void` field access).
+- Writes `data/bot_status.json` for the dashboard.
+- Verified: real trades on XAUUSD-ECN and BTCUSD flow into the experience DB with outcomes.
+
+### New dashboard (done)
+- **Deleted** old dashboard code: `dashboard_clean.py`, `dashboard_fixed.py`, and 4 stale
+  dashboard docs. Rewrote `dashboard/app.py` from scratch.
+- Real-data endpoints: `/api/status` (account + Algo light + engine), `/api/trades/history`
+  (live MT5 deals), `/api/trades/bot`, `/api/strategies` (+ best per symbol), `/api/learning`
+  (progress to 100), `/api/research`, `/api/readiness`. Auto-refresh ~4s.
+
+### Cleanup
+- Removed 50 stale docs/scripts (old completion reports, fix guides, `run_bot.py`,
+  `run_system.py`, `monitor.py`, `mt5_proof.py`, `diagnostics.py`, `check_*.py`, etc.).
+- Unified `app.py` now starts dashboard + engine in one process.
+- Rewrote `README.md` to describe the actual current system.
+
+### How to run
+```
+python app.py LIVE_MICRO     # real 0.01-lot demo trading + dashboard at :5000
+```
+
+### Next (see REPAIR_PLAN.md)
+- Phase 3: RiskManager (daily-loss halt, max positions, spread ceiling, kill switch).
+- Phase 4: wire research/sentiment into decisions.
+- Phase 5: no-look-ahead backtest + readiness gate before any real capital.

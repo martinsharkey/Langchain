@@ -5,6 +5,7 @@ Logging configuration with Rich console output.
 import os
 import sys
 import logging
+from logging.handlers import RotatingFileHandler
 from datetime import datetime
 from rich.console import Console
 from rich.logging import RichHandler
@@ -46,17 +47,22 @@ def setup_logger(name: str = "trading_bot") -> logging.Logger:
     # Create logger
     logger = logging.getLogger(name)
     logger.setLevel(logging.DEBUG)
+    # Stop child loggers (e.g. "mt5.data") re-emitting through a configured
+    # parent ("mt5") — that was causing every mt5.* line to be logged twice.
+    logger.propagate = False
 
     # Avoid duplicate handlers
     if logger.handlers:
         return logger
 
-    # File handler (detailed, all levels)
+    # File handler (detailed, all levels) — rotating to bound disk growth.
     log_file = os.path.join(
         LOGS_DIR,
         f"trading_bot_{datetime.now().strftime('%Y%m%d')}.log"
     )
-    file_handler = logging.FileHandler(log_file)
+    file_handler = RotatingFileHandler(
+        log_file, maxBytes=10 * 1024 * 1024, backupCount=5, encoding="utf-8"
+    )
     file_handler.setLevel(logging.DEBUG)
     file_formatter = logging.Formatter(
         "%(asctime)s | %(levelname)-8s | %(name)s | %(message)s",

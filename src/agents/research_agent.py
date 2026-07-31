@@ -17,7 +17,7 @@ You can:
 
 ## CRITICAL RULES — DATA SOURCE
 - **ALL market data is provided to you in the task prompt below.** Do NOT read CSV files or any other files for market data.
-- The data comes from the bot's MT5 integration layer (live or simulated at current market prices ~$4,038).
+- The data comes from the bot's MT5 integration layer (live market data from the connected account).
 - Use Python REPL to analyze the OHLCV data provided in the task.
 - Do NOT use the read_file tool to look for market data — it will give you stale historical data.
 - If you need additional data (e.g. different timeframe), ask for it in your analysis — do not read files.

@@ -239,6 +239,7 @@ def get_llm(
             model=model,
             temperature=temperature,
             max_tokens=max_tokens,
+            model_kwargs={"litellm_settings": {"modify_params": True}},
         )
 
     if provider_override:
@@ -274,6 +275,7 @@ def get_llm(
             "model": model_name,
             "temperature": temperature,
             "max_tokens": max_tokens,
+            "model_kwargs": {"litellm_settings": {"modify_params": True}},
         }
         if api_key:
             kwargs["api_key"] = api_key
@@ -292,6 +294,7 @@ def get_llm(
         "model": model_name,
         "temperature": temperature,
         "max_tokens": max_tokens,
+        "model_kwargs": {"litellm_settings": {"modify_params": True}},
     }
     if api_key:
         kwargs["api_key"] = api_key
