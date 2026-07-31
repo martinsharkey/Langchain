@@ -363,11 +363,13 @@ def compute_full_indicators(data: list[dict], params: Optional[dict] = None) -> 
     stoch_k_s, stoch_d_s = stochastic(df, 14, 3)
     adx_s = adx(df, 14)
     willr_s = williams_r(df, 14)
-    cci_s = cci(df, 20)
+    cci_s = cci(df, p.get("cci_period", 20))
     obv_s = obv(df)
-    bulls_s = bulls_power(df, 13)
-    bears_s = bears_power(df, 13)
-    osma_s = osma(close, 12, 26, 9)
+    bulls_s = bulls_power(df, p.get("power_period", 13))
+    bears_s = bears_power(df, p.get("power_period", 13))
+    osma_s = osma(close, p.get("osma_fast", p.get("macd_fast", 12)),
+                  p.get("osma_slow", p.get("macd_slow", 26)),
+                  p.get("osma_signal", p.get("macd_signal", 9)))
     support, resistance = support_resistance_levels(df)
 
     c = _last(close, 0.0)
@@ -458,11 +460,13 @@ def compute_indicator_series(data: list[dict], params: Optional[dict] = None):
     stoch_k_s, stoch_d_s = stochastic(df, 14, 3)
     adx_s = adx(df, 14)
     willr_s = williams_r(df, 14)
-    cci_s = cci(df, 20)
+    cci_s = cci(df, p.get("cci_period", 20))
     obv_s = obv(df)
-    bulls_s = bulls_power(df, 13)
-    bears_s = bears_power(df, 13)
-    osma_s = osma(close, 12, 26, 9)
+    bulls_s = bulls_power(df, p.get("power_period", 13))
+    bears_s = bears_power(df, p.get("power_period", 13))
+    osma_s = osma(close, p.get("osma_fast", p.get("macd_fast", 12)),
+                  p.get("osma_slow", p.get("macd_slow", 26)),
+                  p.get("osma_signal", p.get("macd_signal", 9)))
 
     pc5 = close.pct_change(5)
     pc10 = close.pct_change(10)

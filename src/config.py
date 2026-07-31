@@ -210,6 +210,13 @@ PENDING_STALE_HOURS = float(os.getenv("PENDING_STALE_HOURS", "48"))
 ADAPTIVE_EVERY_CYCLES = int(os.getenv("ADAPTIVE_EVERY_CYCLES", "240"))  # ~1h at 15s cycles
 ADAPTIVE_MIN_SAMPLE = int(os.getenv("ADAPTIVE_MIN_SAMPLE", "10"))
 
+# ─── Autonomous parameter optimizer (self-learning) ──
+# The bot mutates indicator params (EMA/OsMA/RSI/CCI periods, SL/RR) per symbol,
+# backtests each walk-forward, and keeps only validated improvements. Runs on the
+# adaptive cadence. Iterations kept modest so it never blocks trading for long.
+OPTIMIZER_ENABLED = os.getenv("OPTIMIZER_ENABLED", "true").lower() in ("true", "1", "yes")
+OPTIMIZER_ITERATIONS = int(os.getenv("OPTIMIZER_ITERATIONS", "8"))
+
 # ─── Researcher -> action feedback ──────────────────────────
 # Pause new entries on a symbol the PerformanceResearcher flags as bleeding.
 SYMBOL_PAUSE_MIN_TRADES = int(os.getenv("SYMBOL_PAUSE_MIN_TRADES", "12"))

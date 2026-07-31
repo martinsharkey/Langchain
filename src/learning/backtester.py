@@ -50,6 +50,92 @@ class Backtester:
     def __init__(self, registry):
         self.registry = registry
 
+    def walkforward_focused(self, symbol, params, sl_atr=1.0, tp_rr=2.0,
+                            giveback=0.55, arm=0.5, timeframe="M15",
+                            bars=12000, windows=3, warmup=210):
+        """
+        Walk-forward backtest of the symbol's FOCUSED pockets with a GIVEN
+        indicator param set + realistic manager exits (giveback of peak).
+        Recomputes indicators with `params` so tuning EMA/OsMA/RSI actually
+        changes signals. Returns generalization metrics for the optimizer:
+          {pfs, wrs, n_total, generalizes, score}  (score = min PF across windows)
+        """
+        from src.strategies.indicators import compute_indicator_series
+        from src.learning.edge_weights import focused_rules
+        rates = get_rates(symbol, timeframe=timeframe, count=bars)
+        if not rates or len(rates) < 2000:
+            return None
+        series = compute_indicator_series(rates, params)  # params drive indicators
+        rules = focused_rules(symbol) or []
+        if not rules:
+            return None
+        fns = {nm: (self.registry.get(nm).signal_fn, {**self.registry.get(nm).params, **(params or {})})
+               for nm, _ in rules if self.registry.get(nm)}
+        n = len(rates); seg = (n - warmup) // windows
+
+        def _sim(lo, hi):
+            w = l = 0; gw = gl = 0.0; ot = None
+            for i in range(lo, hi):
+                ind = series[i]
+                if not ind or not ind.get("close"):
+                    continue
+                price = ind["close"]; atr = ind.get("atr") or 0
+                if atr <= 0:
+                    continue
+                if ot:
+                    hib, lob = rates[i]["high"], rates[i]["low"]; r = None
+                    if ot["dir"] == "buy":
+                        ot["peak"] = max(ot["peak"], hib); fav = ot["peak"] - ot["entry"]
+                        if lob <= ot["sl"]: r = -1.0
+                        elif hib >= ot["tp"]: r = ot["rr"]
+                        elif fav >= ot["arm"] and (ot["peak"] - price) >= giveback * fav:
+                            r = (price - ot["entry"]) / ot["risk"]
+                    else:
+                        ot["peak"] = min(ot["peak"], lob); fav = ot["entry"] - ot["peak"]
+                        if hib >= ot["sl"]: r = -1.0
+                        elif lob <= ot["tp"]: r = ot["rr"]
+                        elif fav >= ot["arm"] and (price - ot["peak"]) >= giveback * fav:
+                            r = (ot["entry"] - price) / ot["risk"]
+                    if r is not None:
+                        if r > 0: w += 1; gw += r
+                        else: l += 1; gl += abs(r)
+                        ot = None
+                if ot:
+                    continue
+                regime = self.registry._detect_market_regime(ind)
+                action = None
+                for nm, regs in rules:
+                    if nm not in fns or regime not in regs:
+                        continue
+                    try:
+                        s = fns[nm][0](ind, fns[nm][1])
+                    except Exception:
+                        continue
+                    if s.action in ("buy", "sell"):
+                        action = s.action; break
+                if not action:
+                    continue
+                risk = sl_atr * atr; tpd = tp_rr * risk
+                sl = price - risk if action == "buy" else price + risk
+                tp = price + tpd if action == "buy" else price - tpd
+                ot = {"dir": action, "entry": price, "sl": sl, "tp": tp, "risk": risk,
+                      "rr": tp_rr, "peak": price, "arm": arm * atr}
+            tot = w + l
+            pf = round(gw / gl, 2) if gl > 0 else (gw if gw else 0.0)
+            return tot, (round(w / tot * 100, 1) if tot else 0), pf, round(gw - gl, 1)
+
+        pfs = []; wrs = []; n_total = 0
+        for k in range(windows):
+            lo = warmup + k * seg; hi = warmup + (k + 1) * seg if k < windows - 1 else n
+            tot, wr, pf, R = _sim(lo, hi)
+            if tot < 15:      # too few trades in a window -> unreliable
+                return {"pfs": pfs, "wrs": wrs, "n_total": n_total,
+                        "generalizes": False, "score": -1.0}
+            pfs.append(pf); wrs.append(wr); n_total += tot
+        generalizes = all(p >= 1.0 for p in pfs)
+        return {"pfs": pfs, "wrs": wrs, "n_total": n_total,
+                "generalizes": generalizes, "score": min(pfs) if pfs else -1.0}
+
     def _load_history(self, symbol: str, timeframe: str, bars: int) -> list[dict]:
         # MT5 copy_rates_from_pos caps around ~ tens of thousands; request in one call.
         rates = get_rates(symbol, timeframe=timeframe, count=bars)
