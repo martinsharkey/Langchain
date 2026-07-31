@@ -194,6 +194,26 @@ def is_live_mode() -> bool:
     return TRADING_MODE in ("LIVE_MICRO", "LIVE")
 
 
+# ─── Learning safety (#27/#23/#25) ──────────────────────────
+# The self-learning loop was shown to be net-HARMFUL on the accumulated sample
+# (it degraded XAUUSD from +0.117 to -0.669 expectancy). These flags make
+# "always learning" SAFE: adaptation can be frozen, and changes that harm live
+# realised expectancy can be reverted to a best-known checkpoint.
+#
+# LEARNING_ADAPTATION_ENABLED=false freezes the harmful online mutations
+# (strategy weight updates, personality/giveback reclassification, adaptive
+# strategy synthesis/optimizer) while STILL trading, reconciling real outcomes,
+# and recording data. i.e. the bot keeps learning DATA but stops auto-tuning
+# itself until the tuning is proven safe.
+LEARNING_ADAPTATION_ENABLED = os.getenv("LEARNING_ADAPTATION_ENABLED", "true").lower() in ("true", "1", "yes")
+# Auto-revert: when a symbol's recent realised expectancy degrades vs its
+# best-known checkpoint by more than this (in expectancy units), restore the
+# checkpoint config and mark the change as a failed direction.
+LEARNING_AUTO_REVERT_ENABLED = os.getenv("LEARNING_AUTO_REVERT_ENABLED", "true").lower() in ("true", "1", "yes")
+# Minimum closed trades in the evaluation window before revert can trigger.
+LEARNING_REVERT_MIN_SAMPLE = int(os.getenv("LEARNING_REVERT_MIN_SAMPLE", "15"))
+
+
 # ─── Demo vs Live realism ───────────────────────────────────
 # Demo accounts fill with ~0 slippage and often tighter spread than a real live
 # account. To avoid over-fitting to unrealistically clean demo fills, backtests

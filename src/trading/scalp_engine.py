@@ -414,6 +414,15 @@ class ScalpEngine:
         self.running = True
         logger.info(f"ScalpEngine started | mode={config.TRADING_MODE} "
                     f"symbols={list(self.adapters)} target={config.SCALP_TARGET_TRADES}")
+        if not config.LEARNING_ADAPTATION_ENABLED:
+            logger.warning(
+                "LEARNING ADAPTATION FROZEN (LEARNING_ADAPTATION_ENABLED=false): the bot "
+                "will TRADE, reconcile real outcomes, and record data, but will NOT auto-mutate "
+                "strategy weights / giveback personality / variant bias / synthesize strategies. "
+                "Use this while proving the learning loop is net-positive (#27/#23)."
+            )
+        else:
+            logger.info("Learning adaptation ENABLED (online self-tuning active).")
         # SAFETY: if we are managing REAL open positions but are NOT in a live
         # mode, every manager exit/SL-modify will be SIMULATED (no real order).
         # A winner the manager decides to lock in will keep running on the
@@ -461,16 +470,19 @@ class ScalpEngine:
         # 2) adapt strategy weights from REAL closed-trade performance (L2)
         #    + refresh per-variant performance so the trade manager biases
         #    variant selection toward what actually works (visible learning).
+        #    GATED by LEARNING_ADAPTATION_ENABLED (#27): when adaptation is frozen
+        #    we still MEASURE performance (read caches) but do NOT mutate weights.
         if self.cycle % 5 == 1:
-            try:
-                perf = self.experience_db.get_strategy_performance()
-                if perf:
-                    self.registry.update_weights_from_performance(perf)
-                import datetime as _dt
-                self._last_weight_refresh = _dt.datetime.now().strftime("%H:%M:%S")
-            except Exception as e:
-                logger.warning(f"strategy weight update failed: {e}")
-                self._last_learning_error = f"weight update: {str(e)[:80]}"
+            if config.LEARNING_ADAPTATION_ENABLED:
+                try:
+                    perf = self.experience_db.get_strategy_performance()
+                    if perf:
+                        self.registry.update_weights_from_performance(perf)
+                    import datetime as _dt
+                    self._last_weight_refresh = _dt.datetime.now().strftime("%H:%M:%S")
+                except Exception as e:
+                    logger.warning(f"strategy weight update failed: {e}")
+                    self._last_learning_error = f"weight update: {str(e)[:80]}"
             try:
                 self._variant_perf_cache = self.experience_db.get_variant_performance()
             except Exception as e:
@@ -494,10 +506,13 @@ class ScalpEngine:
             except Exception as e:
                 logger.debug(f"symbol profitability refresh skip: {e}")
             # learn per-symbol personality (aggressive scalper vs trend rider)
-            try:
-                self._refresh_personalities()
-            except Exception as e:
-                logger.debug(f"personality refresh skip: {e}")
+            # GATED (#27): when adaptation is frozen, do NOT reclassify giveback
+            # per symbol (this was part of the doom loop that cut winners).
+            if config.LEARNING_ADAPTATION_ENABLED:
+                try:
+                    self._refresh_personalities()
+                except Exception as e:
+                    logger.debug(f"personality refresh skip: {e}")
             # learn per-direction win rate (directional-balance guard, #3)
             try:
                 self._refresh_directional_winrate()
@@ -519,7 +534,9 @@ class ScalpEngine:
         # 2c) Adaptive intelligence: reflect -> synthesize -> backtest -> promote.
         #     Runs in a BACKGROUND thread (LLM + backtest are slow) so it never
         #     blocks live trading. Cadence: periodically, once a sample exists.
-        if (self.adaptive is not None and not self._adaptive_running
+        #     GATED by LEARNING_ADAPTATION_ENABLED (#27): frozen -> no self-tuning.
+        if (config.LEARNING_ADAPTATION_ENABLED
+                and self.adaptive is not None and not self._adaptive_running
                 and self.cycle % config.ADAPTIVE_EVERY_CYCLES == 5):
             self._maybe_run_adaptive()
 
@@ -553,9 +570,15 @@ class ScalpEngine:
         Give the trade manager a weight per management variant, learned from real
         outcomes. Winners get more weight; unexplored variants keep a floor so the
         bot keeps exploring (explore/exploit).
+
+        GATED (#27): when adaptation is frozen, return UNIFORM weights so variant
+        selection is pure exploration and is not biased by the net-negative
+        historical variant performance.
         """
         from src.trading.trade_manager import VARIANTS
         weights = {v: 1.0 for v in VARIANTS}  # exploration floor
+        if not config.LEARNING_ADAPTATION_ENABLED:
+            return weights
         # variant perf may be keyed by resolved symbol; match by prefix
         for sym, vmap in (self._variant_perf_cache or {}).items():
             if not sym.upper().startswith(base_symbol.upper()):
@@ -996,6 +1019,8 @@ class ScalpEngine:
             "last_weight_refresh": self._last_weight_refresh,
             "last_learning_error": self._last_learning_error,
             "adaptive_running": self._adaptive_running,
+            "adaptation_enabled": config.LEARNING_ADAPTATION_ENABLED,
+            "auto_revert_enabled": config.LEARNING_AUTO_REVERT_ENABLED,
             "recent_expectancy": {},
         }
         try:
