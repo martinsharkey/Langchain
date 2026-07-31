@@ -105,6 +105,16 @@ TRADING_SYMBOLS = [
     ).split(",")
     if s.strip()
 ]
+# Symbols to DISABLE (skip for new entries) without editing the full list.
+# XAGUSD (silver) is disabled by default: realised data showed it was the
+# single biggest bleeder (net -45.4, avg loss ~5x avg win) — pause it until the
+# exit/giveback fix is proven, then re-enable by setting DISABLED_SYMBOLS="".
+DISABLED_SYMBOLS = [
+    s.strip().upper()
+    for s in os.getenv("DISABLED_SYMBOLS", "XAGUSD").split(",")
+    if s.strip()
+]
+TRADING_SYMBOLS = [s for s in TRADING_SYMBOLS if s not in DISABLED_SYMBOLS]
 
 # ─── Scalping Mode ──────────────────────────────────────────
 # When enabled, the bot trades small, frequent, tight trades to accumulate a
@@ -118,7 +128,11 @@ SCALP_SL_POINTS = int(os.getenv("SCALP_SL_POINTS", "300"))   # stop-loss floor (
 # were tuned TOGETHER because the manager's giveback and the TP interact.
 SCALP_SL_ATR_MULT = float(os.getenv("SCALP_SL_ATR_MULT", "1.0"))
 SCALP_TP_RR = float(os.getenv("SCALP_TP_RR", "2.0"))
-SCALP_GIVEBACK_FRAC = float(os.getenv("SCALP_GIVEBACK_FRAC", "0.55"))
+SCALP_GIVEBACK_FRAC = float(os.getenv("SCALP_GIVEBACK_FRAC", "0.6"))
+# Peak profit (as a multiple of entry-timeframe ATR) before the giveback guard
+# arms. Realised data showed arming at 0.5*ATR cut winners into scratches
+# (only 5 TP hits vs 198 early closes); 1.5*ATR lets trades reach TP.
+SCALP_GIVEBACK_ARM_ATR = float(os.getenv("SCALP_GIVEBACK_ARM_ATR", "1.5"))
 # FOCUSED mode: trade only validated high-edge (strategy x regime) pockets
 # instead of the broad ensemble vote. Backtest: PF 1.24 vs 1.04.
 FOCUSED_MODE = os.getenv("FOCUSED_MODE", "true").lower() in ("true", "1", "yes")
@@ -139,6 +153,15 @@ MTF_COUNTERTREND_MIN_CONF = float(os.getenv("MTF_COUNTERTREND_MIN_CONF", "0.7"))
 # counter-trend (quality modifier instead of a hard block). A strong signal can
 # still clear SCALP_CONFIDENCE_MIN after the penalty; a weak one is filtered out.
 MTF_COUNTERTREND_PENALTY = float(os.getenv("MTF_COUNTERTREND_PENALTY", "0.12"))
+# Directional-balance guard (#3): the bot showed a persistent LONG bias (buy
+# trades ~4x sell volume and far more loss). When enabled, if a symbol's recent
+# realised win rate for the PROPOSED direction is materially worse than the
+# other direction, trim that direction's confidence so weak trades on the
+# losing side are filtered. Symmetric (works for long OR short skew), evidence-
+# driven, and only engages once there is a real per-direction sample.
+DIRECTIONAL_BALANCE_ENABLED = os.getenv("DIRECTIONAL_BALANCE_ENABLED", "true").lower() in ("true", "1", "yes")
+DIRECTIONAL_BALANCE_MIN_SAMPLE = int(os.getenv("DIRECTIONAL_BALANCE_MIN_SAMPLE", "10"))
+DIRECTIONAL_BALANCE_PENALTY = float(os.getenv("DIRECTIONAL_BALANCE_PENALTY", "0.1"))
 # When an open trade is offside but HTF still aligns (a 'blip'), widen the stop
 # by this many ATR (once) so it survives the wick instead of getting stopped out.
 HTF_WICK_WIDEN_ATR = float(os.getenv("HTF_WICK_WIDEN_ATR", "1.5"))

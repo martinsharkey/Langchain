@@ -100,26 +100,42 @@ class TradeManager:
         """
         p = self._personality(st)
         if "giveback_frac" in p:
-            return float(p["giveback_frac"])
+            # never let a learned personality cut winners on tiny pullbacks:
+            # realised data showed the manager was giving back winners into
+            # small losers (only 5 TP hits vs 198 early closes). Floor the
+            # learned value so "let winners run" is the bias, not "scratch fast".
+            return max(float(p["giveback_frac"]), 0.5)
         style = p.get("style")
         if style == "aggressive_scalper":
-            return 0.45
+            return 0.55
         if style == "trend_rider":
-            return 0.7
+            return 0.75
         # neutral default: backtest-tuned (loosening giveback from 0.45 lifted PF)
         try:
             from src import config
             return config.SCALP_GIVEBACK_FRAC
         except Exception:
-            return 0.55
+            return 0.6
 
     def giveback_arm_points(self, st) -> float:
-        """Minimum peak profit (points) before the giveback guard activates."""
+        """
+        Minimum peak profit (points) before the giveback guard activates.
+
+        Realised data showed the guard was arming at just 0.5*ATR of profit and
+        firing ~198 times, cutting would-be TP runners into tiny scratches
+        (placed RR ~2.0 but realised payoff ~0.7). Arm it MUCH later so it only
+        protects genuinely large winners and lets normal trades reach TP.
+        """
         p = self._personality(st)
         if "giveback_arm_points" in p:
             return float(p["giveback_arm_points"])
-        # default: half the typical move on the entry timeframe
-        return (st.atr_points or 60) * 0.5
+        try:
+            from src import config
+            mult = config.SCALP_GIVEBACK_ARM_ATR
+        except Exception:
+            mult = 1.5
+        # default: ~1.5x the typical move on the entry timeframe (was 0.5x)
+        return (st.atr_points or 60) * mult
 
     # ── variant assignment (learning biases this over time) ──
     def assign_variant(self, symbol: str) -> str:
@@ -189,6 +205,15 @@ class TradeManager:
             # ride mode: if aligned with the higher-TF trend, tolerate more giveback
             if st.trend_aligned:
                 giveback_frac = min(giveback_frac + 0.2, 0.9)
+            # TP-awareness: if the trade is still on its way to a much larger TP
+            # and hasn't yet reached most of that target, don't scratch it on a
+            # normal pullback — let the pre-set RR play out. Only the giveback
+            # guard (not the broker TP) was cutting winners early.
+            if st.tp and point:
+                tp_points = abs(st.tp - st.entry) / point
+                if tp_points > 0 and st.peak_profit_points < 0.6 * tp_points:
+                    # peak is still well short of TP — require a BIG giveback to cut
+                    giveback_frac = max(giveback_frac, 0.8)
             given_back = (st.peak_profit_points - profit_points) / st.peak_profit_points
             if given_back >= giveback_frac:
                 self._log(st, "giveback_exit", price)

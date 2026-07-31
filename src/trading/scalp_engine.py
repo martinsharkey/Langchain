@@ -414,6 +414,18 @@ class ScalpEngine:
         self.running = True
         logger.info(f"ScalpEngine started | mode={config.TRADING_MODE} "
                     f"symbols={list(self.adapters)} target={config.SCALP_TARGET_TRADES}")
+        # SAFETY: if we are managing REAL open positions but are NOT in a live
+        # mode, every manager exit/SL-modify will be SIMULATED (no real order).
+        # A winner the manager decides to lock in will keep running on the
+        # broker. Make this impossible to miss.
+        if self.open_positions and not config.is_live_mode():
+            logger.warning(
+                f"*** {len(self.open_positions)} REAL open position(s) are being "
+                f"managed in mode={config.TRADING_MODE} — manager exits and SL "
+                f"changes will be SIMULATED ONLY (no real orders). Winners the "
+                f"bot decides to close will NOT actually close. Restart with "
+                f"LIVE_MICRO to manage them for real. ***"
+            )
         try:
             while self.running:
                 self.cycle += 1
@@ -486,6 +498,11 @@ class ScalpEngine:
                 self._refresh_personalities()
             except Exception as e:
                 logger.debug(f"personality refresh skip: {e}")
+            # learn per-direction win rate (directional-balance guard, #3)
+            try:
+                self._refresh_directional_winrate()
+            except Exception as e:
+                logger.debug(f"directional winrate refresh skip: {e}")
             # proactive self-performance research (what's working?)
             if self.perf_researcher is not None:
                 try:
@@ -647,6 +664,72 @@ class ScalpEngine:
                 return p
         return {}
 
+    def _directional_winrate(self, base_symbol: str) -> dict:
+        """
+        Recent realised win rate per direction for a symbol, e.g.
+        {'buy': {'n': 40, 'wr': 33.0}, 'sell': {'n': 12, 'wr': 43.0}}.
+        Cached; refreshed with the profitability cache. Used by the directional-
+        balance guard (#3) to trim the side that is empirically losing.
+        """
+        return (getattr(self, "_dir_winrate_cache", {}) or {}).get(base_symbol.upper(), {})
+
+    def _directional_penalty(self, base_symbol: str, action: str) -> float:
+        """
+        Confidence penalty for the PROPOSED direction when it is empirically the
+        weaker side for this symbol. Symmetric: penalises long OR short skew.
+        Returns 0.0 until both directions have a real sample.
+        """
+        if not config.DIRECTIONAL_BALANCE_ENABLED:
+            return 0.0
+        dw = self._directional_winrate(base_symbol)
+        this = dw.get(action)
+        other = dw.get("sell" if action == "buy" else "buy")
+        if not this or not other:
+            return 0.0
+        min_n = config.DIRECTIONAL_BALANCE_MIN_SAMPLE
+        if this.get("n", 0) < min_n or other.get("n", 0) < min_n:
+            return 0.0
+        # only penalise the proposed side if it is clearly worse than the other
+        if this["wr"] + 8.0 < other["wr"]:
+            return config.DIRECTIONAL_BALANCE_PENALTY
+        return 0.0
+
+    def _refresh_directional_winrate(self):
+        """Compute recent per-direction win rate per symbol (called on a cadence)."""
+        import sqlite3
+        try:
+            conn = sqlite3.connect(self.experience_db.db_path)
+            conn.row_factory = sqlite3.Row
+            rows = conn.execute(
+                "SELECT symbol, action, outcome FROM trades "
+                "WHERE outcome IN ('win','loss') ORDER BY id DESC LIMIT 400"
+            ).fetchall()
+            conn.close()
+        except Exception as e:
+            logger.debug(f"directional winrate refresh skip: {e}")
+            return
+        from collections import defaultdict
+        agg = defaultdict(lambda: defaultdict(lambda: {"n": 0, "w": 0}))
+        for r in rows:
+            base = None
+            for b in self.adapters:
+                if (r["symbol"] or "").upper().startswith(b.upper()):
+                    base = b.upper()
+                    break
+            if not base or r["action"] not in ("buy", "sell"):
+                continue
+            d = agg[base][r["action"]]
+            d["n"] += 1
+            d["w"] += 1 if r["outcome"] == "win" else 0
+        out = {}
+        for base, dirs in agg.items():
+            out[base] = {
+                a: {"n": v["n"], "wr": round(v["w"] / v["n"] * 100, 1) if v["n"] else 0.0}
+                for a, v in dirs.items()
+            }
+        if out:
+            self._dir_winrate_cache = out
+
     def _refresh_personalities(self):
         """Compute per-symbol personality from closed trades (called on a cadence)."""
         import sqlite3, statistics
@@ -676,12 +759,17 @@ class ScalpEngine:
             avg_loss = abs(statistics.mean([t["profit_loss"] for t in losses])) if losses else 0
             # if wins are bigger than losses -> letting winners run pays (trend_rider)
             # if wins are small & frequent -> scalp fast (aggressive_scalper)
+            # NOTE: avg_win <= avg_loss is often a SYMPTOM of cutting winners too
+            # early, not evidence that fast scalping works. So we no longer drop
+            # giveback to a tiny value on that condition (that created a doom loop
+            # where over-cutting -> small wins -> even more cutting). Floors keep
+            # the bias toward letting winners run.
             if avg_win > avg_loss * 1.3 and wr >= 0.4:
-                out[sym] = {"style": "trend_rider", "giveback_frac": 0.6}
-            elif wr >= 0.5 and avg_win <= avg_loss:
-                out[sym] = {"style": "aggressive_scalper", "giveback_frac": 0.3}
+                out[sym] = {"style": "trend_rider", "giveback_frac": 0.75}
+            elif wr >= 0.55 and avg_win <= avg_loss:
+                out[sym] = {"style": "aggressive_scalper", "giveback_frac": 0.55}
             else:
-                out[sym] = {"style": "neutral", "giveback_frac": 0.45}
+                out[sym] = {"style": "neutral", "giveback_frac": 0.6}
         if out:
             self._symbol_personality_cache = out
             logger.info(f"Symbol personalities: { {k: v['style'] for k, v in out.items()} }")
@@ -731,7 +819,17 @@ class ScalpEngine:
                         adapter.modify_sl(ticket, pc["modify_sl"])
                     elif "close" in pc:
                         res = adapter.close(ticket)
-                        logger.info(f"Pre-close managed {ticket}: {pc['close']} ({res.reason})")
+                        if res.ok and not res.simulated:
+                            logger.info(f"Pre-close CLOSED {ticket}: {pc['close']} ({res.reason})")
+                            self.managed.pop(ticket, None)
+                        elif res.simulated or adapter.mode in ("OBSERVE", "PAPER"):
+                            logger.warning(
+                                f"Pre-close wanted to close {ticket} ({pc['close']}) but "
+                                f"mode={adapter.mode} — SIMULATED, no real order. Trade left running."
+                            )
+                        else:
+                            logger.warning(f"Pre-close close of {ticket} FAILED ({res.reason}); "
+                                           f"keeping tracked")
                     continue  # pre-close decision takes precedence this cycle
 
             # ── HTF-aware wick survival vs reversal (the trader's key ask) ──
@@ -752,10 +850,21 @@ class ScalpEngine:
                         verdict = "neutral"
                     if verdict == "reversal":
                         res = adapter.close(ticket)
-                        logger.info(f"HTF REVERSAL exit {ticket} ({pos.base_symbol}): "
-                                    f"HTF momentum flipped against {pos.action} ({res.reason})")
-                        self.managed.pop(ticket, None)
-                        continue
+                        if res.ok and not res.simulated:
+                            logger.info(f"HTF REVERSAL exit {ticket} ({pos.base_symbol}): "
+                                        f"HTF momentum flipped against {pos.action} ({res.reason})")
+                            self.managed.pop(ticket, None)
+                            continue
+                        elif res.simulated or adapter.mode in ("OBSERVE", "PAPER"):
+                            logger.warning(
+                                f"HTF REVERSAL wanted to exit {ticket} but mode={adapter.mode} "
+                                f"— SIMULATED, no real order. Trade left running."
+                            )
+                            continue
+                        else:
+                            logger.warning(f"HTF REVERSAL close of {ticket} FAILED ({res.reason}); "
+                                           f"keeping tracked")
+                            continue
                     if verdict == "blip" and not getattr(st, "htf_widened", False):
                         # widen the broker stop to survive the wick, ONCE, capped
                         widen = max(st.atr_points * config.HTF_WICK_WIDEN_ATR, spread_pts * 3) * adapter.spec.point
@@ -773,7 +882,20 @@ class ScalpEngine:
                     adapter.modify_sl(ticket, intent["modify_sl"])
                 elif "close" in intent:
                     res = adapter.close(ticket)
-                    logger.info(f"Manager closed {ticket}: {intent['close']} ({res.reason})")
+                    if res.ok and not res.simulated:
+                        logger.info(f"Manager CLOSED {ticket}: {intent['close']} ({res.reason})")
+                        # real close confirmed — stop managing; reconcile will
+                        # record the true outcome from the deal history.
+                        self.managed.pop(ticket, None)
+                    elif res.simulated or self.adapters[pos.base_symbol].mode in ("OBSERVE", "PAPER"):
+                        logger.warning(
+                            f"Manager wanted to close {ticket} ({intent['close']}) but "
+                            f"mode={adapter.mode} — SIMULATED, no real order sent. "
+                            f"Trade left running. Restart in LIVE_MICRO to close for real."
+                        )
+                    else:
+                        logger.warning(f"Manager close of {ticket} FAILED ({res.reason}); "
+                                       f"keeping trade tracked, will retry next cycle")
                 continue
 
             # ── HYBRID_LLM: throttled LLM review (what makes this arm distinct) ──
@@ -830,7 +952,14 @@ class ScalpEngine:
         if decision == "EXIT" and profit_pts > spread_pts:
             # only act on EXIT when not crystallising a spread-sized loss
             res = adapter.close(st.ticket)
-            logger.info(f"[HYBRID_LLM] #{st.ticket}: LLM EXIT ({res.reason})")
+            if res.ok and not res.simulated:
+                logger.info(f"[HYBRID_LLM] #{st.ticket}: LLM EXIT ({res.reason})")
+                self.managed.pop(st.ticket, None)
+            elif res.simulated or adapter.mode in ("OBSERVE", "PAPER"):
+                logger.warning(f"[HYBRID_LLM] #{st.ticket}: LLM EXIT wanted but mode="
+                               f"{adapter.mode} — SIMULATED, no real order")
+            else:
+                logger.warning(f"[HYBRID_LLM] #{st.ticket}: LLM EXIT close FAILED ({res.reason})")
         elif decision == "TIGHTEN" and profit_pts > (spread_pts + 20):
             tighten = max((st.atr_points or 60) * 0.3, spread_pts + 10) * adapter.spec.point
             new_sl = (price - tighten) if st.action == "buy" else (price + tighten)
@@ -1090,6 +1219,18 @@ class ScalpEngine:
                 signal.confidence = max(0.0, signal.confidence - penalty)
                 logger.info(f"{base}: counter-trend {signal.action} penalised "
                             f"{before:.2f}->{signal.confidence:.2f} ({detail})")
+
+        # ── Directional-balance guard (#3): trim the empirically weaker side ──
+        # The bot showed a persistent long bias (buy ~4x sell volume, far worse
+        # P&L). If this symbol's recent win rate for the PROPOSED direction is
+        # clearly worse than the other side, trim confidence so weak trades on
+        # the losing side fall below the entry bar. Symmetric + evidence-driven.
+        dir_pen = self._directional_penalty(base, signal.action)
+        if dir_pen > 0:
+            before = signal.confidence
+            signal.confidence = max(0.0, signal.confidence - dir_pen)
+            logger.info(f"{base}: directional-balance penalty on {signal.action} "
+                        f"{before:.2f}->{signal.confidence:.2f} (weaker side by win rate)")
 
         # HTF context (M5/M15/M30/H1) — applies to EVERY symbol incl. gold. Strong
         # multi-timeframe agreement boosts confidence; disagreement trims it. Stored
@@ -1357,4 +1498,24 @@ def run_scalp_engine(max_cycles: Optional[int] = None):
 
 
 if __name__ == "__main__":
+    # Allow the trading mode to be set as the first CLI arg, mirroring app.py:
+    #     python -m src.trading.scalp_engine LIVE_MICRO
+    # This MUST run before `src.config` is imported anywhere in this process,
+    # otherwise config.TRADING_MODE is already frozen at its .env/default value.
+    # Because this module imports `from src import config` at the top, config is
+    # already loaded here; so we set the env AND reload the resolved mode.
+    import sys as _sys
+    _valid = ("OBSERVE", "PAPER", "LIVE_MICRO", "LIVE")
+    if len(_sys.argv) > 1 and _sys.argv[1].upper() in _valid:
+        os.environ["TRADING_MODE"] = _sys.argv[1].upper()
+        # config was imported at module load; re-resolve the mode from the env
+        # so a direct `-m` launch is not silently stuck in OBSERVE.
+        config.TRADING_MODE = _sys.argv[1].upper()
+    else:
+        logger.warning(
+            "No trading mode argument given to scalp_engine. Running in "
+            f"mode={config.TRADING_MODE!r} (from .env/default). If you intend to "
+            "place/close REAL demo orders, launch with: "
+            "python -m src.trading.scalp_engine LIVE_MICRO"
+        )
     run_scalp_engine()
