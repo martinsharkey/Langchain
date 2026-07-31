@@ -1,0 +1,9 @@
+# NEVER commit CryptoRTI secrets
+certs/*.pem
+certs/*.key
+*.pem
+*.key
+
+# AWS credentials must never be committed
+.env.cryptorti
+aws_credentials*
