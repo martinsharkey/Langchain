@@ -232,13 +232,24 @@ def api_research():
     newsapi = bool(os.getenv("NEWSAPI_KEY"))
     rss_items = []
     rss_ok = False
-    try:
-        from src.data_sources.rss_news import RSSNewsSource
-        rss = RSSNewsSource()
-        rss_items = rss.fetch()[:15]
+    # Cache RSS with a TTL so an auto-refreshing dashboard tab does NOT hammer the
+    # live feeds (and flood the logs) on every ~4s poll. Refetch at most every 5 min.
+    import time as _t
+    global _RSS_CACHE
+    now = _t.time()
+    cached = globals().get("_RSS_CACHE")
+    if cached and (now - cached["ts"] < 300):
+        rss_items = cached["items"]
         rss_ok = bool(rss_items)
-    except Exception as e:
-        logger.debug(f"rss news skip: {e}")
+    else:
+        try:
+            from src.data_sources.rss_news import RSSNewsSource
+            rss = RSSNewsSource()
+            rss_items = rss.fetch()[:15]
+            rss_ok = bool(rss_items)
+            globals()["_RSS_CACHE"] = {"ts": now, "items": rss_items}
+        except Exception as e:
+            logger.debug(f"rss news skip: {e}")
 
     if rss_ok or newsapi:
         news_status = "available (live headlines)"

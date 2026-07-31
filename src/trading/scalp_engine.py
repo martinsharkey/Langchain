@@ -660,9 +660,18 @@ class ScalpEngine:
         if this symbol should be paused/failed. Judged on RECENT trades + per-
         strategy breakdown; healthy symbols (WR>=45%) are never blocked so we
         never freeze all trading. The governor persists a FAILURE REPORT on pause.
+
+        TRAINING/DEMO: when GOVERNOR_PAUSE_BLOCKS_ENTRIES is false, the pause is
+        ADVISORY ONLY — the governor still evaluates + records reports (visible in
+        status/dashboard) but does NOT hard-block new entries, so the bot keeps
+        trading + learning (and can validate a new strategy) on demo. On a live
+        account set it true to let the governor freeze bleeders.
         """
         if self.governor is None:
             return False
+        # NOTE: we still run the governor evaluation below (it records failure
+        # reports + snapshot for the dashboard). Whether a paused decision actually
+        # BLOCKS entries is gated at the end by GOVERNOR_PAUSE_BLOCKS_ENTRIES.
         try:
             import sqlite3
             from src.learning.symbol_governor import SymbolStats
@@ -692,7 +701,11 @@ class ScalpEngine:
                             win_rate=(wins / n * 100) if n else 0.0,
                             pnl=pnl, per_strategy=per_strat)
         decision = self.governor.evaluate(stats)
-        return decision.status in ("paused", "failed")
+        paused = decision.status in ("paused", "failed")
+        # TRAINING/DEMO: advisory only — do not block entries unless explicitly enabled.
+        if paused and not config.GOVERNOR_PAUSE_BLOCKS_ENTRIES:
+            return False
+        return paused
 
     def _symbol_personality_for(self, base_symbol: str) -> dict:
         """

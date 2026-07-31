@@ -273,6 +273,13 @@ SYMBOL_PAUSE_MIN_TRADES = int(os.getenv("SYMBOL_PAUSE_MIN_TRADES", "15"))
 SYMBOL_PAUSE_PNL = float(os.getenv("SYMBOL_PAUSE_PNL", "-15"))       # recent pnl <= this -> pause (bleeding)
 SYMBOL_PAUSE_WINRATE = float(os.getenv("SYMBOL_PAUSE_WINRATE", "25"))  # recent WR < this -> pause (catastrophic)
 SYMBOL_PAUSE_HEALTHY_WR = float(os.getenv("SYMBOL_PAUSE_HEALTHY_WR", "45"))  # never pause if WR >= this
+# TRAINING MODE: on a demo account we WANT the bot to keep trading + learning even
+# on symbols with poor recent history (that is how it gathers the sample to improve
+# and to validate a new strategy). When true, the SymbolGovernor pause is ADVISORY
+# only — it still records failure reports + de-prioritises, but does NOT hard-block
+# new entries. Set false on a live/real account to let the governor freeze bleeders.
+# (A dashboard toggle for this is deferred to a future roadmap feature.)
+GOVERNOR_PAUSE_BLOCKS_ENTRIES = os.getenv("GOVERNOR_PAUSE_BLOCKS_ENTRIES", "false").lower() in ("true", "1", "yes")
 # Persisted kill switch file — create/toggle from dashboard or by touching the file.
 KILL_SWITCH_FILE = os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data", "KILL_SWITCH"
