@@ -139,6 +139,9 @@ MTF_COUNTERTREND_MIN_CONF = float(os.getenv("MTF_COUNTERTREND_MIN_CONF", "0.7"))
 # counter-trend (quality modifier instead of a hard block). A strong signal can
 # still clear SCALP_CONFIDENCE_MIN after the penalty; a weak one is filtered out.
 MTF_COUNTERTREND_PENALTY = float(os.getenv("MTF_COUNTERTREND_PENALTY", "0.12"))
+# When an open trade is offside but HTF still aligns (a 'blip'), widen the stop
+# by this many ATR (once) so it survives the wick instead of getting stopped out.
+HTF_WICK_WIDEN_ATR = float(os.getenv("HTF_WICK_WIDEN_ATR", "1.5"))
 
 # ─── Trading Mode ───────────────────────────────────────────
 # Controls how far the bot is allowed to act on its decisions.

@@ -191,6 +191,21 @@ class ScalpEngine:
             logger.warning(f"pattern matcher unavailable: {e}")
             self.pattern_matcher = None
 
+        # HTF context — multi-timeframe alignment for ENTRY + trade MANAGEMENT.
+        # Every symbol (incl. gold) now "sees" M5/M15/M30/H1 to survive wicks when
+        # HTF still aligns, and to cut when HTF momentum genuinely reverses.
+        try:
+            from src.learning.htf_context import HTFContext
+            self.htf = HTFContext(get_rates)
+        except Exception as e:
+            logger.warning(f"HTFContext unavailable: {e}")
+            self.htf = None
+        # observability counters (learning-health, per Grok review)
+        self._rag_lookups = 0
+        self._rag_hits = 0
+        self._last_weight_refresh = None
+        self._last_learning_error = None
+
     # ── setup ─────────────────────────────────────────────────────────
     def initialize(self) -> bool:
         self.connector.initialize()
@@ -432,12 +447,16 @@ class ScalpEngine:
                 perf = self.experience_db.get_strategy_performance()
                 if perf:
                     self.registry.update_weights_from_performance(perf)
+                import datetime as _dt
+                self._last_weight_refresh = _dt.datetime.now().strftime("%H:%M:%S")
             except Exception as e:
                 logger.warning(f"strategy weight update failed: {e}")
+                self._last_learning_error = f"weight update: {str(e)[:80]}"
             try:
                 self._variant_perf_cache = self.experience_db.get_variant_performance()
             except Exception as e:
                 logger.warning(f"variant perf refresh failed: {e}")
+                self._last_learning_error = f"variant refresh: {str(e)[:80]}"
 
         # 2b) refresh per-symbol stats occasionally (cached; cheap otherwise)
         if self.cycle % 40 == 1:
@@ -708,6 +727,39 @@ class ScalpEngine:
                         logger.info(f"Pre-close managed {ticket}: {pc['close']} ({res.reason})")
                     continue  # pre-close decision takes precedence this cycle
 
+            # ── HTF-aware wick survival vs reversal (the trader's key ask) ──
+            # If the trade is in adverse territory, ask the HTF context whether
+            # this is a BLIP (higher TFs still align -> give room by widening the
+            # stop so we don't get wicked out) or a genuine REVERSAL (HTF momentum
+            # flipped against us -> cut now). Applies to gold and all symbols.
+            if self.htf is not None and adapter.spec.point:
+                if pos.action == "buy":
+                    adverse_pts = (pos.entry_price - price) / adapter.spec.point
+                else:
+                    adverse_pts = (price - pos.entry_price) / adapter.spec.point
+                # only intervene once meaningfully offside (beyond spread noise)
+                if adverse_pts > max(spread_pts * 1.5, st.atr_points * 0.4):
+                    try:
+                        verdict = self.htf.blip_or_reversal(pos.symbol, pos.action)
+                    except Exception:
+                        verdict = "neutral"
+                    if verdict == "reversal":
+                        res = adapter.close(ticket)
+                        logger.info(f"HTF REVERSAL exit {ticket} ({pos.base_symbol}): "
+                                    f"HTF momentum flipped against {pos.action} ({res.reason})")
+                        self.managed.pop(ticket, None)
+                        continue
+                    if verdict == "blip" and not getattr(st, "htf_widened", False):
+                        # widen the broker stop to survive the wick, ONCE, capped
+                        widen = max(st.atr_points * config.HTF_WICK_WIDEN_ATR, spread_pts * 3) * adapter.spec.point
+                        new_sl = (pos.entry_price - widen) if pos.action == "buy" else (pos.entry_price + widen)
+                        r = adapter.modify_sl(ticket, round(new_sl, adapter.spec.digits))
+                        if r.ok:
+                            st.htf_widened = True
+                            logger.info(f"HTF BLIP: widened SL on {ticket} ({pos.base_symbol}) "
+                                        f"to survive wick (HTF still aligned)")
+                        continue
+
             intent = self.trade_manager.evaluate(st, price, adapter.spec.point, spread_pts)
             if intent:
                 if "modify_sl" in intent:
@@ -792,6 +844,44 @@ class ScalpEngine:
             return a if isinstance(a, dict) else {}
         except Exception:
             return {}
+
+    def _learning_health(self) -> dict:
+        """
+        Observability (per external review): make learning VISIBLE so stalls are
+        obvious. Reports pending count, RAG hit rate, last weight refresh, last
+        learning error, and per-symbol RECENT expectancy (not all-time).
+        """
+        import sqlite3
+        health = {
+            "pending_trades": None,
+            "rag_lookups": self._rag_lookups,
+            "rag_hits": self._rag_hits,
+            "rag_hit_rate": round(self._rag_hits / self._rag_lookups * 100, 1) if self._rag_lookups else 0.0,
+            "last_weight_refresh": self._last_weight_refresh,
+            "last_learning_error": self._last_learning_error,
+            "adaptive_running": self._adaptive_running,
+            "recent_expectancy": {},
+        }
+        try:
+            conn = sqlite3.connect(self.experience_db.db_path); conn.row_factory = sqlite3.Row
+            health["pending_trades"] = conn.execute(
+                "SELECT COUNT(*) FROM trades WHERE outcome='pending'").fetchone()[0]
+            # per-symbol recent (last 20) expectancy
+            for base in self.adapters:
+                rows = conn.execute(
+                    "SELECT profit_loss FROM trades WHERE symbol LIKE ? "
+                    "AND outcome IN ('win','loss','breakeven') ORDER BY id DESC LIMIT 20",
+                    (base.upper() + "%",)).fetchall()
+                if len(rows) >= 5:
+                    pnls = [r[0] or 0 for r in rows]
+                    health["recent_expectancy"][base] = round(sum(pnls) / len(pnls), 4)
+            conn.close()
+        except Exception as e:
+            health["error"] = str(e)[:120]
+        # stalled flag: pending piling up, or a learning error recorded
+        health["stalled"] = bool(
+            (health["pending_trades"] or 0) > 10 or self._last_learning_error)
+        return health
 
     def _tuned_params(self, resolved_symbol: str) -> dict:
         """Optimizer-tuned indicator params for this symbol (or {} = defaults)."""
@@ -941,6 +1031,9 @@ class ScalpEngine:
             try:
                 rag = self.pattern_matcher.analyze_current_market(indicators)
                 n_similar = rag.get("similar_patterns_found", 0)
+                self._rag_lookups += 1
+                if n_similar > 0:
+                    self._rag_hits += 1
                 adj = float(rag.get("confidence_adjustment", 0.0) or 0.0)
                 # Only let the RAG influence decisions once there's a MEANINGFUL,
                 # non-trivial sample — otherwise a tiny/biased early history would
@@ -975,7 +1068,19 @@ class ScalpEngine:
                 logger.info(f"{base}: counter-trend {signal.action} penalised "
                             f"{before:.2f}->{signal.confidence:.2f} ({detail})")
 
-        # Final confidence gate (after MTF quality penalty)
+        # HTF context (M5/M15/M30/H1) — applies to EVERY symbol incl. gold. Strong
+        # multi-timeframe agreement boosts confidence; disagreement trims it. Stored
+        # on the trade so management can re-check the same context later.
+        htf_read = None
+        if self.htf is not None:
+            try:
+                htf_read = self.htf.read(resolved, signal.action)
+                signal.confidence = max(0.0, min(1.0, signal.confidence + 0.15 * htf_read.alignment))
+                indicators["htf_alignment"] = htf_read.alignment
+            except Exception as e:
+                logger.debug(f"HTF read skip: {e}")
+
+        # Final confidence gate (after MTF + HTF quality adjustment)
         if signal.confidence < config.SCALP_CONFIDENCE_MIN:
             return
 
@@ -1199,6 +1304,7 @@ class ScalpEngine:
                 "tuned_params": (self.param_optimizer.status() if self.param_optimizer else {}),
                 "symbol_governance": (self.governor.snapshot() if self.governor else {}),
                 "post_mortem": (getattr(self, "_postmortem_cache", {}) or {}),
+                "learning_health": self._learning_health(),
                 "performance_research": (self.perf_researcher.status() if self.perf_researcher else {}),
                 "edge": (self._edge_cache or {}),
                 "algo_trading": {

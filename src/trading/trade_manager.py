@@ -59,6 +59,7 @@ class ManagedState:
     last_llm_review: float = 0.0   # epoch of last HYBRID_LLM review (throttle)
     peak_profit_points: float = 0.0  # best unrealized profit (points) ever seen
     trend_aligned: bool = False      # entry aligned with higher-TF trend (ride mode)
+    htf_widened: bool = False        # HTF-blip stop-widen already applied (once)
 
 
 class TradeManager:
