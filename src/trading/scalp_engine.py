@@ -107,6 +107,20 @@ class ScalpEngine:
         except Exception as e:
             logger.warning(f"EdgeCalculator unavailable: {e}")
             self.edge = None
+        # SymbolGovernor: learning-loop pause/fail decisions + failure reports
+        try:
+            from src.learning.symbol_governor import SymbolGovernor
+            kb = getattr(self.perf_researcher, "kb", None) if self.perf_researcher else None
+            if kb is None:
+                try:
+                    from src.learning.knowledge_base import KnowledgeBase
+                    kb = KnowledgeBase()
+                except Exception:
+                    kb = None
+            self.governor = SymbolGovernor(knowledge_base=kb)
+        except Exception as e:
+            logger.warning(f"SymbolGovernor unavailable: {e}")
+            self.governor = None
         self._edge_cache = {}
         self._symbol_profit_cache = {}
 
@@ -545,19 +559,20 @@ class ScalpEngine:
 
     def _symbol_paused(self, base_symbol: str) -> bool:
         """
-        ACT on the PerformanceResearcher's findings: pause new entries on a symbol
-        that is genuinely bleeding — judged on RECENT trades (not the polluted
-        all-time pool) and only when it is clearly bad, so we never quarantine a
-        healthy symbol and accidentally stop trading everything.
-        Config: SYMBOL_PAUSE_MIN_TRADES, SYMBOL_PAUSE_PNL, SYMBOL_PAUSE_WINRATE.
+        Consult the SymbolGovernor (learning-loop component, unit-tested) to decide
+        if this symbol should be paused/failed. Judged on RECENT trades + per-
+        strategy breakdown; healthy symbols (WR>=45%) are never blocked so we
+        never freeze all trading. The governor persists a FAILURE REPORT on pause.
         """
+        if self.governor is None:
+            return False
         try:
             import sqlite3
+            from src.learning.symbol_governor import SymbolStats
             conn = sqlite3.connect(self.experience_db.db_path)
             conn.row_factory = sqlite3.Row
-            # RECENT window only: last N closed trades for this symbol (prefix match)
             rows = conn.execute(
-                "SELECT outcome, profit_loss FROM trades "
+                "SELECT outcome, profit_loss, strategy_used FROM trades "
                 "WHERE symbol LIKE ? AND outcome IN ('win','loss','breakeven') "
                 "ORDER BY id DESC LIMIT ?",
                 (base_symbol.upper() + "%", config.SYMBOL_PAUSE_WINDOW),
@@ -567,23 +582,20 @@ class ScalpEngine:
             return False
 
         n = len(rows)
-        if n < config.SYMBOL_PAUSE_MIN_TRADES:
-            return False
         wins = sum(1 for r in rows if r["outcome"] == "win")
-        wr = wins / n * 100
         pnl = sum((r["profit_loss"] or 0) for r in rows)
-        # Never pause a symbol with a healthy recent win rate — protects winners
-        # and prevents quarantining everything (which halts all trading).
-        if wr >= config.SYMBOL_PAUSE_HEALTHY_WR:
-            return False
-        # Pause if EITHER: catastrophic win rate (e.g. ETH 5%), OR meaningfully
-        # bleeding recent P&L. Judged on the recent window only.
-        catastrophic_wr = wr < config.SYMBOL_PAUSE_WINRATE
-        bleeding_pnl = pnl <= config.SYMBOL_PAUSE_PNL
-        if catastrophic_wr or bleeding_pnl:
-            logger.info(f"{base_symbol}: PAUSED (recent {n}: WR {wr:.0f}%, pnl {pnl:.2f}) — bleeding")
-            return True
-        return False
+        per_strat = {}
+        for r in rows:
+            k = r["strategy_used"] or "unknown"
+            d = per_strat.setdefault(k, {"n": 0, "wins": 0, "pnl": 0.0})
+            d["n"] += 1
+            d["wins"] += 1 if r["outcome"] == "win" else 0
+            d["pnl"] = round(d["pnl"] + (r["profit_loss"] or 0), 2)
+        stats = SymbolStats(symbol=base_symbol, n=n,
+                            win_rate=(wins / n * 100) if n else 0.0,
+                            pnl=pnl, per_strategy=per_strat)
+        decision = self.governor.evaluate(stats)
+        return decision.status in ("paused", "failed")
 
     def _symbol_personality_for(self, base_symbol: str) -> dict:
         """
@@ -1151,6 +1163,7 @@ class ScalpEngine:
                 "variant_performance": getattr(self, "_variant_perf_cache", {}),
                 "adaptive": (self.adaptive.status() if self.adaptive else {}),
                 "tuned_params": (self.param_optimizer.status() if self.param_optimizer else {}),
+                "symbol_governance": (self.governor.snapshot() if self.governor else {}),
                 "performance_research": (self.perf_researcher.status() if self.perf_researcher else {}),
                 "edge": (self._edge_cache or {}),
                 "algo_trading": {
