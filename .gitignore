@@ -14,6 +14,31 @@ venv/
 
 # Environment (keep .env.example in repo for credentials)
 .env
+.env.*
+!.env.example
+
+# ─── SECRETS — never commit ───
+# CryptoRTI credentials + mTLS certificates
+cryptorti/.env.cryptorti
+cryptorti/certs/*.pem
+cryptorti/certs/*.key
+**/*.pem
+**/*.key
+aws_credentials*
+
+# ─── Runtime state / data (machine-local, not source) ───
+data/
+*.db
+*.db-journal
+chromadb_store/
+**/chromadb*/
+bot_status.json
+risk_state.json
+symbol_stats.json
+cryptorti_signals.json
+cryptorti_correlation.json
+session_schedule.json
+KILL_SWITCH
 
 # IDE
 .vscode/
