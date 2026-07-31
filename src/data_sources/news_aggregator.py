@@ -62,16 +62,18 @@ class NewsAggregatorSource:
     def __init__(self):
         self.timeout = aiohttp.ClientTimeout(total=30)
         self.has_api_key = bool(self.NEWSAPI_KEY)
-        
+
         if not self.has_api_key:
-            raise ValueError(
-                "NEWSAPI_KEY environment variable is required.\n"
-                "NewsAggregatorSource requires real API key to operate.\n"
-                "Set NEWSAPI_KEY in your .env file to enable news collection.\n"
-                "Get a free key from https://newsapi.org/"
+            # Degrade gracefully: construct without a key so the app can boot.
+            # collect() will refuse to run (raising ConnectionError) rather than
+            # fabricating fake news — "unavailable", never mock data.
+            logger.warning(
+                "NewsAggregatorSource: NEWSAPI_KEY not set — source will be "
+                "reported UNAVAILABLE at collection time (no mock data). "
+                "Set NEWSAPI_KEY in .env to enable live news."
             )
-        
-        logger.info("NewsAggregatorSource initialized with API key")
+        else:
+            logger.info("NewsAggregatorSource initialized with API key")
     
     async def collect(self) -> Dict[str, Any]:
         """

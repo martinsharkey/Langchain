@@ -393,9 +393,6 @@ _result = _init_result
         
         logger.warning("Could not connect to MT5")
         return False
-        
-        logger.error("Failed to connect to MT5 natively")
-        return False
     
     def shutdown(self):
         """Shutdown the MT5 connection."""
@@ -426,7 +423,6 @@ _result = _init_result
         
         return self._connected
     
-    @property
     @property
     def bridge_available(self) -> bool:
         """Check if the Docker bridge is available (even if no account logged in)."""

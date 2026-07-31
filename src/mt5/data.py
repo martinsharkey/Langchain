@@ -140,14 +140,14 @@ def get_rates(
     result = []
     for rate in rates:
         result.append({
-            "time": str(datetime.fromtimestamp(rate.time)),
-            "timestamp": rate.time,
-            "open": rate.open,
-            "high": rate.high,
-            "low": rate.low,
-            "close": rate.close,
-            "volume": rate.tick_volume,
-            "spread": rate.spread,
+            "time": str(datetime.fromtimestamp(int(rate["time"]))),
+            "timestamp": int(rate["time"]),
+            "open": float(rate["open"]),
+            "high": float(rate["high"]),
+            "low": float(rate["low"]),
+            "close": float(rate["close"]),
+            "volume": int(rate["tick_volume"]),
+            "spread": int(rate["spread"]) if "spread" in rates.dtype.names else 0,
         })
     
     return result
@@ -216,10 +216,10 @@ def get_last_price(symbol: str = "XAUUSD") -> Optional[dict]:
         "symbol": symbol,
         "bid": tick.bid,
         "ask": tick.ask,
-        "spread": tick.spread,
+        "spread": round(tick.ask - tick.bid, 8),
         "time": str(datetime.fromtimestamp(tick.time)),
-        "last": tick.last,
-        "volume": tick.volume,
+        "last": getattr(tick, "last", 0.0),
+        "volume": getattr(tick, "volume", 0),
     }
 
 

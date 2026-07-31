@@ -1,268 +1,140 @@
 #!/usr/bin/env python3
 """
-Unified Application Startup — Start all components as one integrated system.
+app.py — Unified single-command launcher for the Agentic Trader.
 
-This single script starts:
-1. Daily Research Scheduler
-2. Market Data Collection
-3. Trading Research Agent
-4. Dashboard Web Server
-5. System monitoring
+Starts, in ONE process:
+  1. The live dashboard (http://localhost:5000) — always available first.
+  2. The trading engine (ScalpEngine) in a background thread, trading the
+     configured symbols on the connected MT5 demo account.
+  3. (Optional, best-effort) the research orchestrator/scheduler.
 
-All components run together as one cohesive application.
+Trading mode is controlled by TRADING_MODE (.env or CLI arg):
+    python app.py                 # uses TRADING_MODE from .env (default OBSERVE)
+    python app.py LIVE_MICRO      # real 0.01-lot demo trading
+    python app.py PAPER           # simulated fills at live prices
+    python app.py OBSERVE         # analyze only, no orders
 
-Usage:
-    python app.py
+The dashboard shows ONLY real data (live MT5 + engine status + learning DBs).
 """
 
-import asyncio
-import sys
 import os
-import threading
+import sys
 import time
-from datetime import datetime, timezone
+import threading
 
-# Add project root to path
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from src.orchestration import get_orchestrator
+# Allow mode override as first CLI arg
+if len(sys.argv) > 1 and sys.argv[1].upper() in ("OBSERVE", "PAPER", "LIVE_MICRO", "LIVE"):
+    os.environ["TRADING_MODE"] = sys.argv[1].upper()
+
+from src import config
 from src.utils.logger import get_logger, console
 from dashboard.app import app as flask_app
 
+logger = get_logger("app")
 
-logger = get_logger("app.startup")
+
+def start_dashboard():
+    """Run the Flask dashboard in a daemon thread (never blocks trading)."""
+    def _run():
+        import logging as pylog
+        pylog.getLogger("werkzeug").setLevel(pylog.ERROR)
+        flask_app.run(host="0.0.0.0", port=5000, debug=False, use_reloader=False)
+    t = threading.Thread(target=_run, daemon=True, name="dashboard")
+    t.start()
+    return t
 
 
-class UnifiedApplication:
-    """Unified trading research application - all components integrated."""
-    
-    def __init__(self):
-        self.orchestrator = None
-        self.flask_thread = None
-        self.is_running = False
-        self.startup_time = None
-        
-    def print_banner(self):
-        """Print startup banner."""
-        console.print("\n" + "=" * 70, style="bold cyan")
-        console.print("🚀 UNIFIED TRADING RESEARCH APPLICATION", style="bold cyan")
-        console.print("=" * 70, style="bold cyan")
-        console.print()
-        
-    def initialize_components(self):
-        """Initialize all components."""
-        console.print("INITIALIZING COMPONENTS", style="bold")
-        console.print("-" * 70)
-        
+def start_engine():
+    """Run the trading engine in a daemon thread."""
+    from src.trading.scalp_engine import run_scalp_engine
+
+    def _run():
         try:
-            # Initialize orchestrator (includes scheduler, research agent, etc.)
-            console.print("  • Initializing Research Orchestrator...", style="dim")
-            self.orchestrator = get_orchestrator()
-            console.print("    ✅ Version Manager", style="green")
-            console.print("    ✅ Research Scheduler", style="green")
-            console.print("    ✅ Market Data Collector", style="green")
-            console.print("    ✅ Research Agent", style="green")
-            console.print("    ✅ Handoff Protocol", style="green")
-            console.print("    ✅ Knowledge Base", style="green")
-            console.print()
-            
-            # Verify Flask app
-            console.print("  • Verifying Dashboard...", style="dim")
-            if flask_app:
-                console.print("    ✅ Flask App Ready", style="green")
-            console.print()
-            
-            return True
-            
+            run_scalp_engine()
         except Exception as e:
-            console.print(f"  ❌ Initialization failed: {e}", style="red")
-            logger.error(f"Initialization error: {e}", exc_info=True)
-            return False
-    
-    def start_research_system(self):
-        """Start the research scheduler."""
-        console.print("STARTING RESEARCH SYSTEM", style="bold")
-        console.print("-" * 70)
-        
-        try:
-            console.print("  • Starting daily scheduler...", style="dim")
-            self.orchestrator.start()
-            
-            status = self.orchestrator.scheduler.get_status()
-            console.print(f"    ✅ Scheduler Running", style="green")
-            console.print(f"    ✅ Trigger: {status['trigger_time']}", style="green")
-            console.print(f"    ✅ Next Run: {status.get('next_run', 'N/A')}", style="green")
-            console.print()
-            
-            return True
-            
-        except Exception as e:
-            console.print(f"  ❌ Failed to start research system: {e}", style="red")
-            logger.error(f"Research system error: {e}", exc_info=True)
-            return False
-    
-    def start_dashboard(self):
-        """Start the Flask dashboard in a separate thread."""
-        console.print("STARTING DASHBOARD", style="bold")
-        console.print("-" * 70)
-        
-        try:
-            console.print("  • Starting Flask dashboard server...", style="dim")
-            
-            def run_flask():
-                try:
-                    # Disable Flask's default logging
-                    import logging as py_logging
-                    py_logging.getLogger('werkzeug').setLevel(py_logging.ERROR)
-                    
-                    flask_app.run(
-                        host='0.0.0.0',
-                        port=5000,
-                        debug=False,
-                        use_reloader=False,
-                        threaded=True
-                    )
-                except Exception as e:
-                    logger.error(f"Flask error: {e}")
-            
-            self.flask_thread = threading.Thread(target=run_flask, daemon=True)
-            self.flask_thread.start()
-            
-            # Wait a moment for Flask to start
-            time.sleep(2)
-            
-            console.print("    ✅ Dashboard Running", style="green")
-            console.print("    ✅ Access: http://localhost:5000", style="green")
-            console.print()
-            
-            return True
-            
-        except Exception as e:
-            console.print(f"  ❌ Failed to start dashboard: {e}", style="red")
-            logger.error(f"Dashboard error: {e}", exc_info=True)
-            return False
-    
-    def print_startup_summary(self):
-        """Print startup summary."""
-        console.print("=" * 70, style="bold green")
-        console.print("✅ APPLICATION STARTED SUCCESSFULLY", style="bold green")
-        console.print("=" * 70, style="bold green")
-        console.print()
-        
-        console.print("COMPONENTS RUNNING:", style="bold")
-        console.print("  ✅ Research System")
-        console.print("     • Daily scheduler (00:00 UTC)")
-        console.print("     • Market data collection (6 sources)")
-        console.print("     • LLM semantic analysis")
-        console.print("     • Knowledge base storage")
-        console.print()
-        console.print("  ✅ Dashboard")
-        console.print("     • Web interface (port 5000)")
-        console.print("     • Real-time metrics")
-        console.print("     • Performance tracking")
-        console.print()
-        
-        console.print("ACCESS POINTS:", style="bold")
-        console.print("  🌐 Dashboard: http://localhost:5000")
-        console.print("  📊 Research: Automatic daily at 00:00 UTC")
-        console.print("  🐍 Python API: from src.orchestration import get_orchestrator")
-        console.print()
-        
-        console.print("SYSTEM STATUS:", style="bold")
-        self.orchestrator.print_status()
-        
-        console.print()
-        console.print("NEXT STEPS:", style="bold")
-        console.print("  1. Open http://localhost:5000 in your browser")
-        console.print("  2. Monitor the dashboard for metrics")
-        console.print("  3. System runs automatically in background")
-        console.print("  4. Press Ctrl+C to stop all components")
-        console.print()
-        
-        self.startup_time = datetime.now(timezone.utc)
-        console.print(f"Started: {self.startup_time.isoformat()}", style="dim")
-        console.print()
-    
-    def print_uptime(self):
-        """Print current uptime."""
-        if self.startup_time:
-            uptime = datetime.now(timezone.utc) - self.startup_time
-            hours = uptime.seconds // 3600
-            minutes = (uptime.seconds % 3600) // 60
-            seconds = uptime.seconds % 60
-            console.print(f"⏱️  Uptime: {hours}h {minutes}m {seconds}s", style="dim")
-    
-    def run(self):
-        """Run the unified application."""
-        self.print_banner()
-        
-        # Initialize all components
-        if not self.initialize_components():
-            console.print("❌ Failed to initialize components", style="red")
-            return False
-        
-        # Start research system
-        if not self.start_research_system():
-            console.print("⚠️  Research system failed, but continuing...", style="yellow")
-        
-        # Start dashboard
-        if not self.start_dashboard():
-            console.print("⚠️  Dashboard failed, but continuing...", style="yellow")
-        
-        # Print summary
-        self.print_startup_summary()
-        
-        # Keep application running
-        self.is_running = True
-        
-        try:
-            while True:
-                time.sleep(1)
-                # Could add periodic status checks here
-        
-        except KeyboardInterrupt:
-            self.shutdown()
-            return True
-    
-    def shutdown(self):
-        """Graceful shutdown."""
-        console.print("\n\n" + "=" * 70, style="bold yellow")
-        console.print("🛑 SHUTTING DOWN", style="bold yellow")
-        console.print("=" * 70 + "\n", style="bold yellow")
-        
-        try:
-            console.print("Stopping research system...", style="dim")
-            if self.orchestrator:
-                self.orchestrator.stop()
-            console.print("✅ Research system stopped", style="green")
-        except Exception as e:
-            console.print(f"⚠️  Error stopping research system: {e}", style="yellow")
-        
-        console.print("✅ Dashboard stopped", style="green")
-        console.print()
-        
-        self.print_uptime()
-        console.print()
-        console.print("✅ Application stopped gracefully", style="green")
-        console.print()
+            logger.error(f"Trading engine stopped: {e}", exc_info=True)
+    t = threading.Thread(target=_run, daemon=True, name="engine")
+    t.start()
+    return t
 
 
-async def async_main():
-    """Async wrapper for main."""
-    app = UnifiedApplication()
-    return app.run()
+def start_research_best_effort():
+    """Start the research scheduler if available; never fatal."""
+    try:
+        from src.orchestration import get_orchestrator
+        orch = get_orchestrator()
+        orch.start()
+        console.print("  [green]Research scheduler started[/green]")
+        return orch
+    except Exception as e:
+        console.print(f"  [yellow]Research scheduler unavailable (non-fatal): {e}[/yellow]")
+        logger.warning(f"research start failed: {e}")
+        return None
+
+
+def start_cryptorti_best_effort():
+    """Start the CryptoRTI live signal client in a daemon thread (non-fatal)."""
+    import os
+    cert_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "cryptorti", "certs")
+    needed = [os.path.join(cert_dir, f) for f in ("ca.pem", "client.pem", "client-key.pem")]
+    if not all(os.path.exists(p) for p in needed):
+        console.print("  [yellow]CryptoRTI: certs not found — live signal feed disabled[/yellow]")
+        return None
+    try:
+        from src.cryptorti.signal_client import run as run_cryptorti
+
+        def _run():
+            try:
+                run_cryptorti()
+            except Exception as e:
+                logger.warning(f"CryptoRTI client stopped: {e}")
+        t = threading.Thread(target=_run, daemon=True, name="cryptorti")
+        t.start()
+        console.print("  [green]CryptoRTI live signal feed started[/green]")
+        return t
+    except Exception as e:
+        console.print(f"  [yellow]CryptoRTI feed unavailable (non-fatal): {e}[/yellow]")
+        return None
 
 
 def main():
-    """Main entry point."""
+    mode = os.environ.get("TRADING_MODE", config.TRADING_MODE)
+    console.print("\n" + "=" * 66, style="bold cyan")
+    console.print("  AGENTIC TRADER", style="bold cyan")
+    console.print("=" * 66, style="bold cyan")
+    console.print(f"  Mode:     [bold]{mode}[/bold]")
+    console.print(f"  Symbols:  {', '.join(config.TRADING_SYMBOLS)}")
+    console.print(f"  Target:   {config.SCALP_TARGET_TRADES} closed trades")
+    console.print("=" * 66 + "\n", style="bold cyan")
+
+    # 1) dashboard first — always available
+    start_dashboard()
+    console.print("  [green]Dashboard:[/green] http://localhost:5000")
+
+    # 2) research (best effort, non-fatal)
+    start_research_best_effort()
+
+    # 2b) CryptoRTI live whale-signal feed (best effort, non-fatal)
+    start_cryptorti_best_effort()
+
+    # 3) trading engine
+    start_engine()
+    console.print(f"  [green]Trading engine started[/green] (mode={mode})\n")
+
+    if mode == "OBSERVE":
+        console.print("  [yellow]OBSERVE mode:[/yellow] analyzing only — no orders will be placed.")
+        console.print("  Run 'python app.py LIVE_MICRO' to trade the demo account.\n")
+
+    console.print("  Press Ctrl+C to stop.\n")
+
     try:
-        # Run the application
-        asyncio.run(async_main())
-    
-    except Exception as e:
-        console.print(f"\n❌ Fatal error: {e}", style="red")
-        logger.error(f"Fatal error: {e}", exc_info=True)
-        sys.exit(1)
+        while True:
+            time.sleep(1)
+    except KeyboardInterrupt:
+        console.print("\n  Shutting down…", style="yellow")
+        console.print("  Stopped.\n", style="green")
 
 
 if __name__ == "__main__":

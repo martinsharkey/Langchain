@@ -1,0 +1,435 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<title>Agentic Trader — Live Dashboard</title>
+<style>
+  :root{--bg:#0d1117;--card:#161b22;--card2:#1c2230;--border:#30363d;--fg:#e6edf3;--dim:#8b949e;
+        --green:#3fb950;--red:#f85149;--blue:#58a6ff;--amber:#d29922;--grid:12;}
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{background:var(--bg);color:var(--fg);font:13px/1.5 -apple-system,Segoe UI,Roboto,sans-serif;padding:0 0 40px}
+  .wrap{max-width:1500px;margin:0 auto;padding:0 16px}
+  h2{font-size:11px;color:var(--dim);text-transform:uppercase;letter-spacing:.06em;margin-bottom:10px;font-weight:600}
+  .pos{color:var(--green)} .neg{color:var(--red)} .muted{color:var(--dim)}
+
+  /* status bar */
+  .statusbar{position:sticky;top:0;z-index:20;background:#0d1117ee;backdrop-filter:blur(6px);
+    border-bottom:1px solid var(--border);display:flex;align-items:center;gap:14px;flex-wrap:wrap;
+    padding:10px 16px;margin-bottom:16px}
+  .brand{font-weight:700;font-size:14px;margin-right:6px}
+  .chip{display:inline-flex;align-items:center;gap:6px;background:var(--card);border:1px solid var(--border);
+    border-radius:20px;padding:4px 10px;font-size:12px}
+  .dot{width:9px;height:9px;border-radius:50%;display:inline-block}
+  .dot.g{background:var(--green)} .dot.r{background:var(--red)} .dot.a{background:var(--amber)} .dot.b{background:var(--blue)}
+  .spacer{flex:1}
+  .algo{font-weight:700;padding:5px 12px;border-radius:20px;border:1px solid}
+  .algo.on{color:var(--green);border-color:#238636;background:#23863618}
+  .algo.off{color:var(--red);border-color:#da3633;background:#da363318}
+
+  /* grid + cards */
+  .grid{display:grid;gap:14px;grid-template-columns:repeat(12,1fr)}
+  .card{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:14px}
+  .c3{grid-column:span 3}.c4{grid-column:span 4}.c6{grid-column:span 6}.c8{grid-column:span 8}.c12{grid-column:span 12}
+  @media(max-width:1100px){.c3{grid-column:span 6}.c4,.c6,.c8{grid-column:span 12}}
+
+  .kpi .label{font-size:11px;color:var(--dim);text-transform:uppercase;letter-spacing:.05em}
+  .kpi .val{font-size:26px;font-weight:700;margin-top:2px;font-variant-numeric:tabular-nums}
+  .kpi .sub{font-size:12px;color:var(--dim);margin-top:2px}
+
+  .row{display:flex;justify-content:space-between;padding:3px 0;border-bottom:1px solid #21262d}
+  .row:last-child{border-bottom:none}.k{color:var(--dim)}.v{font-weight:600;font-variant-numeric:tabular-nums}
+
+  table{width:100%;border-collapse:collapse;font-size:12px}
+  th,td{text-align:left;padding:6px 8px;border-bottom:1px solid #21262d;white-space:nowrap}
+  th{color:var(--dim);font-weight:600;position:sticky;top:0;background:var(--card)}
+  td.num,th.num{text-align:right;font-variant-numeric:tabular-nums}
+  .badge{padding:2px 8px;border-radius:10px;font-size:11px;font-weight:600}
+  .b-buy{background:#23863633;color:var(--green)}.b-sell{background:#da363333;color:var(--red)}
+  .b-win{background:#23863633;color:var(--green)}.b-loss{background:#da363333;color:var(--red)}
+  .b-pending{background:#d2992233;color:var(--amber)}.b-breakeven{background:#8b949e33;color:var(--dim)}
+  .scroll{max-height:300px;overflow:auto}
+  .tag{display:inline-block;background:#21262d;color:var(--dim);padding:3px 9px;border-radius:10px;margin:2px;font-size:11px}
+
+  .meter{height:20px;background:#21262d;border-radius:10px;overflow:hidden;margin:6px 0}
+  .meter-fill{height:100%;transition:width .5s;border-radius:10px}
+  .gauge-num{font-size:34px;font-weight:800;text-align:center}
+  .checkrow{display:flex;justify-content:space-between;padding:4px 0;border-bottom:1px solid #21262d;font-size:12px}
+
+  .tabs{display:flex;gap:4px;margin-bottom:10px;flex-wrap:wrap}
+  .tab{padding:6px 12px;border-radius:8px;background:var(--card2);border:1px solid var(--border);cursor:pointer;font-size:12px}
+  .tab.active{background:#1f6feb22;border-color:#1f6feb;color:var(--blue)}
+  .tabpane{display:none}.tabpane.active{display:block}
+  svg{display:block;width:100%;height:180px}
+  .spark{height:28px;width:80px}
+</style>
+</head>
+<body>
+  <!-- ROW 0: status bar -->
+  <div class="statusbar">
+    <span class="brand">⚡ Agentic Trader</span>
+    <span class="algo off" id="algo">ALGO: —</span>
+    <span class="chip"><span class="dot b" id="d-conn"></span>MT5 <span id="s-conn">—</span></span>
+    <span class="chip"><span class="dot b" id="d-engine"></span>Engine <span id="s-engine">—</span></span>
+    <span class="chip"><span class="dot b" id="d-news"></span>News <span id="s-news">—</span></span>
+    <span class="chip"><span class="dot b" id="d-research"></span>Research <span id="s-research">—</span></span>
+    <span class="chip">Mode <b id="s-mode" style="margin-left:4px">—</b></span>
+    <span class="chip" id="s-risk-chip">Risk <b id="s-risk" style="margin-left:4px">—</b></span>
+    <span class="chip" id="s-edge-chip">Edge <b id="s-edge" style="margin-left:4px">—</b></span>
+    <span class="spacer"></span>
+    <span class="chip">Readiness <b id="s-ready" style="margin-left:4px">—</b></span>
+    <span class="muted" id="s-updated" style="font-size:11px"></span>
+  </div>
+
+  <div class="wrap">
+    <!-- ROW 1: KPI hero cards -->
+    <div class="grid" style="margin-bottom:14px">
+      <div class="card c3 kpi"><div class="label">Balance / Equity</div><div class="val" id="k-balance">—</div><div class="sub" id="k-equity"></div></div>
+      <div class="card c3 kpi"><div class="label">Net P&L (closed)</div><div class="val" id="k-pnl">—</div><div class="sub" id="k-pnlsub"></div></div>
+      <div class="card c3 kpi"><div class="label">Open Positions</div><div class="val" id="k-open">—</div><div class="sub" id="k-opensub"></div></div>
+      <div class="card c3 kpi"><div class="label">Win Rate</div><div class="val" id="k-wr">—</div><div class="sub" id="k-wrsub"></div></div>
+    </div>
+
+    <!-- ROW 2: equity curve + readiness -->
+    <div class="grid" style="margin-bottom:14px">
+      <div class="card c8">
+        <h2>Cumulative P&L (real closed trades)</h2>
+        <svg id="equity" viewBox="0 0 800 180" preserveAspectRatio="none"></svg>
+      </div>
+      <div class="card c4">
+        <h2>Trading Readiness</h2>
+        <div class="gauge-num" id="r-score">—</div>
+        <div class="meter"><div class="meter-fill" id="r-fill" style="width:0%"></div></div>
+        <div class="muted" id="r-summary" style="margin-bottom:8px"></div>
+        <div id="r-checks"></div>
+      </div>
+    </div>
+
+    <!-- ROW 3: live open positions -->
+    <div class="grid" style="margin-bottom:14px">
+      <div class="card c12">
+        <h2>Live Open Positions</h2>
+        <div class="scroll"><table id="t-open"><thead><tr>
+          <th>Ticket</th><th>Symbol</th><th>Side</th><th class="num">Entry</th><th class="num">Volume</th><th class="num">SL</th><th class="num">TP</th><th>Strategy</th><th class="num">Conf</th>
+        </tr></thead><tbody><tr><td>Loading…</td></tr></tbody></table></div>
+      </div>
+    </div>
+
+    <!-- ROW 4: strategy leaderboard + best per symbol -->
+    <div class="grid" style="margin-bottom:14px">
+      <div class="card c6">
+        <h2>Strategy Performance</h2>
+        <div class="scroll"><table id="t-strat"><thead><tr>
+          <th>Strategy</th><th class="num">Trades</th><th class="num">Win%</th><th class="num">Net P&L</th><th class="num">Avg Conf</th>
+        </tr></thead><tbody></tbody></table></div>
+      </div>
+      <div class="card c6">
+        <h2>Best Strategy per Symbol</h2>
+        <div class="scroll"><table id="t-bysym"><thead><tr>
+          <th>Symbol</th><th>Strategy</th><th class="num">Trades</th><th class="num">W</th><th class="num">L</th><th class="num">P&L</th>
+        </tr></thead><tbody></tbody></table></div>
+      </div>
+    </div>
+
+    <!-- ROW 5: learning progress -->
+    <div class="grid" style="margin-bottom:14px">
+      <div class="card c12">
+        <h2>Learning Progress</h2>
+        <div class="meter" style="height:24px"><div class="meter-fill" id="l-fill" style="width:0%;background:var(--blue)"></div></div>
+        <div id="l-summary" class="muted" style="margin-bottom:8px"></div>
+        <div id="l-symbols"></div>
+      </div>
+    </div>
+
+    <!-- ROW 6: tabbed bottom panel -->
+    <div class="card c12">
+      <div class="tabs">
+        <div class="tab active" data-tab="history">MT5 Deal History</div>
+        <div class="tab" data-tab="bot">Bot Trades</div>
+        <div class="tab" data-tab="research">Research & Topics</div>
+        <div class="tab" data-tab="cryptorti">CryptoRTI Signals</div>
+        <div class="tab" data-tab="learning">Learning & Sessions</div>
+        <div class="tab" data-tab="adaptive">Adaptive AI</div>
+        <div class="tab" data-tab="account">Account</div>
+      </div>
+      <div class="tabpane active" id="tab-history">
+        <div class="scroll"><table id="t-history"><thead><tr>
+          <th>Ticket</th><th>Time</th><th>Symbol</th><th>Type</th><th class="num">Volume</th><th class="num">Price</th><th class="num">Net</th>
+        </tr></thead><tbody><tr><td>Loading…</td></tr></tbody></table></div>
+      </div>
+      <div class="tabpane" id="tab-bot">
+        <div class="scroll"><table id="t-bot"><thead><tr>
+          <th>ID</th><th>Time</th><th>Symbol</th><th>Action</th><th class="num">Entry</th><th class="num">Size</th><th>Strategy</th><th>Outcome</th><th class="num">P&L</th>
+        </tr></thead><tbody><tr><td>Loading…</td></tr></tbody></table></div>
+      </div>
+      <div class="tabpane" id="tab-research">
+        <div id="research-status" class="muted" style="margin-bottom:8px"></div>
+        <div id="research-topics" style="margin-bottom:10px"></div>
+        <div class="scroll" id="research-recent"></div>
+      </div>
+      <div class="tabpane" id="tab-cryptorti">
+        <div id="cryptorti-status" class="muted" style="margin-bottom:8px"></div>
+        <div class="scroll"><table id="t-cryptorti"><thead><tr>
+          <th>Signal</th><th>Stage</th><th>Status</th><th>Exchange</th><th class="num">BTC</th><th class="num">USD</th><th>Detected</th>
+        </tr></thead><tbody><tr><td>Loading…</td></tr></tbody></table></div>
+      </div>
+      <div class="tabpane" id="tab-learning">
+        <div id="sessions-status" class="muted" style="margin-bottom:10px"></div>
+        <h2 style="margin-bottom:8px">Symbol Profitability (fastest return)</h2>
+        <div class="scroll" style="margin-bottom:14px"><table id="t-profit"><thead><tr>
+          <th>Symbol</th><th class="num">Trades</th><th class="num">Win%</th><th class="num">Net P&L</th><th class="num">P&L/trade</th>
+        </tr></thead><tbody><tr><td>Loading…</td></tr></tbody></table></div>
+        <h2 style="margin-bottom:8px">Trade-Management Variants (A/B learning)</h2>
+        <div class="scroll"><table id="t-variants"><thead><tr>
+          <th>Symbol</th><th>Variant</th><th class="num">Trades</th><th class="num">Win%</th><th class="num">Net P&L</th>
+        </tr></thead><tbody><tr><td>Loading…</td></tr></tbody></table></div>
+      </div>
+      <div class="tabpane" id="tab-account">
+        <div id="account-detail"></div>
+      </div>
+      <div class="tabpane" id="tab-adaptive">
+        <div id="adaptive-summary" class="muted" style="margin-bottom:8px"></div>
+        <h2 style="margin-bottom:8px">Hypotheses (reflection -> synthesis -> backtest)</h2>
+        <div class="scroll"><table id="t-hypotheses"><thead><tr>
+          <th>ID</th><th>Symbol</th><th>Hypothesis</th><th>Strategies</th><th>Filter</th><th>Status</th>
+        </tr></thead><tbody><tr><td>Loading…</td></tr></tbody></table></div>
+      </div>
+    </div>
+  </div>
+
+<script>
+const fmt=(v,d=2)=>(v===null||v===undefined||isNaN(v))?'—':Number(v).toFixed(d);
+const cls=v=>Number(v)>=0?'pos':'neg';
+async function j(u){try{const r=await fetch(u);return await r.json();}catch(e){return null;}}
+function row(k,v){return `<div class="row"><span class="k">${k}</span><span class="v">${v}</span></div>`;}
+function setDot(id,ok){document.getElementById(id).className='dot '+(ok?'g':'r');}
+
+// tab switching
+document.querySelectorAll('.tab').forEach(t=>t.onclick=()=>{
+  document.querySelectorAll('.tab').forEach(x=>x.classList.remove('active'));
+  document.querySelectorAll('.tabpane').forEach(x=>x.classList.remove('active'));
+  t.classList.add('active');
+  document.getElementById('tab-'+t.dataset.tab).classList.add('active');
+});
+
+function drawEquity(curve){
+  const svg=document.getElementById('equity');
+  if(!curve||curve.length<2){svg.innerHTML='<text x="400" y="90" fill="#8b949e" text-anchor="middle">Not enough closed trades yet</text>';return;}
+  const W=800,H=180,pad=6;
+  const vals=curve.map(p=>p.cum);
+  const min=Math.min(...vals,0),max=Math.max(...vals,0),rng=(max-min)||1;
+  const x=i=>pad+i*(W-2*pad)/(curve.length-1);
+  const y=v=>H-pad-((v-min)/rng)*(H-2*pad);
+  const zeroY=y(0);
+  let d='';curve.forEach((p,i)=>{d+=(i?'L':'M')+x(i).toFixed(1)+' '+y(p.cum).toFixed(1)+' ';});
+  const last=vals[vals.length-1];const col=last>=0?'#3fb950':'#f85149';
+  const area=d+`L ${x(curve.length-1)} ${zeroY} L ${x(0)} ${zeroY} Z`;
+  svg.innerHTML=
+    `<line x1="0" y1="${zeroY}" x2="${W}" y2="${zeroY}" stroke="#30363d" stroke-dasharray="4"/>`+
+    `<path d="${area}" fill="${col}22"/>`+
+    `<path d="${d}" fill="none" stroke="${col}" stroke-width="2"/>`;
+}
+
+async function refresh(){
+  const [status,readiness,learning,strat,bot,history,research,equity,cryptorti]=await Promise.all([
+    j('/api/status'),j('/api/readiness'),j('/api/learning'),j('/api/strategies'),
+    j('/api/trades/bot'),j('/api/trades/history'),j('/api/research'),j('/api/equity'),j('/api/cryptorti')
+  ]);
+
+  // status bar
+  if(status){
+    const a=status.algo_trading||{};
+    const algo=document.getElementById('algo');
+    algo.textContent='ALGO: '+(a.can_trade?'LIVE ▶':'BLOCKED ■');
+    algo.className='algo '+(a.can_trade?'on':'off');
+    algo.title=a.reason||'';
+    setDot('d-conn',a.connected);document.getElementById('s-conn').textContent=a.connected?'ok':'down';
+    setDot('d-engine',status.engine_running);document.getElementById('s-engine').textContent=status.engine_running?'running':'stopped';
+    document.getElementById('s-mode').textContent=status.mode||'—';
+    // edge scoreboard chip (proof-of-edge / phase)
+    const ed=status.edge||{};
+    if(ed.phase!==undefined){
+      const eEl=document.getElementById('s-edge');
+      eEl.textContent=`PF ${ed.profit_factor} • P${ed.phase}`;
+      eEl.style.color=(ed.profit_factor>=1.3)?'var(--green)':(ed.profit_factor>=1.0)?'var(--amber)':'var(--red)';
+      document.getElementById('s-edge-chip').title=
+        `${ed.phase_name} | ${ed.closed_trades} closed, WR ${ed.win_rate}%, `+
+        `expectancy ${ed.expectancy}, maxDD ${ed.max_drawdown_pct}%, streak ${ed.longest_loss_streak}`;
+    }
+    // risk chip
+    const rk=status.risk||{};
+    const riskEl=document.getElementById('s-risk');
+    if(rk.halted){ riskEl.textContent='HALTED'; riskEl.style.color='var(--red)'; }
+    else { riskEl.textContent=`${rk.daily_loss_used_pct||0}% of limit`; riskEl.style.color='var(--fg)'; }
+    document.getElementById('s-risk-chip').title=
+      rk.halt_reason || `Daily loss ${rk.daily_loss_used||0}/${rk.daily_loss_limit_value||0} (${rk.daily_loss_limit_pct||0}% of ${rk.day_open_balance||0}) • kill switch: ${rk.kill_switch?'ON':'off'}`;
+    const ac=status.account||{};
+    document.getElementById('k-balance').textContent=fmt(ac.balance)+' '+(ac.currency||'');
+    document.getElementById('k-equity').textContent='Equity '+fmt(ac.equity)+' • Free '+fmt(ac.free_margin);
+    const ops=status.open_positions||[];
+    document.getElementById('k-open').textContent=ops.length;
+    document.getElementById('k-opensub').textContent=(status.trades_opened||0)+' opened • '+(status.trades_closed||0)+' closed';
+    document.getElementById('t-open').querySelector('tbody').innerHTML=
+      ops.length?ops.map(p=>`<tr><td>${p.ticket}</td><td>${p.symbol}</td>`+
+        `<td><span class="badge b-${p.action}">${p.action}</span></td>`+
+        `<td class="num">${fmt(p.entry)}</td><td class="num">${fmt(p.volume)}</td>`+
+        `<td class="num">${fmt(p.sl)}</td><td class="num">${fmt(p.tp)}</td>`+
+        `<td>${p.strategy||''}</td><td class="num">${fmt(p.confidence)}</td></tr>`).join('')
+        :'<tr><td colspan="9" class="muted">No open positions</td></tr>';
+    // account tab
+    document.getElementById('account-detail').innerHTML=
+      row('Name',ac.name||'—')+row('Server',ac.server||'—')+
+      row('Balance',fmt(ac.balance)+' '+(ac.currency||''))+row('Equity',fmt(ac.equity))+
+      row('Margin',fmt(ac.margin))+row('Free margin',fmt(ac.free_margin))+
+      row('Leverage',ac.leverage?('1:'+ac.leverage):'—')+
+      row('Symbols',(status.symbols||[]).map(s=>s.resolved+(s.tradable?'':' (disabled)')).join(', ')||'—');
+
+    // learning & sessions tab
+    const sess=(status.symbols||[]).map(s=>{
+      const mc=s.minutes_to_close;
+      return `<span class="tag">${s.base}: ${s.open?'OPEN':'CLOSED'}${mc!=null?(' • close in '+mc+'m'):' • 24/7'}</span>`;
+    }).join(' ');
+    document.getElementById('sessions-status').innerHTML='Sessions &nbsp; '+(sess||'—');
+    const prof=status.symbol_profitability||{};
+    document.getElementById('t-profit').querySelector('tbody').innerHTML=
+      Object.keys(prof).length?Object.entries(prof).map(([sym,m])=>
+        `<tr><td>${sym}</td><td class="num">${m.trades}</td><td class="num ${m.win_rate>=50?'pos':'neg'}">${m.win_rate}%</td>`+
+        `<td class="num ${cls(m.net_pnl)}">${fmt(m.net_pnl)}</td><td class="num ${cls(m.pnl_per_trade)}">${fmt(m.pnl_per_trade,4)}</td></tr>`).join('')
+        :'<tr><td colspan="5" class="muted">No closed trades yet</td></tr>';
+    const vp=status.variant_performance||{};
+    let vrows='';
+    for(const sym of Object.keys(vp)){
+      for(const [v,m] of Object.entries(vp[sym])){
+        vrows+=`<tr><td>${sym}</td><td>${v}</td><td class="num">${m.trades}</td>`+
+          `<td class="num ${m.win_rate>=50?'pos':'neg'}">${m.win_rate}%</td>`+
+          `<td class="num ${cls(m.net_pnl)}">${fmt(m.net_pnl)}</td></tr>`;
+      }
+    }
+    document.getElementById('t-variants').querySelector('tbody').innerHTML=
+      vrows||'<tr><td colspan="5" class="muted">No variant data yet (accumulating)</td></tr>';
+
+    // adaptive AI tab
+    const ad=status.adaptive||{};
+    const testing=(ad.testing||[]).length, promoted=(ad.promoted||[]).length;
+    document.getElementById('adaptive-summary').innerHTML=
+      `Synthesized strategies — <b style="color:var(--amber)">${testing} testing</b>, `+
+      `<b style="color:var(--green)">${promoted} promoted</b>. `+
+      `Reflection runs periodically once enough closed trades exist.`;
+    const hyps=ad.recent_hypotheses||[];
+    document.getElementById('t-hypotheses').querySelector('tbody').innerHTML=
+      hyps.length?hyps.map(h=>{
+        let strat=''; try{strat=(JSON.parse(h.proposed_strategies||'[]')).join(', ');}catch(e){strat=h.proposed_strategies||'';}
+        const sc=h.status==='promoted'?'pos':h.status==='rejected'?'neg':'';
+        return `<tr><td>${h.id}</td><td>${h.symbol||''}</td><td>${(h.hypothesis||'').slice(0,80)}</td>`+
+          `<td>${strat}</td><td>${h.proposed_filter||''}</td><td class="${sc}">${h.status||''}</td></tr>`;
+      }).join('')
+      :'<tr><td colspan="6" class="muted">No hypotheses yet — the bot forms these after enough losing trades to learn from</td></tr>';
+  }
+  document.getElementById('s-updated').textContent='updated '+new Date().toLocaleTimeString();
+
+  // news + research chips
+  if(research){
+    const ns=(research.news_status||'');
+    const newsFull=ns.startsWith('available');
+    const newsPartial=ns.startsWith('partial');
+    // green if full, amber if partial (free sources live), red if off
+    const nd=document.getElementById('d-news');
+    nd.className='dot '+(newsFull?'g':newsPartial?'a':'r');
+    document.getElementById('s-news').textContent=newsFull?'live':newsPartial?'partial':'off';
+    // render live headlines if present
+    const hl=research.headlines||[];
+    if(hl.length){
+      const html=hl.slice(0,12).map(h=>`<div class="row"><span class="k">[${h.tag}]</span><span class="v" style="text-align:right;max-width:70%">${h.title}</span></div>`).join('');
+      const el=document.getElementById('research-recent');
+      if(el) el.innerHTML=html;
+    }
+    setDot('d-research',true);document.getElementById('s-research').textContent=(research.topics||[]).length+' topics';
+    document.getElementById('research-status').textContent='News: '+research.news_status;
+    document.getElementById('research-topics').innerHTML=(research.topics||[]).map(t=>`<span class="tag">${t.topic_name} (${t.entry_count||0})</span>`).join(' ')||'<span class="muted">No topics</span>';
+    document.getElementById('research-recent').innerHTML=(research.recent_entries||[]).map(e=>row(e.category||'',e.title||'')).join('')||'<span class="muted">No entries</span>';
+  }
+
+  // pnl + winrate KPIs
+  if(learning){
+    document.getElementById('k-pnl').textContent=fmt(learning.net_pnl);
+    document.getElementById('k-pnl').className='val '+cls(learning.net_pnl);
+    document.getElementById('k-pnlsub').textContent=learning.closed_trades+' closed';
+    document.getElementById('k-wr').textContent=learning.win_rate+'%';
+    document.getElementById('k-wrsub').textContent=learning.wins+'W / '+learning.losses+'L / '+learning.breakeven+'BE';
+    // learning progress
+    document.getElementById('l-fill').style.width=learning.progress_pct+'%';
+    document.getElementById('l-summary').textContent=`${learning.closed_trades}/${learning.target_trades} closed trades (${learning.progress_pct}%) • ${learning.pending} pending • ${learning.knowledge_entries} knowledge entries`;
+    document.getElementById('l-symbols').innerHTML=(learning.symbols_learned||[]).map(s=>
+      `<div class="row"><span class="k">${s.symbol}</span><span class="v">${s.trades} trades • ${s.wins||0}W/${s.losses||0}L • <span class="${cls(s.pnl)}">${fmt(s.pnl)}</span></span></div>`).join('')||'<span class="muted">None yet</span>';
+  }
+
+  // readiness
+  if(readiness){
+    document.getElementById('r-score').textContent=readiness.score+'%';
+    document.getElementById('r-score').style.color=readiness.color;
+    const f=document.getElementById('r-fill');f.style.width=readiness.score+'%';f.style.background=readiness.color;
+    document.getElementById('r-summary').textContent=readiness.summary;
+    document.getElementById('s-ready').textContent=readiness.score+'% '+readiness.status;
+    document.getElementById('r-checks').innerHTML=Object.values(readiness.details||{}).map(d=>
+      `<div class="checkrow"><span class="k">${d.label}</span><span class="v">${fmt(d.score,1)}/${d.max}</span></div>`).join('');
+  }
+
+  // strategies
+  if(strat){
+    document.getElementById('t-strat').querySelector('tbody').innerHTML=
+      (strat.performance||[]).length?strat.performance.map(s=>
+        `<tr><td>${s.strategy_name}</td><td class="num">${s.total_trades||0}</td>`+
+        `<td class="num ${s.win_rate>=50?'pos':'neg'}">${s.win_rate}%</td>`+
+        `<td class="num ${cls(s.net_profit)}">${fmt(s.net_profit)}</td><td class="num">${fmt(s.avg_confidence)}</td></tr>`).join('')
+        :'<tr><td colspan="5" class="muted">No strategy data yet</td></tr>';
+    document.getElementById('t-bysym').querySelector('tbody').innerHTML=
+      (strat.by_symbol||[]).length?strat.by_symbol.map(s=>
+        `<tr><td>${s.symbol}</td><td>${s.strategy_used}</td><td class="num">${s.trades}</td>`+
+        `<td class="num">${s.wins}</td><td class="num">${s.losses}</td>`+
+        `<td class="num ${cls(s.pnl)}">${fmt(s.pnl)}</td></tr>`).join('')
+        :'<tr><td colspan="6" class="muted">No closed trades yet</td></tr>';
+  }
+
+  // bot trades
+  if(Array.isArray(bot)){
+    document.getElementById('t-bot').querySelector('tbody').innerHTML=
+      bot.length?bot.slice(0,50).map(t=>
+        `<tr><td>${t.id}</td><td>${(t.timestamp||'').replace('T',' ').slice(0,19)}</td><td>${t.symbol}</td>`+
+        `<td><span class="badge b-${t.action}">${t.action}</span></td><td class="num">${fmt(t.entry_price)}</td>`+
+        `<td class="num">${fmt(t.position_size)}</td><td>${t.strategy_used||''}</td>`+
+        `<td><span class="badge b-${t.outcome}">${t.outcome}</span></td>`+
+        `<td class="num ${cls(t.profit_loss)}">${fmt(t.profit_loss)}</td></tr>`).join('')
+        :'<tr><td colspan="9" class="muted">No bot trades yet</td></tr>';
+  }
+
+  // history
+  if(Array.isArray(history)){
+    document.getElementById('t-history').querySelector('tbody').innerHTML=
+      history.length?history.slice(0,60).map(h=>
+        `<tr><td>${h.ticket}</td><td>${h.time}</td><td>${h.symbol}</td>`+
+        `<td><span class="badge b-${h.type}">${h.type}</span></td><td class="num">${fmt(h.volume)}</td>`+
+        `<td class="num">${fmt(h.price)}</td><td class="num ${cls(h.net)}">${fmt(h.net)}</td></tr>`).join('')
+        :'<tr><td colspan="7" class="muted">No deals</td></tr>';
+  }
+
+  // cryptorti signals
+  if(cryptorti){
+    const conn=cryptorti.connected;
+    document.getElementById('cryptorti-status').innerHTML=
+      `Feed: <b style="color:${conn?'var(--green)':'var(--red)'}">${conn?'connected':'offline'}</b>`+
+      ` • ${cryptorti.count||0} active signals • updated ${cryptorti.updated_at?new Date(cryptorti.updated_at).toLocaleTimeString():'—'}`;
+    document.getElementById('t-cryptorti').querySelector('tbody').innerHTML=
+      (cryptorti.signals||[]).length?cryptorti.signals.slice().reverse().map(s=>
+        `<tr><td>${(s.signal_id||'').slice(0,24)}</td><td>${s.stage||''}</td><td>${s.status||''}</td>`+
+        `<td>${s.exchange||''}</td><td class="num">${fmt(s.amount_btc)}</td>`+
+        `<td class="num">${s.amount_usd?('$'+Math.round(s.amount_usd).toLocaleString()):'—'}</td>`+
+        `<td>${(s.detected_at||'').replace('T',' ').slice(0,19)}</td></tr>`).join('')
+        :'<tr><td colspan="7" class="muted">No active signals (start the CryptoRTI client)</td></tr>';
+  }
+
+  drawEquity(equity);
+}
+refresh();
+setInterval(refresh,4000);
+</script>
+</body>
+</html>

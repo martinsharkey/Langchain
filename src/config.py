@@ -78,12 +78,140 @@ MT5_PASSWORD = os.getenv("MT5_PASSWORD", "")
 MT5_SERVER = os.getenv("MT5_SERVER", "")
 
 # ─── Trading Parameters ─────────────────────────────────────
-SYMBOL = "XAUUSD"
+SYMBOL = "XAUUSD"         # Base/primary symbol (broker suffix resolved at runtime)
 TIMEFRAME = "H1"          # Primary timeframe for analysis
 ENTRY_TIMEFRAME = "M15"   # Timeframe for entry signals
 RISK_PERCENT = float(os.getenv("XAUUSD_RISK_PERCENT", "1.0"))
 MAX_POSITION_SIZE = float(os.getenv("XAUUSD_MAX_POSITION_SIZE", "0.1"))
 MIN_RISK_REWARD_RATIO = 2.0
+
+# ─── Multi-Symbol Trading ───────────────────────────────────
+# Base symbols the bot may trade. Broker-specific suffixes (e.g. -ECN, .crp)
+# are resolved at runtime by the BrokerAdapter, which selects the TRADABLE
+# variant (trade_mode == full). Comma-separated env override supported.
+#
+# Expanded to a diverse, liquid, tight-spread set across asset classes to plug
+# the learning gap and identify what works per instrument:
+#   XAUUSD (gold), XAGUSD (silver) - metals
+#   BTCUSD, ETHUSD               - crypto (also covered by CryptoRTI)
+#   EURUSD, AUDUSD, USDCAD       - FX majors (tight spreads, distinct behaviour)
+#   GER40                        - equity index (regime diversity)
+# MAX_OPEN_POSITIONS caps total simultaneous exposure across all symbols.
+TRADING_SYMBOLS = [
+    s.strip().upper()
+    for s in os.getenv(
+        "TRADING_SYMBOLS",
+        "XAUUSD,XAGUSD,BTCUSD,ETHUSD,EURUSD,AUDUSD,USDCAD,GER40"
+    ).split(",")
+    if s.strip()
+]
+
+# ─── Scalping Mode ──────────────────────────────────────────
+# When enabled, the bot trades small, frequent, tight trades to accumulate a
+# large sample of real closed outcomes quickly (for learning). Uses 0.01 lots.
+SCALP_MODE = os.getenv("SCALP_MODE", "true").lower() in ("true", "1", "yes")
+SCALP_LOT = float(os.getenv("SCALP_LOT", "0.01"))
+SCALP_TP_POINTS = int(os.getenv("SCALP_TP_POINTS", "400"))   # take-profit distance in points
+SCALP_SL_POINTS = int(os.getenv("SCALP_SL_POINTS", "300"))   # stop-loss distance in points
+SCALP_CONFIDENCE_MIN = float(os.getenv("SCALP_CONFIDENCE_MIN", "0.45"))  # lower bar to build sample
+SCALP_TARGET_TRADES = int(os.getenv("SCALP_TARGET_TRADES", "100"))       # learning goal
+SCALP_MAX_OPEN_PER_SYMBOL = int(os.getenv("SCALP_MAX_OPEN_PER_SYMBOL", "1"))
+SCALP_CYCLE_SECONDS = int(os.getenv("SCALP_CYCLE_SECONDS", "15"))         # loop cadence
+
+# ─── Multi-Timeframe Alignment ──────────────────────────────────────
+# Before a fast (1m) entry, require that higher timeframes don't clearly oppose
+# the trade direction. Keeps scalps aligned with the broader trend.
+MTF_ALIGNMENT_ENABLED = os.getenv("MTF_ALIGNMENT_ENABLED", "true").lower() in ("true", "1", "yes")
+MTF_ALIGNMENT_TFS = [s.strip() for s in os.getenv("MTF_ALIGNMENT_TFS", "M15,H1,H4").split(",") if s.strip()]
+# A counter-trend signal this confident is allowed through the MTF gate, so the
+# bot can take the other side on strong setups instead of only ever trend-trading.
+MTF_COUNTERTREND_MIN_CONF = float(os.getenv("MTF_COUNTERTREND_MIN_CONF", "0.7"))
+
+# ─── Trading Mode ───────────────────────────────────────────
+# Controls how far the bot is allowed to act on its decisions.
+# This is the master safety gate for the whole system.
+#
+#   OBSERVE    — Analyze and log decisions ONLY. No orders, no trade
+#                records written. Pure dry-run for building confidence.
+#   PAPER      — Simulate fills using real live prices/spread. Positions
+#                and outcomes are tracked as PAPER (clearly labelled),
+#                but no real order is sent to the broker.
+#   LIVE_MICRO — Place REAL orders, hard-capped to micro lots (0.01).
+#   LIVE       — Place REAL orders using full configured sizing.
+#
+# Default is the safest mode. Promotion between modes is gated by the
+# readiness system + explicit human approval (see REPAIR_PLAN.md).
+_VALID_TRADING_MODES = ("OBSERVE", "PAPER", "LIVE_MICRO", "LIVE")
+TRADING_MODE = os.getenv("TRADING_MODE", "OBSERVE").strip().upper()
+if TRADING_MODE not in _VALID_TRADING_MODES:
+    TRADING_MODE = "OBSERVE"
+
+# Micro-lot cap applied when TRADING_MODE == "LIVE_MICRO"
+LIVE_MICRO_MAX_LOT = float(os.getenv("LIVE_MICRO_MAX_LOT", "0.01"))
+
+
+def is_live_mode() -> bool:
+    """True if the current mode places REAL orders on the broker."""
+    return TRADING_MODE in ("LIVE_MICRO", "LIVE")
+
+
+# ─── Demo vs Live realism ───────────────────────────────────
+# Demo accounts fill with ~0 slippage and often tighter spread than a real live
+# account. To avoid over-fitting to unrealistically clean demo fills, backtests
+# and (optionally) paper simulation add a realism haircut: an assumed extra
+# spread + slippage in points applied per trade. Set to demo-realistic values;
+# raise for live-account modelling. The engine records account type so we always
+# know whether results came from demo or live.
+ASSUMED_SLIPPAGE_POINTS = float(os.getenv("ASSUMED_SLIPPAGE_POINTS", "2"))
+BACKTEST_SPREAD_HAIRCUT = float(os.getenv("BACKTEST_SPREAD_HAIRCUT", "1.0"))  # x live spread
+# Detected at runtime from MT5 (account_info.trade_mode: 0=demo,1=contest,2=real)
+ACCOUNT_IS_DEMO = None  # set by the engine on connect
+
+
+# ─── Risk Management (Phase 3) ──────────────────────────────
+# The master safety layer. All limits are % of the START-OF-DAY balance so they
+# scale automatically: 50% of a £100 demo is £50; 50% (or a tighter live value)
+# of a £50k account is a substantial, balance-relative figure.
+#
+# Daily-loss halt: when the day's realized loss reaches this % of the day's
+# opening balance, the bot stops opening new trades until the daily reset
+# (so "the bot can go again" next session/day).
+DAILY_LOSS_LIMIT_PCT = float(os.getenv("DAILY_LOSS_LIMIT_PCT", "50"))   # 50% for demo
+# For a live account you'll want this much tighter, e.g. 2–5%.
+LIVE_DAILY_LOSS_LIMIT_PCT = float(os.getenv("LIVE_DAILY_LOSS_LIMIT_PCT", "5"))
+
+MAX_OPEN_POSITIONS = int(os.getenv("MAX_OPEN_POSITIONS", "6"))          # across all symbols
+MAX_SPREAD_POINTS = float(os.getenv("MAX_SPREAD_POINTS", "0"))         # 0 = disabled; per-symbol override better
+MIN_FREE_MARGIN = float(os.getenv("MIN_FREE_MARGIN", "10"))            # refuse if below
+
+# Magic number stamped on the bot's own orders. Positions with a DIFFERENT magic
+# (or 0) are treated as MANUAL trades and adopted/managed by the bot too.
+BOT_MAGIC = int(os.getenv("BOT_MAGIC", "987654"))
+# Pending trades older than this with no findable closing deal are marked
+# 'unknown' so they stop skewing win/loss statistics.
+PENDING_STALE_HOURS = float(os.getenv("PENDING_STALE_HOURS", "48"))
+
+# ─── Adaptive Intelligence (L4 reflect / L5 synthesize / L6 backtest) ──
+# How often (in engine cycles) to run the adaptive self-improvement pass, and
+# the minimum closed-trade sample per symbol before reflection is meaningful.
+ADAPTIVE_EVERY_CYCLES = int(os.getenv("ADAPTIVE_EVERY_CYCLES", "240"))  # ~1h at 15s cycles
+ADAPTIVE_MIN_SAMPLE = int(os.getenv("ADAPTIVE_MIN_SAMPLE", "10"))
+
+# ─── Researcher -> action feedback ──────────────────────────
+# Pause new entries on a symbol the PerformanceResearcher flags as bleeding.
+SYMBOL_PAUSE_MIN_TRADES = int(os.getenv("SYMBOL_PAUSE_MIN_TRADES", "10"))
+SYMBOL_PAUSE_PNL = float(os.getenv("SYMBOL_PAUSE_PNL", "-15"))       # net pnl <= this
+SYMBOL_PAUSE_WINRATE = float(os.getenv("SYMBOL_PAUSE_WINRATE", "30"))  # AND win rate < this
+# Persisted kill switch file — create/toggle from dashboard or by touching the file.
+KILL_SWITCH_FILE = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data", "KILL_SWITCH"
+)
+
+
+def effective_daily_loss_pct() -> float:
+    """Daily loss limit % for the current mode (tighter on live)."""
+    return LIVE_DAILY_LOSS_LIMIT_PCT if TRADING_MODE == "LIVE" else DAILY_LOSS_LIMIT_PCT
+
 
 # ─── Agent Configuration ────────────────────────────────────
 AGENT_TEMPERATURE = 0.7

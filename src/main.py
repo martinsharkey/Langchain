@@ -33,7 +33,7 @@ from typing import Optional
 # Add project root to path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from src.config import validate_config, SYMBOL, DATA_DIR
+from src.config import validate_config, SYMBOL, DATA_DIR, TRADING_MODE, is_live_mode
 from src.core.agent import create_main_agent
 from src.core.llm import get_groq_llm, get_configured_providers
 from src.mt5.connector import get_connector
@@ -850,91 +850,80 @@ class TradingBot:
             console.print(f"  [dim]Still tracking {len(self.open_positions)} open position(s)[/dim]")
     
     def execute_trade(self, risk_result: dict, strategy_result: dict) -> dict:
-        """Execute the trade if approved."""
+        """
+        Act on an approved decision, honoring the configured TRADING_MODE.
+
+        Phase 0 (current): OBSERVE is fully honest — it logs the decision but
+        writes NO trade record and opens NO position, so the learning system is
+        never fed phantom data. PAPER/LIVE order placement is wired in Phase 1
+        via the BrokerAdapter; until then those modes explicitly report that
+        real execution is not yet enabled rather than fabricating a fill.
+        """
         console.print("\n[bold cyan]Phase 6d: Trade Execution[/bold cyan]")
         console.print("  " + "─" * 50)
-        
+        console.print(f"  [dim]Trading mode:[/dim] [bold]{TRADING_MODE}[/bold]")
+
         if not risk_result.get("approved"):
             console.print("  [yellow]Trade not approved — skipping execution[/yellow]")
-            return {"executed": False, "reason": "Risk check failed"}
-        
+            return {"executed": False, "reason": "Risk check failed", "mode": TRADING_MODE}
+
         signal = strategy_result.get("signal", {})
         if not signal or signal.get("action") == "hold":
-            return {"executed": False, "reason": "No signal"}
-        
+            return {"executed": False, "reason": "No signal", "mode": TRADING_MODE}
+
         action = signal.get("action")
         price = signal.get("price", 0)
         stop_loss = signal.get("stop_loss")
         take_profit = signal.get("take_profit")
         strategy_used = signal.get("strategy_used", "unknown")
         strategy_combo = signal.get("strategy_combination", [])
-        
-        self._print_step(f"Executing {action.upper()} trade...", "running")
-        
-        console.print(f"\n  [bold]Order Details:[/bold]")
+        position_size = risk_result.get("position_size", 0.01)
+
+        console.print(f"\n  [bold]Decision Details:[/bold]")
         console.print(f"    Symbol: {SYMBOL}")
         console.print(f"    Action: [bold]{'BUY' if action == 'buy' else 'SELL'}[/bold]")
-        console.print(f"    Volume: {risk_result.get('position_size', 0.01)} lots")
+        console.print(f"    Volume: {position_size} lots")
         console.print(f"    Entry: ${price:.2f}")
         console.print(f"    Stop Loss: ${stop_loss:.2f}" if stop_loss else "    Stop Loss: N/A")
         console.print(f"    Take Profit: ${take_profit:.2f}" if take_profit else "    Take Profit: N/A")
         console.print(f"    Strategy: {strategy_used}")
         if strategy_combo:
             console.print(f"    Strategy combo: {', '.join(strategy_combo)}")
-        
-        # Run execution agent
-        self._print_step("Execution agent processing order...", "running")
-        execution_agent = self.team["execution"]
-        
-        console.print("  [dim]┌─ Execution Agent Report ────────────────────────┐[/dim]")
-        execution_result = execution_agent.run(
-            f"Execute a {action} trade for {SYMBOL}:\n"
-            f"Volume: {risk_result.get('position_size', 0.01)} lots\n"
-            f"Entry: ${price:.2f}\n"
-            f"Stop Loss: ${stop_loss:.2f}\n"
-            f"Take Profit: ${take_profit:.2f}\n"
-            f"Strategy: {strategy_used}\n"
-            f"Comment: LangChain Meta-Strategy Trade #{self.iteration}"
+
+        # ── OBSERVE mode: analyze only, never write a trade or open a position ──
+        if TRADING_MODE == "OBSERVE":
+            console.print(
+                "  [yellow]OBSERVE mode:[/yellow] decision logged only. "
+                "No order placed, no trade recorded, no position tracked."
+            )
+            self._print_step("Observation recorded (no execution)", "done")
+            return {
+                "executed": False,
+                "observed": True,
+                "mode": TRADING_MODE,
+                "action": action,
+                "size": position_size,
+                "price": price,
+                "sl": stop_loss,
+                "tp": take_profit,
+                "strategy_used": strategy_used,
+                "strategy_combination": strategy_combo,
+            }
+
+        # ── PAPER / LIVE_MICRO / LIVE: real placement arrives in Phase 1 ──
+        # Until the BrokerAdapter is wired, do NOT fabricate a fill or write a
+        # phantom outcome. Report honestly that execution is not yet enabled.
+        console.print(
+            f"  [yellow]{TRADING_MODE} mode:[/yellow] order placement is not yet "
+            "enabled (Phase 1 BrokerAdapter pending). No real order sent."
         )
-        console.print("  [dim]└────────────────────────────────────────────────┘[/dim]")
-        
-        for line in execution_result.split('\n')[:6]:
-            if line.strip():
-                console.print(f"    {line.strip()}")
-        
-        
-        # Record the trade in the learning system
-        if self.meta_strategy:
-            self._print_step("Recording trade for learning...", "running")
-            self.meta_strategy.record_outcome(
-                decision=signal,
-                profit_loss=0.0,  # Will be updated when trade closes
-                exit_reason="pending",
-                indicators=strategy_result.get("indicators"),
-            )
-            self._print_step("Trade recorded in learning database", "done")
-        
-        self._print_step("Trade execution complete", "done")
-        
-        # ← FIX #3: Track the open position
-        if trade_result.get("executed"):
-            position = OpenPosition(
-                trade_id=f"trade_{self.iteration}_{int(time.time())}",
-                action=action,
-                entry_price=price,
-                entry_time=datetime.now(),
-                stop_loss=stop_loss,
-                take_profit=take_profit,
-                position_size=risk_result.get("position_size", 0.01),
-                decision=signal,
-            )
-            self.open_positions.append(position)
-            console.print(f"  [bold cyan]Position tracked[/bold cyan]: {position.trade_id}")
-        
+        self._print_step("Execution deferred to Phase 1 broker adapter", "done")
         return {
-            "executed": True,
+            "executed": False,
+            "pending_execution_layer": True,
+            "mode": TRADING_MODE,
             "action": action,
-            "size": risk_result.get("position_size"),
+            "size": position_size,
             "price": price,
             "sl": stop_loss,
             "tp": take_profit,

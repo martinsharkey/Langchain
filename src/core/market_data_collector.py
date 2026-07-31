@@ -23,9 +23,9 @@ from typing import Optional, Dict, List, Any
 from datetime import datetime, timezone
 import json
 
-from src.data_sources.economic_calendar import EconomicCalendarSourceMock
+from src.data_sources.economic_calendar import EconomicCalendarSource
 from src.data_sources.news_aggregator import NewsAggregatorSource
-from src.data_sources.central_banks import CentralBankSourceMock
+from src.data_sources.central_banks import CentralBankSource
 from src.data_sources.geopolitical import GeopoliticalSource
 from src.data_sources.gold_news import GoldNewsSource
 from src.data_sources.usd_strength import USDStrengthSource
@@ -47,9 +47,9 @@ class MarketDataCollector:
         self.total_timeout = 600  # 10 minutes overall
         
         # Initialize data sources
-        self.economic_calendar = EconomicCalendarSourceMock()
+        self.economic_calendar = EconomicCalendarSource()
         self.news_aggregator = NewsAggregatorSource()
-        self.central_banks = CentralBankSourceMock()
+        self.central_banks = CentralBankSource()
         self.geopolitical = GeopoliticalSource()
         self.gold_news = GoldNewsSource()
         self.usd_strength = USDStrengthSource()

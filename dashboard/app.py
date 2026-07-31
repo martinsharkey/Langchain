@@ -1,932 +1,365 @@
 """
-Trading Bot Dashboard — Production-ready web interface.
+Trading Dashboard — REAL DATA ONLY.
 
-Real-time monitoring with self-trading readiness meter.
+Every value shown is sourced from one of:
+  * Live MT5 account (balance, equity, positions, deal history, prices)
+  * bot_status.json written by the ScalpEngine (mode, cycle, open trades,
+    Algo Trading status, per-symbol prices, learning progress)
+  * The experience DB (closed trades, per-strategy performance)
+  * The knowledge DB (research topics/entries)
+
+If a source is unavailable it is reported as "unavailable" — never faked.
+
+Run standalone:  python -m flask --app dashboard.app run --port 5000
+Or via app.py (imports `app` from here).
 """
 
 import os
-import sys
 import json
 import sqlite3
-import logging
-from datetime import datetime, timedelta
-from pathlib import Path
+from datetime import datetime, timezone
 
-from flask import Flask, render_template_string, jsonify
+from flask import Flask, jsonify
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from src import config
+from src.utils.logger import get_logger
 
-from src.config import DATA_DIR
-
-logger = logging.getLogger("dashboard")
+logger = get_logger("dashboard")
 app = Flask(__name__)
 
-DB_PATH = os.path.join(DATA_DIR, "trading_experience.db")
-KB_PATH = os.path.join(DATA_DIR, "trading_knowledge.db")
+DATA_DIR = config.DATA_DIR
+EXPERIENCE_DB = os.path.join(DATA_DIR, "trading_experience.db")
+KNOWLEDGE_DB = os.path.join(DATA_DIR, "trading_knowledge.db")
 STATUS_PATH = os.path.join(DATA_DIR, "bot_status.json")
 
 
-# ═══════════════════════════════════════════════════════════════════
-# Database helpers
-# ═══════════════════════════════════════════════════════════════════
-
-def get_db(path: str) -> sqlite3.Connection:
-    conn = sqlite3.connect(path)
-    conn.row_factory = sqlite3.Row
-    return conn
-
-
-def safe_query(path: str, query: str, params=(), default=None):
+# ─────────────────────────── helpers ───────────────────────────
+def _query(db_path, sql, params=(), default=None):
+    if not os.path.exists(db_path):
+        return default if default is not None else []
     try:
-        if not os.path.exists(path):
-            return default
-        conn = get_db(path)
-        cur = conn.cursor()
-        cur.execute(query, params)
-        rows = [dict(r) for r in cur.fetchall()]
+        conn = sqlite3.connect(db_path)
+        conn.row_factory = sqlite3.Row
+        rows = [dict(r) for r in conn.execute(sql, params).fetchall()]
         conn.close()
         return rows
     except Exception as e:
-        logger.warning(f"DB query failed: {e}")
-        return default
+        logger.warning(f"query failed on {db_path}: {e}")
+        return default if default is not None else []
 
 
-# ═══════════════════════════════════════════════════════════════════
-# Readiness calculation
-# ═══════════════════════════════════════════════════════════════════
-
-def calculate_readiness() -> dict:
-    """
-    Calculate how ready the bot is for autonomous trading.
-    
-    Returns a score from 0-100 and detailed breakdown.
-    """
-    scores = []
-    details = {}
-    
-    # 1. Historical trades (max 30 points)
-    trades = safe_query(DB_PATH, "SELECT COUNT(*) as cnt FROM trades", default=[{"cnt": 0}])
-    trade_count = trades[0]["cnt"] if trades else 0
-    trade_score = min(trade_count / 30 * 30, 30)
-    scores.append(trade_score)
-    details["trades"] = {
-        "score": round(trade_score, 1),
-        "max": 30,
-        "value": trade_count,
-        "label": "Historical Trades",
-        "threshold": "Need 30 closed trades for statistical significance",
-    }
-    
-    # 2. Win rate (max 25 points)
-    perf = safe_query(DB_PATH, """
-        SELECT 
-            SUM(CASE WHEN outcome='win' THEN 1 ELSE 0 END) as wins,
-            SUM(CASE WHEN outcome='loss' THEN 1 ELSE 0 END) as losses
-        FROM trades WHERE outcome IN ('win', 'loss')
-    """, default=[{"wins": 0, "losses": 0}])
-    closed = (perf[0]["wins"] or 0) + (perf[0]["losses"] or 0)
-    win_rate = (perf[0]["wins"] / closed * 100) if closed > 0 else 0
-    win_score = min(win_rate / 60 * 25, 25) if closed >= 5 else 0
-    scores.append(win_score)
-    details["win_rate"] = {
-        "score": round(win_score, 1),
-        "max": 25,
-        "value": round(win_rate, 1),
-        "label": "Win Rate",
-        "threshold": "Need 60% win rate on 5+ closed trades",
-    }
-    
-    # 3. Strategy diversity (max 15 points)
-    strategies = safe_query(DB_PATH, """
-        SELECT strategy_name, total_trades, winning_trades, losing_trades
-        FROM strategy_performance
-    """, default=[])
-    active_strategies = sum(1 for s in strategies if s["total_trades"] > 0)
-    strat_score = min(active_strategies / 5 * 15, 15)
-    scores.append(strat_score)
-    details["strategies"] = {
-        "score": round(strat_score, 1),
-        "max": 15,
-        "value": active_strategies,
-        "label": "Active Strategies",
-        "threshold": "Need 5+ strategies with trade history",
-    }
-    
-    # 4. Knowledge base (max 15 points)
-    kb = safe_query(KB_PATH, "SELECT COUNT(*) as cnt FROM knowledge_entries", default=[{"cnt": 0}])
-    kb_count = kb[0]["cnt"] if kb else 0
-    kb_score = min(kb_count / 20 * 15, 15)
-    scores.append(kb_score)
-    details["knowledge"] = {
-        "score": round(kb_score, 1),
-        "max": 15,
-        "value": kb_count,
-        "label": "Knowledge Entries",
-        "threshold": "Need 20+ learned knowledge entries",
-    }
-    
-    # 5. Pattern store (max 10 points)
-    patterns = safe_query(KB_PATH, "SELECT COUNT(*) as cnt FROM knowledge_entries", default=[{"cnt": 0}])
-    pattern_count = patterns[0]["cnt"] if patterns else 0
-    pattern_score = min(pattern_count / 10 * 10, 10)
-    scores.append(pattern_score)
-    details["patterns"] = {
-        "score": round(pattern_score, 1),
-        "max": 10,
-        "value": pattern_count,
-        "label": "Pattern History",
-        "threshold": "Need 10+ stored patterns",
-    }
-    
-    # 6. Account stability (max 5 points)
+def _read_status():
+    if not os.path.exists(STATUS_PATH):
+        return None
     try:
-        from src.mt5.connector import get_connector
-        c = get_connector()
-        if c.is_connected() and not c.in_simulation_mode:
-            stability_score = 5
-        else:
-            stability_score = 0
+        with open(STATUS_PATH) as f:
+            return json.load(f)
     except Exception:
-        stability_score = 0
-    scores.append(stability_score)
-    details["connection"] = {
-        "score": stability_score,
-        "max": 5,
-        "value": "Connected" if stability_score > 0 else "Disconnected",
-        "label": "MT5 Connection",
-        "threshold": "Must be connected to live/demo account",
-    }
-    
-    total = sum(scores)
-    percentage = min(total, 100)
-    
-    # Determine status
-    if percentage >= 90:
-        status = "READY"
-        color = "#3fb950"
-    elif percentage >= 70:
-        status = "ALMOST READY"
-        color = "#d29922"
-    elif percentage >= 50:
-        status = "LEARNING"
-        color = "#58a6ff"
-    else:
-        status = "TRAINING"
-        color = "#f85149"
-    
-    return {
-        "score": round(percentage, 1),
-        "status": status,
-        "color": color,
-        "details": details,
-        "summary": f"{percentage:.0f}% ready for autonomous trading",
-    }
+        return None
 
 
-# ═══════════════════════════════════════════════════════════════════
-# Routes
-# ═══════════════════════════════════════════════════════════════════
+# ─────────────────────────── API ───────────────────────────
+@app.route("/api/status")
+def api_status():
+    """Engine + Algo Trading + account snapshot (from bot_status.json)."""
+    status = _read_status()
+    if not status:
+        # fall back to live MT5 read so the dashboard still shows account/algo
+        try:
+            from src.mt5.broker_adapter import get_algo_status
+            from src.mt5.account import get_account_info
+            algo = get_algo_status()
+            acct = get_account_info()
+            return jsonify({
+                "engine_running": False,
+                "mode": config.TRADING_MODE,
+                "note": "Engine not running — showing live MT5 only",
+                "algo_trading": {
+                    "can_trade": algo.can_trade,
+                    "terminal_trade_allowed": algo.terminal_trade_allowed,
+                    "account_trade_allowed": algo.account_trade_allowed,
+                    "connected": algo.connected,
+                    "reason": algo.reason,
+                },
+                "account": acct if isinstance(acct, dict) else {},
+                "trades_opened": 0, "trades_closed": 0,
+                "target_trades": config.SCALP_TARGET_TRADES,
+                "open_positions": [], "symbols": [],
+            })
+        except Exception as e:
+            return jsonify({"error": str(e), "engine_running": False})
+    status["engine_running"] = status.get("running", False)
+    return jsonify(status)
 
-@app.route("/")
-def index():
-    return render_template_string(HTML_TEMPLATE)
 
-
-@app.route("/api/readiness")
-def api_readiness():
-    readiness = calculate_readiness()
-    
-    # Add live MT5 proof
+@app.route("/api/trades/history")
+def api_trades_history():
+    """REAL executed deals from the live MT5 account history."""
     try:
         from src.mt5.connector import get_connector
-        from src.mt5.account import get_account_info
-        from src.mt5.data import get_last_price
-        
+        from src.mt5.account import get_history
         c = get_connector()
-        c.initialize()
-        mt5_connected = c.is_connected() and not c.in_simulation_mode
-        
-        if mt5_connected:
-            acc = get_account_info()
-            last = get_last_price("XAUUSD")
-            readiness["mt5"] = {
-                "connected": True,
-                "simulation": False,
-                "account": acc,
-                "xauusd_last": last,
-            }
-            # ← FIX: Pass account currency for dashboard
-            readiness["account_currency"] = acc.get("currency", "USD") if acc else "USD"
-        else:
-            readiness["mt5"] = {
-                "connected": False,
-                "simulation": True,
-                "account": None,
-                "xauusd_last": None,
-            }
-            readiness["account_currency"] = "USD"  # Fallback
+        if not c.is_connected():
+            c.initialize()
+        deals = get_history(deals=100)
+        if isinstance(deals, dict):
+            return jsonify({"error": deals.get("error", "unavailable"), "deals": []})
+        rows = []
+        for d in deals or []:
+            ts = d.get("time")
+            try:
+                ts = datetime.utcfromtimestamp(int(ts)).strftime("%Y-%m-%d %H:%M:%S")
+            except (ValueError, TypeError):
+                ts = str(ts)
+            profit = float(d.get("profit") or 0)
+            comm = float(d.get("commission") or 0)
+            swap = float(d.get("swap") or 0)
+            rows.append({
+                "ticket": d.get("ticket"), "time": ts, "symbol": d.get("symbol"),
+                "type": d.get("type"), "volume": float(d.get("volume") or 0),
+                "price": float(d.get("price") or 0),
+                "net": round(profit + comm + swap, 2),
+                "comment": d.get("comment", ""),
+            })
+        rows.reverse()
+        return jsonify(rows)
     except Exception as e:
-        readiness["mt5"] = {
-            "connected": False,
-            "simulation": True,
-            "error": str(e),
-        }
-    
-    return jsonify(readiness)
+        return jsonify({"error": str(e), "deals": []})
 
 
-@app.route("/api/trades")
-def api_trades():
-    limit = int(os.environ.get("DASHBOARD_TRADES_LIMIT", "50"))
-    rows = safe_query(DB_PATH, """
-        SELECT id, timestamp, symbol, action, entry_price, stop_loss,
-               take_profit, position_size, confidence, strategy_used,
-               outcome, profit_loss, exit_price, exit_reason,
-               market_regime, created_at
-        FROM trades
-        ORDER BY id DESC
-        LIMIT ?
-    """, (limit,), default=[])
+@app.route("/api/trades/bot")
+def api_trades_bot():
+    """Trades the BOT placed and recorded (experience DB), with real outcomes."""
+    rows = _query(EXPERIENCE_DB, """
+        SELECT id, timestamp, symbol, action, entry_price, stop_loss, take_profit,
+               position_size, confidence, strategy_used, strategy_combination,
+               outcome, profit_loss, exit_price, exit_reason
+        FROM trades ORDER BY id DESC LIMIT 100
+    """)
     return jsonify(rows)
 
 
-@app.route("/api/performance")
-def api_performance():
-    overall = safe_query(DB_PATH, """
-        SELECT 
-            COUNT(*) as total_trades,
-            SUM(CASE WHEN outcome='win' THEN 1 ELSE 0 END) as wins,
-            SUM(CASE WHEN outcome='loss' THEN 1 ELSE 0 END) as losses,
-            SUM(CASE WHEN outcome='pending' THEN 1 ELSE 0 END) as pending,
-            COALESCE(SUM(profit_loss), 0) as total_pnl,
-            AVG(CASE WHEN outcome IN ('win','loss') THEN confidence ELSE NULL END) as avg_confidence
-        FROM trades
-    """, default=[{}])
-    
-    strategies = safe_query(DB_PATH, """
+@app.route("/api/strategies")
+def api_strategies():
+    """Per-strategy performance from real closed trades + which symbols each traded."""
+    perf = _query(EXPERIENCE_DB, """
         SELECT strategy_name, total_trades, winning_trades, losing_trades,
                total_profit, total_loss, avg_confidence
-        FROM strategy_performance
-        ORDER BY total_trades DESC
-    """, default=[])
-    
-    for s in strategies:
-        s["win_rate"] = round(s["winning_trades"] / max(s["total_trades"], 1) * 100, 2)
-        s["profit_factor"] = round(s["total_profit"] / max(abs(s["total_loss"]), 0.001), 2)
-    
+        FROM strategy_performance ORDER BY total_trades DESC
+    """)
+    for s in perf:
+        tt = s.get("total_trades") or 0
+        wins = s.get("winning_trades") or 0
+        s["win_rate"] = round(wins / tt * 100, 1) if tt else 0.0
+        s["net_profit"] = round((s.get("total_profit") or 0) - (s.get("total_loss") or 0), 2)
+
+    # which symbols each strategy has traded + best strategy per symbol (real closed trades)
+    by_symbol = _query(EXPERIENCE_DB, """
+        SELECT symbol, strategy_used,
+               COUNT(*) as trades,
+               SUM(CASE WHEN outcome='win' THEN 1 ELSE 0 END) as wins,
+               SUM(CASE WHEN outcome='loss' THEN 1 ELSE 0 END) as losses,
+               COALESCE(SUM(profit_loss),0) as pnl
+        FROM trades
+        WHERE outcome IN ('win','loss','breakeven')
+        GROUP BY symbol, strategy_used
+        ORDER BY symbol, pnl DESC
+    """)
+    return jsonify({"performance": perf, "by_symbol": by_symbol})
+
+
+@app.route("/api/learning")
+def api_learning():
+    """Learning progress: closed-trade counts, symbols learned, knowledge base."""
+    counts = _query(EXPERIENCE_DB, """
+        SELECT
+            COUNT(*) as total,
+            SUM(CASE WHEN outcome='win' THEN 1 ELSE 0 END) as wins,
+            SUM(CASE WHEN outcome='loss' THEN 1 ELSE 0 END) as losses,
+            SUM(CASE WHEN outcome='breakeven' THEN 1 ELSE 0 END) as breakeven,
+            SUM(CASE WHEN outcome='pending' THEN 1 ELSE 0 END) as pending,
+            COALESCE(SUM(profit_loss),0) as net_pnl
+        FROM trades
+    """, default=[{}])
+    c = counts[0] if counts else {}
+    closed = (c.get("wins") or 0) + (c.get("losses") or 0) + (c.get("breakeven") or 0)
+
+    symbols = _query(EXPERIENCE_DB, """
+        SELECT symbol, COUNT(*) as trades,
+               SUM(CASE WHEN outcome='win' THEN 1 ELSE 0 END) as wins,
+               SUM(CASE WHEN outcome='loss' THEN 1 ELSE 0 END) as losses,
+               COALESCE(SUM(profit_loss),0) as pnl
+        FROM trades GROUP BY symbol ORDER BY trades DESC
+    """)
+
+    kb_entries = _query(KNOWLEDGE_DB, "SELECT COUNT(*) as n FROM knowledge_entries", default=[{"n": 0}])
+    kb_topics = _query(KNOWLEDGE_DB, "SELECT name as topic_name, entry_count as n FROM topics ORDER BY entry_count DESC",
+                       default=[])
+    pending_q = _query(KNOWLEDGE_DB, "SELECT COUNT(*) as n FROM pending_questions", default=[{"n": 0}])
+
+    target = config.SCALP_TARGET_TRADES
     return jsonify({
-        "overall": overall[0] if overall else {},
-        "strategies": strategies,
+        "closed_trades": closed,
+        "target_trades": target,
+        "progress_pct": round(min(closed / target * 100, 100), 1) if target else 0,
+        "wins": c.get("wins") or 0,
+        "losses": c.get("losses") or 0,
+        "breakeven": c.get("breakeven") or 0,
+        "pending": c.get("pending") or 0,
+        "net_pnl": round(c.get("net_pnl") or 0, 2),
+        "win_rate": round((c.get("wins") or 0) / closed * 100, 1) if closed else 0.0,
+        "symbols_learned": symbols,
+        "knowledge_entries": kb_entries[0]["n"] if kb_entries else 0,
+        "knowledge_topics": kb_topics,
+        "pending_questions": pending_q[0]["n"] if pending_q else 0,
     })
 
 
-@app.route("/api/knowledge")
-def api_knowledge():
-    entries = safe_query(KB_PATH, "SELECT COUNT(*) as cnt FROM knowledge_entries", default=[{"cnt": 0}])
-    topics = safe_query(KB_PATH, "SELECT COUNT(DISTINCT topic) as cnt FROM knowledge_entries", default=[{"cnt": 0}])
-    pending = safe_query(KB_PATH, "SELECT COUNT(*) as cnt FROM pending_questions WHERE status='pending'", default=[{"cnt": 0}])
-    
-    topic_breakdown = safe_query(KB_PATH, """
-        SELECT topic, COUNT(*) as cnt, AVG(confidence) as avg_conf
-        FROM knowledge_entries
-        GROUP BY topic
-        ORDER BY cnt DESC
+@app.route("/api/research")
+def api_research():
+    """Research status + topics (knowledge base is the persistent research store)."""
+    topics = _query(KNOWLEDGE_DB, """
+        SELECT name as topic_name, description, entry_count
+        FROM topics ORDER BY entry_count DESC LIMIT 25
     """, default=[])
-    
-    recent = safe_query(KB_PATH, """
-        SELECT id, question, answer, topic, subtopic, confidence, created_at
-        FROM knowledge_entries
-        ORDER BY id DESC
-        LIMIT 20
+    recent = _query(KNOWLEDGE_DB, """
+        SELECT question as title, topic as category, created_at
+        FROM knowledge_entries ORDER BY id DESC LIMIT 15
     """, default=[])
-    
+    # News/research availability (honest, granular):
+    # RSS (Yahoo/CoinDesk/Investing) needs NO key; central banks + geopolitical
+    # scrape public sites; only the NewsAPI aggregator needs NEWSAPI_KEY.
+    newsapi = bool(os.getenv("NEWSAPI_KEY"))
+    rss_items = []
+    rss_ok = False
+    try:
+        from src.data_sources.rss_news import RSSNewsSource
+        rss = RSSNewsSource()
+        rss_items = rss.fetch()[:15]
+        rss_ok = bool(rss_items)
+    except Exception as e:
+        logger.debug(f"rss news skip: {e}")
+
+    if rss_ok or newsapi:
+        news_status = "available (live headlines)"
+    else:
+        news_status = "unavailable"
     return jsonify({
-        "total_entries": entries[0]["cnt"] if entries else 0,
-        "total_topics": topics[0]["cnt"] if topics else 0,
-        "pending_questions": pending[0]["cnt"] if pending else 0,
-        "topics": topic_breakdown,
+        "news_status": news_status,
+        "newsapi_configured": newsapi,
+        "rss_available": rss_ok,
+        "headlines": rss_items,
+        "topics": topics,
         "recent_entries": recent,
     })
 
 
-@app.route("/api/patterns")
-def api_patterns():
-    try:
-        from src.learning.vector_store import PatternVectorStore
-        store = PatternVectorStore()
-        return jsonify({"pattern_count": store.pattern_count, "status": "ok"})
-    except Exception as e:
-        return jsonify({"pattern_count": 0, "status": "error", "error": str(e)})
+@app.route("/api/readiness")
+def api_readiness():
+    """Trading readiness score based on REAL closed trades + connection + learning."""
+    learning = api_learning().get_json()
+    status = _read_status() or {}
+    algo = status.get("algo_trading", {})
+
+    closed = learning["closed_trades"]
+    win_rate = learning["win_rate"]
+    target = learning["target_trades"]
+
+    scores, details = [], {}
+
+    # connection + algo (20)
+    conn_ok = algo.get("can_trade", False)
+    conn_score = 20 if conn_ok else 0
+    scores.append(conn_score)
+    details["connection"] = {"label": "Algo Trading enabled", "score": conn_score, "max": 20,
+                             "value": algo.get("reason", "unknown")}
+
+    # sample size (40) — driving toward target
+    sample_score = min(closed / target * 40, 40) if target else 0
+    scores.append(sample_score)
+    details["sample"] = {"label": f"Closed trades ({closed}/{target})", "score": round(sample_score, 1),
+                         "max": 40, "value": closed}
+
+    # win rate (40) — only meaningful with >=20 closed
+    wr_score = min(win_rate / 60 * 40, 40) if closed >= 20 else 0
+    scores.append(wr_score)
+    details["win_rate"] = {"label": "Win rate (needs 20+ trades)", "score": round(wr_score, 1),
+                           "max": 40, "value": f"{win_rate}%"}
+
+    total = round(sum(scores), 1)
+    if total >= 80:
+        status_txt, color = "READY", "#3fb950"
+    elif total >= 50:
+        status_txt, color = "LEARNING", "#d29922"
+    else:
+        status_txt, color = "TRAINING", "#58a6ff"
+
+    return jsonify({"score": total, "status": status_txt, "color": color,
+                    "details": details,
+                    "summary": f"{total}% — {status_txt} ({closed}/{target} trades, {win_rate}% win)"})
 
 
-@app.route("/api/cycles")
-def api_cycles():
-    rows = safe_query(DB_PATH, """
-        SELECT timestamp, signal_action, signal_confidence, trade_executed, profit_loss
+@app.route("/api/equity")
+def api_equity():
+    """Cumulative P&L curve from real closed trades (for the hero chart)."""
+    rows = _query(EXPERIENCE_DB, """
+        SELECT id, timestamp, profit_loss, outcome
         FROM trades
+        WHERE outcome IN ('win','loss','breakeven')
         ORDER BY id ASC
-    """, default=[])
-    return jsonify(rows)
+    """)
+    curve, cum = [], 0.0
+    for r in rows:
+        cum += float(r.get("profit_loss") or 0)
+        curve.append({"t": (r.get("timestamp") or "")[:19].replace("T", " "),
+                      "cum": round(cum, 2)})
+    return jsonify(curve)
 
 
-# ═══════════════════════════════════════════════════════════════════
-# HTML Template
-# ═══════════════════════════════════════════════════════════════════
-
-HTML_TEMPLATE = r"""
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Trading Bot Dashboard</title>
-    <style>
-        * { margin: 0; padding: 0; box-sizing: border-box; }
-        body { 
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; 
-            background: #0d1117; 
-            color: #c9d1d9; 
-            padding: 20px;
-            min-height: 100vh;
-        }
-        h1 { 
-            color: #58a6ff; 
-            margin-bottom: 5px;
-            font-size: 24px;
-        }
-        .subtitle {
-            color: #8b949e;
-            font-size: 14px;
-            margin-bottom: 20px;
-        }
-        h2 { 
-            color: #8b949e; 
-            font-size: 14px; 
-            margin: 25px 0 12px; 
-            text-transform: uppercase; 
-            letter-spacing: 1px;
-            border-bottom: 1px solid #30363d;
-            padding-bottom: 8px;
-        }
-        .grid { 
-            display: grid; 
-            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); 
-            gap: 15px; 
-            margin-bottom: 20px; 
-        }
-        .card { 
-            background: #161b22; 
-            border: 1px solid #30363d; 
-            border-radius: 8px; 
-            padding: 15px; 
-        }
-        .card h3 { 
-            color: #58a6ff; 
-            font-size: 13px; 
-            margin-bottom: 10px;
-            text-transform: uppercase;
-            letter-spacing: 0.5px;
-        }
-        .metric { 
-            font-size: 28px; 
-            font-weight: bold; 
-            color: #c9d1d9; 
-        }
-        .metric small { 
-            font-size: 13px; 
-            color: #8b949e; 
-            display: block;
-            margin-top: 4px;
-        }
-        .positive { color: #3fb950; }
-        .negative { color: #f85149; }
-        .neutral { color: #d29922; }
-        
-        /* Readiness Meter */
-        .readiness-container {
-            background: #161b22;
-            border: 1px solid #30363d;
-            border-radius: 12px;
-            padding: 20px;
-            margin-bottom: 25px;
-        }
-        .readiness-header {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            margin-bottom: 15px;
-        }
-        .readiness-status {
-            font-size: 18px;
-            font-weight: bold;
-            padding: 6px 16px;
-            border-radius: 20px;
-            background: #21262d;
-        }
-        .readiness-meter {
-            width: 100%;
-            height: 32px;
-            background: #21262d;
-            border-radius: 16px;
-            overflow: hidden;
-            position: relative;
-            margin-bottom: 15px;
-        }
-        .readiness-fill {
-            height: 100%;
-            border-radius: 16px;
-            transition: width 0.5s ease, background 0.5s ease;
-            position: relative;
-        }
-        .readiness-fill::after {
-            content: '';
-            position: absolute;
-            top: 0;
-            left: 0;
-            right: 0;
-            bottom: 0;
-            background: linear-gradient(90deg, transparent, rgba(255,255,255,0.1), transparent);
-            animation: shimmer 2s infinite;
-        }
-        @keyframes shimmer {
-            0% { transform: translateX(-100%); }
-            100% { transform: translateX(100%); }
-        }
-        .readiness-details {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-            gap: 10px;
-        }
-        .readiness-item {
-            background: #0d1117;
-            border: 1px solid #30363d;
-            border-radius: 6px;
-            padding: 10px;
-        }
-        .readiness-item-label {
-            font-size: 11px;
-            color: #8b949e;
-            text-transform: uppercase;
-            letter-spacing: 0.5px;
-            margin-bottom: 4px;
-        }
-        .readiness-item-value {
-            font-size: 16px;
-            font-weight: bold;
-            color: #c9d1d9;
-        }
-        .readiness-item-threshold {
-            font-size: 11px;
-            color: #8b949e;
-            margin-top: 2px;
-        }
-        
-        /* Connection Badge */
-        .connection-badge {
-            display: inline-flex;
-            align-items: center;
-            gap: 8px;
-            padding: 8px 12px;
-            border-radius: 6px;
-            font-size: 13px;
-            font-weight: 600;
-            margin-bottom: 10px;
-        }
-        .connection-badge.live {
-            background: #23863633;
-            color: #3fb950;
-            border: 1px solid #238636;
-        }
-        .connection-badge.sim {
-            background: #d2992233;
-            color: #d29922;
-            border: 1px solid #d29922;
-        }
-        .connection-badge.offline {
-            background: #da363333;
-            color: #f85149;
-            border: 1px solid #da3633;
-        }
-        .pulse {
-            width: 10px;
-            height: 10px;
-            border-radius: 50%;
-            background: currentColor;
-            animation: pulse 2s infinite;
-        }
-        @keyframes pulse {
-            0%, 100% { opacity: 1; }
-            50% { opacity: 0.4; }
-        }
-        
-        /* Tables */
-        table { 
-            width: 100%; 
-            border-collapse: collapse; 
-            font-size: 13px; 
-        }
-        th, td { 
-            text-align: left; 
-            padding: 8px; 
-            border-bottom: 1px solid #30363d; 
-        }
-        th { 
-            color: #8b949e; 
-            font-weight: 600;
-            font-size: 12px;
-            text-transform: uppercase;
-            letter-spacing: 0.5px;
-        }
-        tr:hover { background: #1c2128; }
-        
-        .badge { 
-            display: inline-block; 
-            padding: 3px 10px; 
-            border-radius: 12px; 
-            font-size: 11px; 
-            font-weight: 600; 
-        }
-        .badge-buy { background: #238636; color: white; }
-        .badge-sell { background: #da3633; color: white; }
-        .badge-hold { background: #6e7681; color: white; }
-        .badge-win { background: #238636; color: white; }
-        .badge-loss { background: #da3633; color: white; }
-        .badge-pending { background: #d29922; color: white; }
-        
-        .refresh { 
-            color: #8b949e; 
-            font-size: 12px; 
-            margin-top: 10px;
-        }
-        a { 
-            color: #58a6ff; 
-            text-decoration: none; 
-        }
-        a:hover { 
-            text-decoration: underline; 
-        }
-        .section { 
-            margin-bottom: 30px; 
-        }
-        
-        .empty-state {
-            text-align: center;
-            padding: 30px;
-            color: #8b949e;
-            font-style: italic;
-        }
-    </style>
-</head>
-<body>
-    <h1>Trading Bot Dashboard</h1>
-    <p class="subtitle">Real-time monitoring and self-trading readiness</p>
-
-    <!-- Readiness Meter -->
-    <div class="readiness-container">
-        <div class="readiness-header">
-            <div>
-                <div style="font-size: 12px; color: #8b949e; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 5px;">Self-Trading Readiness</div>
-                <div id="readiness-summary" style="font-size: 20px; font-weight: bold;">Loading...</div>
-            </div>
-            <div id="readiness-badge" class="readiness-status">CALCULATING</div>
-        </div>
-        <div class="readiness-meter">
-            <div id="readiness-fill" class="readiness-fill" style="width: 0%; background: #58a6ff;"></div>
-        </div>
-        <div id="readiness-details" class="readiness-details">Loading...</div>
-    </div>
-
-    <!-- Connection & Account -->
-    <div class="grid">
-        <div class="card">
-            <h3>MT5 Connection</h3>
-            <div id="connection">Loading...</div>
-        </div>
-        <div class="card">
-            <h3>Account</h3>
-            <div id="account">Loading...</div>
-        </div>
-        <div class="card">
-            <h3>Performance</h3>
-            <div id="performance">Loading...</div>
-        </div>
-        <div class="card">
-            <h3>Learning</h3>
-            <div id="learning">Loading...</div>
-        </div>
-    </div>
-
-    <!-- Recent Trades -->
-    <div class="section">
-        <h2>Recent Trades</h2>
-        <div class="card">
-            <table>
-                <thead>
-                    <tr>
-                        <th>ID</th>
-                        <th>Time</th>
-                        <th>Action</th>
-                        <th>Entry</th>
-                        <th>SL</th>
-                        <th>TP</th>
-                        <th>Size</th>
-                        <th>Conf</th>
-                        <th>Strategy</th>
-                        <th>Outcome</th>
-                        <th>P&L</th>
-                    </tr>
-                </thead>
-                <tbody id="trades-table">Loading...</tbody>
-            </table>
-        </div>
-    </div>
-
-    <!-- Strategy Performance -->
-    <div class="section">
-        <h2>Strategy Performance</h2>
-        <div class="card">
-            <table>
-                <thead>
-                    <tr>
-                        <th>Strategy</th>
-                        <th>Trades</th>
-                        <th>Win Rate</th>
-                        <th>Profit Factor</th>
-                        <th>Avg Confidence</th>
-                    </tr>
-                </thead>
-                <tbody id="strategy-table">Loading...</tbody>
-            </table>
-        </div>
-    </div>
-
-    <!-- Knowledge Base -->
-    <div class="section">
-        <h2>Knowledge Base</h2>
-        <div class="card">
-            <table>
-                <thead>
-                    <tr>
-                        <th>Topic</th>
-                        <th>Entries</th>
-                        <th>Avg Confidence</th>
-                    </tr>
-                </thead>
-                <tbody id="knowledge-topics">Loading...</tbody>
-            </table>
-        </div>
-    </div>
-
-    <script>
-        // ← FIX: Dynamic currency symbol
-        let accountCurrency = 'USD';
-        const currencySymbols = {
-            'USD': '$',
-            'GBP': '£',
-            'EUR': '€',
-            'JPY': '¥',
-            'CHF': 'CHF',
-            'AUD': 'A$',
-            'CAD': 'C$',
-            'NZD': 'NZ$',
-            'ZAR': 'R',
-        };
-        
-        function getCurrencySymbol(currency) {
-            return currencySymbols[currency] || '$';
-        }
-        
-        function formatCurrency(val, currency = null) {
-            if (val === null || val === undefined) return 'N/A';
-            const symbol = getCurrencySymbol(currency || accountCurrency);
-            return symbol + parseFloat(val).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2});
-        }
-        
-        function formatPercent(val) {
-            if (val === null || val === undefined) return 'N/A';
-            return parseFloat(val).toFixed(1) + '%';
-        }
-
-        async function loadData() {
-            try {
-                const [readinessRes, tradesRes, perfRes, knowRes, patternsRes] = await Promise.all([
-                    fetch('/api/readiness'),
-                    fetch('/api/trades'),
-                    fetch('/api/performance'),
-                    fetch('/api/knowledge'),
-                    fetch('/api/patterns'),
-                ]);
-
-                const readiness = await readinessRes.json();
-                const perf = await perfRes.json();
-                const know = await knowRes.json();
-                const trades = await tradesRes.json();
-                
-                // ← FIX: Set account currency from API
-                if (readiness.account_currency) {
-                    accountCurrency = readiness.account_currency;
-                }
-
-                // Readiness Meter
-                const score = readiness.score || 0;
-                const status = readiness.status || 'UNKNOWN';
-                const color = readiness.color || '#58a6ff';
-                
-                document.getElementById('readiness-fill').style.width = score + '%';
-                document.getElementById('readiness-fill').style.background = color;
-                document.getElementById('readiness-summary').textContent = readiness.summary || 'Calculating...';
-                document.getElementById('readiness-summary').style.color = color;
-                
-                const badge = document.getElementById('readiness-badge');
-                badge.textContent = status;
-                badge.style.background = color + '33';
-                badge.style.color = color;
-                badge.style.border = '1px solid ' + color;
-                
-                // Readiness details
-                const detailsEl = document.getElementById('readiness-details');
-                if (readiness.details) {
-                    detailsEl.innerHTML = Object.entries(readiness.details).map(([key, d]) => {
-                        const scoreColor = d.score >= d.max * 0.8 ? '#3fb950' : 
-                                          d.score >= d.max * 0.5 ? '#d29922' : '#f85149';
-                        return `
-                            <div class="readiness-item">
-                                <div class="readiness-item-label">${d.label}</div>
-                                <div class="readiness-item-value" style="color: ${scoreColor}">
-                                    ${d.score.toFixed(1)} / ${d.max}
-                                </div>
-                                <div class="readiness-item-threshold">${d.threshold}</div>
-                            </div>
-                        `;
-                    }).join('');
-                }
-
-                // Connection
-                const connEl = document.getElementById('connection');
-                if (readiness.mt5 && readiness.mt5.connected) {
-                    connEl.innerHTML = `
-                        <div class="connection-badge live">
-                            <div class="pulse"></div>
-                            LIVE CONNECTION
-                        </div>
-                        <div style="font-size: 13px; margin-top: 8px;">
-                            <div><strong>${readiness.mt5.account?.name || 'N/A'}</strong></div>
-                            <div style="color: #8b949e;">Server: ${readiness.mt5.account?.server || 'N/A'}</div>
-                            <div style="margin-top: 5px;">
-                                <span style="color: #8b949e;">XAUUSD:</span>
-                                <span style="color: #3fb950; font-weight: bold;">
-                                    ${readiness.mt5.xauusd_last ? formatCurrency(readiness.mt5.xauusd_last.bid) : 'N/A'}
-                                </span>
-                            </div>
-                        </div>
-                    `;
-                } else if (readiness.mt5 && readiness.mt5.simulation) {
-                    connEl.innerHTML = `
-                        <div class="connection-badge sim">
-                            <div class="pulse"></div>
-                            SIMULATION MODE
-                        </div>
-                        <div style="font-size: 13px; color: #8b949e; margin-top: 8px;">
-                            Not connected to live MT5
-                        </div>
-                    `;
-                } else {
-                    connEl.innerHTML = `
-                        <div class="connection-badge offline">
-                            <div class="pulse"></div>
-                            OFFLINE
-                        </div>
-                        <div style="font-size: 13px; color: #8b949e; margin-top: 8px;">
-                            ${readiness.mt5?.error || 'Connection error'}
-                        </div>
-                    `;
-                }
-
-                // Account
-                const accountEl = document.getElementById('account');
-                if (readiness.mt5 && readiness.mt5.account) {
-                    const acc = readiness.mt5.account;
-                    accountEl.innerHTML = `
-                        <div style="font-size: 24px; font-weight: bold; color: #c9d1d9;">
-                            ${formatCurrency(acc.balance)}
-                        </div>
-                        <small style="color: #8b949e;">Balance</small><br>
-                        <div style="margin-top: 8px;">
-                            <span style="color: #8b949e;">Equity:</span>
-                            <span style="color: #c9d1d9; font-weight: bold;">${formatCurrency(acc.equity)}</span>
-                        </div>
-                        <div>
-                            <span style="color: #8b949e;">Leverage:</span>
-                            <span style="color: #c9d1d9;">1:${acc.leverage || 'N/A'}</span>
-                        </div>
-                        <div>
-                            <span style="color: #8b949e;">Currency:</span>
-                            <span style="color: #c9d1d9;">${acc.currency || 'N/A'}</span>
-                        </div>
-                    `;
-                } else {
-                    accountEl.innerHTML = '<div style="color: #8b949e;">No account data</div>';
-                }
-
-                // Performance
-                const perfEl = document.getElementById('performance');
-                const o = perf.overall || {};
-                const pnl = parseFloat(o.total_pnl || 0);
-                const pnlClass = pnl >= 0 ? 'positive' : 'negative';
-                perfEl.innerHTML = `
-                    <div class="metric ${pnlClass}">${formatCurrency(pnl)}</div>
-                    <small>Total P&L</small><br>
-                    <small>${o.total_trades || 0} trades | ${o.wins || 0}W / ${o.losses || 0}L | ${o.pending || 0} pending</small>
-                `;
-
-                // Learning
-                const learnEl = document.getElementById('learning');
-                learnEl.innerHTML = `
-                    <div class="metric">${know.total_entries || 0}</div>
-                    <small>Knowledge entries</small><br>
-                    <small>${know.total_topics || 0} topics | ${know.pending_questions || 0} pending</small>
-                `;
-
-                // Trades table
-                const tradesTable = document.getElementById('trades-table');
-                if (trades.length === 0) {
-                    tradesTable.innerHTML = '<tr><td colspan="11" class="empty-state">No trades recorded yet</td></tr>';
-                } else {
-                    tradesTable.innerHTML = trades.slice(0, 20).map(t => {
-                        const actionBadge = t.action === 'buy' ? 'badge-buy' : t.action === 'sell' ? 'badge-sell' : 'badge-hold';
-                        const outcomeBadge = t.outcome === 'win' ? 'badge-win' : t.outcome === 'loss' ? 'badge-loss' : 'badge-pending';
-                        const pnlClass = parseFloat(t.profit_loss || 0) >= 0 ? 'positive' : 'negative';
-                        const ts = t.timestamp ? new Date(t.timestamp).toLocaleString() : 'N/A';
-                        return `<tr>
-                            <td>${t.id}</td>
-                            <td>${ts}</td>
-                            <td><span class="badge ${actionBadge}">${t.action || 'N/A'}</span></td>
-                            <td>${formatCurrency(t.entry_price)}</td>
-                            <td>${formatCurrency(t.stop_loss)}</td>
-                            <td>${formatCurrency(t.take_profit)}</td>
-                            <td>${parseFloat(t.position_size || 0).toFixed(2)}</td>
-                            <td>${parseFloat(t.confidence || 0).toFixed(2)}</td>
-                            <td>${t.strategy_used || 'N/A'}</td>
-                            <td><span class="badge ${outcomeBadge}">${t.outcome || 'pending'}</span></td>
-                            <td class="${pnlClass}">${formatCurrency(t.profit_loss)}</td>
-                        </tr>`;
-                    }).join('');
-                }
-
-                // Strategy table
-                const stratTable = document.getElementById('strategy-table');
-                if (!perf.strategies || perf.strategies.length === 0) {
-                    stratTable.innerHTML = '<tr><td colspan="5" class="empty-state">No strategy data yet</td></tr>';
-                } else {
-                    stratTable.innerHTML = perf.strategies.map(s => {
-                        const wrClass = s.win_rate >= 50 ? 'positive' : 'negative';
-                        return `<tr>
-                            <td>${s.strategy_name}</td>
-                            <td>${s.total_trades}</td>
-                            <td class="${wrClass}">${s.win_rate}%</td>
-                            <td>${s.profit_factor}</td>
-                            <td>${parseFloat(s.avg_confidence || 0).toFixed(2)}</td>
-                        </tr>`;
-                    }).join('');
-                }
-
-                // Knowledge topics
-                const knowTopics = document.getElementById('knowledge-topics');
-                if (!know.topics || know.topics.length === 0) {
-                    knowTopics.innerHTML = '<tr><td colspan="3" class="empty-state">No knowledge yet</td></tr>';
-                } else {
-                    knowTopics.innerHTML = know.topics.map(t => {
-                        return `<tr>
-                            <td>${t.topic}</td>
-                            <td>${t.cnt}</td>
-                            <td>${parseFloat(t.avg_conf || 0).toFixed(2)}</td>
-                        </tr>`;
-                    }).join('');
-                }
-
-            } catch (e) {
-                console.error('Failed to load dashboard data:', e);
-            }
-        }
-
-        loadData();
-        setInterval(loadData, 5000);
-    </script>
-</body>
-</html>
-"""
+@app.route("/api/cryptorti")
+def api_cryptorti():
+    """Live CryptoRTI whale signals (from the signal client's state file)."""
+    path = os.path.join(DATA_DIR, "cryptorti_signals.json")
+    if not os.path.exists(path):
+        return jsonify({"connected": False, "count": 0, "signals": []})
+    try:
+        with open(path) as f:
+            data = json.load(f)
+        # compact view for the dashboard
+        rows = []
+        for s in data.get("signals", []):
+            wt = s.get("whale_transfer") or {}
+            rows.append({
+                "signal_id": s.get("signal_id"),
+                "stage": s.get("stage"),
+                "status": s.get("signal_status"),
+                "exchange": wt.get("exchange"),
+                "amount_btc": wt.get("amount_btc"),
+                "amount_usd": wt.get("amount_usd"),
+                "detected_at": s.get("detected_at"),
+            })
+        # stale if older than 2 minutes
+        return jsonify({
+            "connected": data.get("connected", False),
+            "updated_at": data.get("updated_at"),
+            "count": len(rows),
+            "signals": rows[-15:],
+        })
+    except Exception as e:
+        return jsonify({"connected": False, "error": str(e), "signals": []})
 
 
-# ═══════════════════════════════════════════════════════════════════
-# Entrypoint
-# ═══════════════════════════════════════════════════════════════════
+@app.route("/")
+def index():
+    tpl = os.path.join(os.path.dirname(__file__), "templates", "dashboard.html")
+    with open(tpl, encoding="utf-8") as f:
+        return f.read()
 
-if __name__ == "__main__":
-    logging.basicConfig(level=logging.INFO)
-    print("=" * 60)
-    print("  Trading Bot Dashboard")
-    print("=" * 60)
-    print("  Open http://localhost:5000 in your browser")
-    print("  Press Ctrl+C to stop")
-    print("=" * 60)
-    app.run(host="0.0.0.0", port=5000, debug=False)
+
+@app.after_request
+def _no_cache(resp):
+    """Prevent the browser from serving a stale cached dashboard/endpoints."""
+    resp.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+    resp.headers["Pragma"] = "no-cache"
+    resp.headers["Expires"] = "0"
+    return resp
