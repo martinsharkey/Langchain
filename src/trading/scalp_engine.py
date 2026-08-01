@@ -454,6 +454,23 @@ class ScalpEngine:
             )
         else:
             logger.info("Learning adaptation ENABLED (online self-tuning active).")
+
+        # #13: recall durable lessons at startup so each run visibly begins with
+        # its accumulated knowledge (corrections + decisions + prior failures).
+        if self.knowledge_store is not None:
+            try:
+                lessons = []
+                for kind in ("correction", "decision"):
+                    lessons += self.knowledge_store.recall(
+                        "trading edge exit tuning symbol strategy", n_results=3, kind=kind)
+                if lessons:
+                    logger.info(f"[KNOWLEDGE] starting with {self.knowledge_store.count()} stored "
+                                f"lessons. Top recalled:")
+                    for h in lessons[:5]:
+                        logger.info(f"  - ({h['metadata'].get('kind')}) {h['text'][:110]}")
+                    self._known_lessons = [h["text"] for h in lessons[:5]]
+            except Exception as e:
+                logger.debug(f"knowledge startup recall skip: {e}")
         # SAFETY: if we are managing REAL open positions but are NOT in a live
         # mode, every manager exit/SL-modify will be SIMULATED (no real order).
         # A winner the manager decides to lock in will keep running on the
@@ -1198,6 +1215,7 @@ class ScalpEngine:
             "adaptive_running": self._adaptive_running,
             "adaptation_enabled": config.LEARNING_ADAPTATION_ENABLED,
             "auto_revert_enabled": config.LEARNING_AUTO_REVERT_ENABLED,
+            "knowledge_entries": (self.knowledge_store.count() if self.knowledge_store else 0),
             "recent_expectancy": {},
         }
         try:
@@ -1257,6 +1275,17 @@ class ScalpEngine:
                         self._postmortem_cache = self.post_mortem.analyze(limit=40)
                         if self._postmortem_cache.get("findings"):
                             logger.info(f"[POST-MORTEM] {self._postmortem_cache['findings']}")
+                            # #13: persist the reflection finding so lessons survive
+                            # across runs (stable key -> updates in place, no dupes).
+                            if self.knowledge_store is not None:
+                                try:
+                                    self.knowledge_store.remember(
+                                        key="postmortem_overall_findings",
+                                        kind="finding", topic="reflection",
+                                        source="post_mortem",
+                                        text=f"Post-mortem findings: {self._postmortem_cache['findings']}")
+                                except Exception:
+                                    pass
                     except Exception as e:
                         logger.debug(f"post-mortem skip: {e}")
                     # per-symbol reflection -> directives that steer that symbol's tuning
