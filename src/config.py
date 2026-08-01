@@ -280,6 +280,10 @@ SYMBOL_PAUSE_HEALTHY_WR = float(os.getenv("SYMBOL_PAUSE_HEALTHY_WR", "45"))  # n
 # new entries. Set false on a live/real account to let the governor freeze bleeders.
 # (A dashboard toggle for this is deferred to a future roadmap feature.)
 GOVERNOR_PAUSE_BLOCKS_ENTRIES = os.getenv("GOVERNOR_PAUSE_BLOCKS_ENTRIES", "false").lower() in ("true", "1", "yes")
+# #20 same-level re-entry guard: block a new entry in the same direction within
+# this many ATRs of an existing open position on the symbol (stops repeated
+# same-level re-entries like GER40 6x at one price). Set 0 to disable.
+REENTRY_MIN_ATR_GAP = float(os.getenv("REENTRY_MIN_ATR_GAP", "0.75"))
 # Persisted kill switch file — create/toggle from dashboard or by touching the file.
 KILL_SWITCH_FILE = os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data", "KILL_SWITCH"

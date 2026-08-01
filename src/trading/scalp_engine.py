@@ -1016,6 +1016,28 @@ class ScalpEngine:
             self._symbol_personality_cache = out
             logger.info(f"Symbol personalities: { {k: v['style'] for k, v in out.items()} }")
 
+    def _same_level_open(self, base_symbol: str, action: str, price: float, atr: float) -> bool:
+        """
+        #20: True if we already hold a position on this symbol in the SAME
+        direction within a small ATR-relative distance of `price` — i.e. this
+        would be a redundant same-level re-entry (e.g. GER40 6x at one price).
+        ATR-relative so it's symbol-agnostic; falls back to a 0.1% band.
+        """
+        if not price:
+            return False
+        try:
+            gap = getattr(config, "REENTRY_MIN_ATR_GAP", 0.75)
+            band = (atr * gap) if atr else (price * 0.001)
+        except Exception:
+            band = price * 0.001
+        for pos in self.open_positions.values():
+            if pos.base_symbol != base_symbol or pos.action != action:
+                continue
+            entry = getattr(pos, "entry", None) or getattr(pos, "entry_price", None)
+            if entry and abs(price - entry) <= band:
+                return True
+        return False
+
     def _manage_open_positions(self):
         """Run the trade manager over each open position; execute SL/exit intents."""
         if not self.open_positions:
@@ -1650,6 +1672,16 @@ class ScalpEngine:
         # Broker-side SL is mandatory — never place a naked position (esp. gold).
         if not sl or sl <= 0:
             logger.warning(f"{base}: refusing entry with no valid stop-loss")
+            return
+
+        # ── #20 same-level re-entry guard ──
+        # Block a new entry at (nearly) the same price + direction as a still-open
+        # position on this symbol, to stop the repeated same-level re-entries seen
+        # in the journal (e.g. GER40 6x at 25706.65). Distance measured in ATR.
+        if self._same_level_open(base, signal.action, signal.price,
+                                 indicators.get("atr", 0)):
+            logger.info(f"{base}: skip re-entry — already have a {signal.action} near "
+                        f"{signal.price} (same-level guard)")
             return
 
         # ── Phase 3: master risk gate ──
