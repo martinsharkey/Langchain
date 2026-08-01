@@ -254,6 +254,16 @@ class ScalpEngine:
         except Exception as e:
             logger.warning(f"DynamicFixer unavailable: {e}")
 
+        # #42: ONNX learned trade-outcome predictor (learned entry confidence).
+        # Non-fatal; predict() returns None if no model yet -> engine uses existing
+        # confidence. Trained on a cadence in the adaptive loop.
+        self.onnx_predictor = None
+        try:
+            from src.learning.onnx_predictor import OnnxOutcomePredictor
+            self.onnx_predictor = OnnxOutcomePredictor(self.experience_db)
+        except Exception as e:
+            logger.warning(f"OnnxOutcomePredictor unavailable: {e}")
+
         # Phase 3 — master risk gate
         from src.trading.risk_manager import RiskManager
         self.risk = RiskManager(
@@ -695,6 +705,19 @@ class ScalpEngine:
                     self._run_checkpointer()
                 except Exception as e:
                     logger.debug(f"checkpointer run skip: {e}")
+            # #41: CONTINUOUSLY re-calibrate + ACTION per-symbol exits (excursion +
+            # pattern lock) on a moderate cadence — not once/day. Outcomes are
+            # applied LIVE immediately; the checkpointer verifies + reverts. This is
+            # what makes the learning ACT, not sit in the KnowledgeStore.
+            if self.researcher is not None and self.cycle % config.EXIT_CALIBRATION_CYCLES == 7:
+                for _b in self.adapters:
+                    if not self.sessions.is_open(_b):
+                        continue  # need live movement; skip closed markets
+                    try:
+                        self.researcher.measure_excursion(_b, self.adapters[_b].resolved_symbol)
+                        self.researcher.lock_in_pattern(_b, self.adapters[_b].resolved_symbol)
+                    except Exception as e:
+                        logger.debug(f"exit calibration skip {_b}: {e}")
             # proactive self-performance research (what's working?)
             if self.perf_researcher is not None:
                 try:
@@ -1118,15 +1141,23 @@ class ScalpEngine:
             except Exception as e:
                 logger.debug(f"checkpointer skip {base}: {e}")
 
-    def _apply_exit_config(self, base_symbol: str, sl_atr: float, tp_rr: float):
-        """#40: lock a discovered MACD-leads-OsMA exit config into the LIVE per-symbol
-        override (entry sizing reads _exit_override). The #27 checkpointer then
-        verifies realised expectancy and reverts if it doesn't hold up."""
+    def _apply_exit_config(self, base_symbol: str, sl_atr: float, tp_rr: float, source: str = "pattern"):
+        """#40/#41: lock a discovered exit config into the LIVE per-symbol override
+        (entry sizing reads _exit_override). Sources: 'pattern' (MACD-leads-OsMA
+        backtest) and 'excursion' (OsMA-cycle movement). When both exist we BLEND
+        (average) so the exit reflects both the backtested edge and the symbol's
+        real movement. The #27 checkpointer verifies realised expectancy + reverts."""
         ov = self._exit_override.setdefault(base_symbol.upper(), {})
-        ov["sl_atr"] = round(float(sl_atr), 2)
-        ov["tp_rr"] = round(float(tp_rr), 2)
-        logger.warning(f"[PATTERN-LOCK] {base_symbol}: live exit config set sl_atr {ov['sl_atr']} "
-                       f"tp_rr {ov['tp_rr']} (let winners run / cut losers early)")
+        srcs = ov.setdefault("_by_source", {})
+        srcs[source] = {"sl_atr": round(float(sl_atr), 2), "tp_rr": round(float(tp_rr), 2)}
+        # blend across available sources (mean) -> the effective live exit config
+        sls = [v["sl_atr"] for v in srcs.values()]
+        rrs = [v["tp_rr"] for v in srcs.values()]
+        ov["sl_atr"] = round(sum(sls) / len(sls), 2)
+        ov["tp_rr"] = round(sum(rrs) / len(rrs), 2)
+        logger.warning(f"[EXIT-LOCK] {base_symbol}: {source} sl_atr {sl_atr} tp_rr {tp_rr} "
+                       f"-> blended live sl_atr {ov['sl_atr']} tp_rr {ov['tp_rr']} "
+                       f"(let winners run / cut losers early)")
 
     def _apply_reverted_config(self, base_symbol: str, best_cfg: dict):
         """Restore a best-known config live: tuned params -> optimizer, giveback -> override."""
@@ -1664,6 +1695,16 @@ class ScalpEngine:
                             self.fixer.fix_symbol(_b)
                         except Exception as e:
                             logger.debug(f"fixer skip {_b}: {e}")
+
+                # #42: retrain the ONNX outcome predictor on accumulated trades
+                # (kept only if it beats the incumbent on holdout — verify/revert).
+                if self.onnx_predictor is not None:
+                    try:
+                        res = self.onnx_predictor.train()
+                        if res.get("trained"):
+                            logger.info(f"[ONNX] train: {res}")
+                    except Exception as e:
+                        logger.debug(f"onnx train skip: {e}")
             except Exception as e:
                 logger.warning(f"adaptive loop error: {e}")
             finally:
@@ -1810,6 +1851,25 @@ class ScalpEngine:
                         return
             except Exception as e:
                 logger.debug(f"RAG analyze skip: {e}")
+
+        # #42: LEARNED entry confidence — the ONNX model (trained on real outcomes)
+        # predicts P(win) for this entry fingerprint and blends it into confidence.
+        # A low learned probability can veto a nominally-confident entry (the old
+        # hand-weighted confidence was anti-calibrated). Falls back silently if no model.
+        if self.onnx_predictor is not None:
+            try:
+                p_win = self.onnx_predictor.predict_win_prob(indicators)
+                if p_win is not None:
+                    before = signal.confidence
+                    # blend 50/50 with the rule confidence, then hard-veto very low P(win)
+                    signal.confidence = round(0.5 * signal.confidence + 0.5 * p_win, 3)
+                    if p_win < 0.35:
+                        logger.info(f"{base}: ONNX veto (P(win) {p_win:.2f})")
+                        return
+                    if abs(signal.confidence - before) > 0.01:
+                        logger.info(f"{base}: ONNX P(win) {p_win:.2f} -> conf {before:.2f}->{signal.confidence:.2f}")
+            except Exception as e:
+                logger.debug(f"onnx confidence skip: {e}")
 
         if signal.confidence < eff_conf_min:
             return
@@ -2118,6 +2178,8 @@ class ScalpEngine:
                 "config_checkpoints": (self.checkpointer.snapshot() if self.checkpointer else {}),
                 "graduation": (self.graduation.snapshot() if self.graduation else {}),
                 "dynamic_fixer": (self.fixer.snapshot() if self.fixer else {}),
+                "onnx_model": (self.onnx_predictor.status() if self.onnx_predictor else {}),
+                "exit_calibration": (self.researcher.excursion_snapshot() if self.researcher else {}),
                 "operating_modes": (self.mode_mgr.snapshot() if self.mode_mgr else {}),
                 "performance_research": (self.perf_researcher.status() if self.perf_researcher else {}),
                 "edge": (self._edge_cache or {}),

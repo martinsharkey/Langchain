@@ -284,6 +284,9 @@ GOVERNOR_PAUSE_BLOCKS_ENTRIES = os.getenv("GOVERNOR_PAUSE_BLOCKS_ENTRIES", "fals
 # this many ATRs of an existing open position on the symbol (stops repeated
 # same-level re-entries like GER40 6x at one price). Set 0 to disable.
 REENTRY_MIN_ATR_GAP = float(os.getenv("REENTRY_MIN_ATR_GAP", "0.75"))
+# #41: how often (in cycles) to re-measure per-symbol excursion + re-lock the
+# MACD-leads-OsMA exit config LIVE (continuous, not once/day). ~40 cycles.
+EXIT_CALIBRATION_CYCLES = int(os.getenv("EXIT_CALIBRATION_CYCLES", "40"))
 # Persisted kill switch file — create/toggle from dashboard or by touching the file.
 KILL_SWITCH_FILE = os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data", "KILL_SWITCH"

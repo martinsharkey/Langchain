@@ -67,3 +67,6 @@ htmlcov/
 
 # session DB backups (never commit)
 *.backup_*.db
+
+# ONNX model artifacts (machine-local, rebuilt from the experience DB)
+data/models/

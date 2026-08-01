@@ -117,6 +117,18 @@ class ContinualResearcher:
             return {"found": False, "reason": str(e)[:80]}
         if r.get("found"):
             self._excursion[base_symbol.upper()] = r
+            rec = r["recommendation"]
+            # ACTION IT (not just store): apply the excursion-derived exit config
+            # LIVE, blended with the pattern-lock config. The #27 checkpointer then
+            # verifies realised expectancy and reverts if it doesn't hold up.
+            if self.apply_exit_config is not None and rec.get("suggested_sl_atr") and rec.get("suggested_tp_rr"):
+                try:
+                    self.apply_exit_config(base_symbol, rec["suggested_sl_atr"],
+                                           rec["suggested_tp_rr"], source="excursion")
+                except TypeError:
+                    self.apply_exit_config(base_symbol, rec["suggested_sl_atr"], rec["suggested_tp_rr"])
+                except Exception as e:
+                    logger.debug(f"excursion apply skip {base_symbol}: {e}")
             if self.ks is not None:
                 try:
                     rec = r["recommendation"]
