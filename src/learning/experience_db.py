@@ -208,16 +208,17 @@ class ExperienceDatabase:
         try:
             conn = sqlite3.connect(self.db_path)
             conn.row_factory = sqlite3.Row
-            rows = conn.execute("""
+            ac, ap = self._account_clause()
+            rows = conn.execute(f"""
                 SELECT symbol,
                     COUNT(*) trades,
                     SUM(CASE WHEN outcome='win' THEN 1 ELSE 0 END) wins,
                     COALESCE(SUM(profit_loss),0) net,
                     COALESCE(AVG(profit_loss),0) avg_pnl
                 FROM trades
-                WHERE outcome IN ('win','loss','breakeven')
+                WHERE outcome IN ('win','loss','breakeven'){ac}
                 GROUP BY symbol
-            """).fetchall()
+            """, ap).fetchall()
             conn.close()
             out = {}
             for r in rows:
@@ -253,10 +254,14 @@ class ExperienceDatabase:
                 FROM trades
                 WHERE outcome IN ('win','loss','breakeven') AND mgmt_variant IS NOT NULL
             """
+            params = []
             if symbol:
                 q += " AND symbol = ?"
+                params.append(symbol)
+            ac, ap = self._account_clause()
+            q += ac; params += ap
             q += " GROUP BY symbol, mgmt_variant"
-            rows = conn.execute(q, (symbol,) if symbol else ()).fetchall()
+            rows = conn.execute(q, tuple(params)).fetchall()
             conn.close()
             out: dict = {}
             for r in rows:
@@ -707,12 +712,13 @@ class ExperienceDatabase:
             
             if strategy_name:
                 query += f" AND strategy_used = '{strategy_name}'"
-            
+            ac, ap = self._account_clause()
+            query += ac
             query += " GROUP BY strategy_used ORDER BY win_rate DESC"
             
             conn = sqlite3.connect(self.db_path)
             cursor = conn.cursor()
-            cursor.execute(query)
+            cursor.execute(query, tuple(ap))
             rows = cursor.fetchall()
             conn.close()
             

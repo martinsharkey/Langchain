@@ -945,12 +945,14 @@ class ScalpEngine:
         try:
             conn = sqlite3.connect(self.experience_db.db_path)
             conn.row_factory = sqlite3.Row
+            ac, ap = self.experience_db._account_clause()
             rows = conn.execute(
                 "SELECT profit_loss FROM trades WHERE symbol LIKE ? "
                 "AND outcome IN ('win','loss','breakeven') "
-                "AND (exit_reason IS NULL OR exit_reason<>'pre_rebuild_synthetic') "
-                "ORDER BY id DESC LIMIT ?",
-                (base_symbol.upper() + "%", limit),
+                "AND (exit_reason IS NULL OR exit_reason<>'pre_rebuild_synthetic')"
+                + ac +
+                " ORDER BY id DESC LIMIT ?",
+                tuple([base_symbol.upper() + "%"] + ap + [limit]),
             ).fetchall()
             conn.close()
         except Exception as e:
