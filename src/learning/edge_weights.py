@@ -11,7 +11,45 @@ Values are OUT-OF-SAMPLE profit-factor-derived multipliers from the edge sweep
 from these seeds. Re-run the sweep to refresh as more data accrues.
 
 Match is by symbol PREFIX (XAUUSD-ECN matches 'XAUUSD').
+
+RUNTIME OVERLAY (#31): a machine-local data/edge_weights.json, produced by the
+automated per-symbol edge-discovery sweep (edge_discovery.py), is merged OVER
+these static seeds at import. This lets NEW symbols get validated edges without
+hand-editing this file. Discovered entries win; static dicts are the fallback.
 """
+
+import os
+import json
+import logging
+
+_log = logging.getLogger("edge_weights")
+
+
+def _overlay_path() -> str:
+    try:
+        from src import config
+        base = config.DATA_DIR
+    except Exception:
+        base = os.path.join(os.getcwd(), "data")
+    return os.path.join(base, "edge_weights.json")
+
+
+def _load_overlay() -> dict:
+    """Load the discovered edge overlay {edge_weights, regime_edge, focused_edge}."""
+    try:
+        p = _overlay_path()
+        if os.path.exists(p):
+            with open(p) as f:
+                data = json.load(f)
+            _log.info(f"edge_weights overlay loaded from {p} "
+                      f"({len(data.get('edge_weights', {}))} symbols)")
+            return data or {}
+    except Exception as e:
+        _log.warning(f"edge_weights overlay load failed: {e}")
+    return {}
+
+
+_OVERLAY = _load_overlay()
 
 EDGE_WEIGHTS_BY_SYMBOL = {
     # XAUUSD-ECN M15 evidence: Volume_Breakout 1.32, BB_Bounce 1.15,
@@ -49,10 +87,15 @@ EDGE_WEIGHTS_BY_SYMBOL = {
 
 
 def edge_weight(symbol: str, strategy: str) -> float:
-    """Per-symbol edge multiplier for a strategy (prefix match); 1.0 if unknown."""
+    """Per-symbol edge multiplier for a strategy (prefix match); 1.0 if unknown.
+    Discovered overlay (#31) wins over the static seed."""
     if not symbol:
         return 1.0
     su = symbol.upper()
+    ov = _OVERLAY.get("edge_weights", {})
+    for key, table in ov.items():
+        if su.startswith(key) and strategy in table:
+            return float(table.get(strategy, 1.0))
     for key, table in EDGE_WEIGHTS_BY_SYMBOL.items():
         if su.startswith(key):
             return float(table.get(strategy, 1.0))
@@ -77,10 +120,17 @@ REGIME_EDGE = {
 
 
 def regime_edge_weight(symbol: str, strategy: str, regime: str) -> float:
-    """Multiplier for a strategy in a given regime on a symbol; 1.0 if unknown."""
+    """Multiplier for a strategy in a given regime on a symbol; 1.0 if unknown.
+    Discovered overlay (#31) wins over the static seed."""
     if not symbol or not regime:
         return 1.0
     su = symbol.upper()
+    ov = _OVERLAY.get("regime_edge", {})
+    for key, table in ov.items():
+        if su.startswith(key):
+            r = table.get(strategy)
+            if r and regime in r:
+                return float(r.get(regime, 1.0))
     for key, table in REGIME_EDGE.items():
         if su.startswith(key):
             r = table.get(strategy)
@@ -120,13 +170,26 @@ FOCUSED_EDGE = {
 
 
 def focused_rules(symbol: str):
-    """Return the list of (strategy, allowed_regimes) pockets for a symbol, or None."""
+    """Return the list of (strategy, allowed_regimes) pockets for a symbol, or None.
+    Discovered overlay (#31) wins over the static seed."""
     if not symbol:
         return None
     su = symbol.upper()
+    ov = _OVERLAY.get("focused_edge", {})
+    for key, rules in ov.items():
+        if su.startswith(key):
+            # overlay stores [[strategy, [regimes]], ...] (JSON) -> normalise
+            return [(r[0], set(r[1])) for r in rules]
     for key, rules in FOCUSED_EDGE.items():
         if su.startswith(key):
             return rules
     return None
+
+
+def reload_overlay():
+    """Re-read data/edge_weights.json at runtime (after a sweep writes it)."""
+    global _OVERLAY
+    _OVERLAY = _load_overlay()
+    return _OVERLAY
 
 
