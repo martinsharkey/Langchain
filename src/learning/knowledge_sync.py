@@ -60,6 +60,27 @@ PROJECT_KNOWLEDGE = [
      "by realised expectancy and auto-reverts a change that degrades live results, "
      "recording the failed direction so it is not retried. Kill-switch "
      "LEARNING_ADAPTATION_ENABLED is the floor. Governor pause is advisory in demo."),
+    ("risk_fixed_deposit_max_loss", "decision", "risk philosophy",
+     "The STARTING BALANCE is the MOST that can be lost (fund e.g. £250 -> worst case is "
+     "£250). So aggressiveness/lot size/compounding do NOT change downside risk: aggressive "
+     "compounding to grow a small ring-fenced deposit (e.g. £250 -> £100k) is acceptable "
+     "because the deposit caps the loss. Once a REAL edge is proven per symbol, compound it "
+     "aggressively within the deposit; do not over-constrain size for capital preservation "
+     "beyond the deposit. Still gate sizing on proven per-symbol edge (no size-up on NO edge)."),
+    ("edge_macd_then_osma_sequence", "finding", "entry pattern",
+     "Real BTCUSD (generalizes) entry trigger = MACD line crosses ZERO FIRST, then OsMA "
+     "follows and crosses zero the SAME direction shortly after (MACD leads, OsMA confirms). "
+     "Strongest when M15 and/or M5 MACD are ALIGNED with M1 MACD at the moment of the M1 OsMA "
+     "cross. Backtest variations of this MACD-leads-OsMA + MTF-MACD-alignment model. When a "
+     "trade fails, diagnose: real reversal vs SL too tight (stopped then recovered) vs held a "
+     "winner into a loss (gave back). GoldShark optimiser shows massive growth on this."),
+    ("backtest_macd_osma_exit_config", "finding", "exit config",
+     "BACKTEST-PROVEN (BTCUSD, scripts/backtest_macd_osma.py): the MACD-then-OsMA pattern is "
+     "profitable ONLY with a WIDE stop + TIGHT take-profit: sl_atr 1.5, tp_atr 1.0 -> 75% WR "
+     "PF 1.91 (all), 77.8% WR PF 3.13 (M5-MACD-aligned). Tight-SL/wide-TP (sl 0.5-1.0, tp "
+     "2.0-3.0) LOSES (PF <1) - that inverted config is what made the live bot lose. So for "
+     "this pattern: sl_atr>=1.5, tp_rr<=1.0, and require M5 (ideally M15) MACD alignment. "
+     "The signal was good; the exit was the leak."),
 ]
 
 
