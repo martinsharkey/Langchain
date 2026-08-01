@@ -167,6 +167,13 @@ class ScalpEngine:
         try:
             from src.learning.knowledge_store import KnowledgeStore
             self.knowledge_store = KnowledgeStore()
+            # sync durable PROJECT knowledge (the same insights saved to Kilo memory)
+            # into the BOT's store so the running bot learns from them too (#13).
+            try:
+                from src.learning.knowledge_sync import sync_project_knowledge
+                sync_project_knowledge(self.knowledge_store)
+            except Exception as e:
+                logger.debug(f"knowledge sync skip: {e}")
         except Exception as e:
             logger.warning(f"KnowledgeStore unavailable (failures persist to disk only): {e}")
         try:
