@@ -33,10 +33,6 @@ TRAINING = "training"
 LIVE = "live"
 OVERRIDE_PATH = os.path.join(config.DATA_DIR, "mode_overrides.json")
 
-TRAINING = "training"
-LIVE = "live"
-OVERRIDE_PATH = os.path.join(config.DATA_DIR, "mode_overrides.json")
-
 # These are POLICY BOUNDS, not tuned magic numbers: the absolute floor of trades
 # below which ANY win rate is statistically meaningless, and the hard cap on how
 # far the bot may loosen/tighten its own entry bar. Everything WITHIN these

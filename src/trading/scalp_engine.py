@@ -775,6 +775,17 @@ class ScalpEngine:
         phase = edge.get("phase", 0)
         if phase < 2 or not adapter.spec:
             return base_lot
+        # SAFETY (per review): a symbol in TRAINING mode trades with a LOOSENED entry
+        # bar, so it must NEVER size up — that would be loosened entries at full risk,
+        # the opposite of the design. Require the per-symbol OperatingMode == LIVE.
+        if self.mode_mgr is not None:
+            try:
+                mp = self.mode_mgr.params_for(adapter.resolved_symbol)
+                from src.learning.operating_mode import LIVE as _LIVE_MODE
+                if getattr(mp, "mode", None) != _LIVE_MODE:
+                    return base_lot
+            except Exception:
+                return base_lot
         # #24: per-symbol graduation gate — only size UP a symbol that has proven
         # its OWN realised edge (not just the pooled phase). Non-graduated symbols
         # stay on the fixed micro lot even in global Phase 2.
@@ -1901,10 +1912,18 @@ class ScalpEngine:
             return
 
         # #26 hybrid: scale the lot when an aligned whale signal boosted conviction
-        # (clamped by the broker/LIVE_MICRO cap inside place()).
+        # (clamped by the broker/LIVE_MICRO cap inside place()). SAFETY: only scale
+        # UP a symbol that has earned it (graduated/LIVE) — a TRAINING symbol still
+        # gets the whale CONFIDENCE boost (better entry) but NOT a size increase.
         _lot = self._position_lot(adapter)
         _ws = getattr(self, "_whale_scale", 1.0)
-        if _ws and _ws > 1.0:
+        _may_scale = True
+        try:
+            if self.graduation is not None and not self.graduation.is_graduated(base):
+                _may_scale = False
+        except Exception:
+            _may_scale = False
+        if _ws and _ws > 1.0 and _may_scale:
             _lot = round(_lot * _ws, 2)
         result = adapter.place(signal.action, _lot, sl=sl, tp=tp, comment=comment)
 
