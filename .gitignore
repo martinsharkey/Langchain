@@ -64,3 +64,6 @@ data/
 .pytest_cache/
 .coverage
 htmlcov/
+
+# session DB backups (never commit)
+*.backup_*.db

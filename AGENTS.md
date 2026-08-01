@@ -58,28 +58,61 @@ all runtime code editor-agnostic and offline-capable (no Kilo/editor deps at run
   real 1m BTCUSD trades (chunked). Stored in the knowledge RAG.
 - **Danny decision recorded** in `cryptorti/martin_qna.md` (Q11 + Decision Log).
 
+## What we built THIS session (2026-08-01) — the continual ReAct learning loop
+
+Branch `fix/17-11-manage-live-positions` (not merged). Full continual-learning
+loop, all with unit tests (59 passing):
+- **OsMA 7-indicator confluence (#29)** `src/strategies/osma_confluence.py` — the
+  PRIMARY, symbol-agnostic entry: OsMA zero-cross (confirmed/anticipated) +
+  fresh-momentum runway + MACD/ATR hard gates + EMA/price-stretch/Bulls-Bears/RSI.
+  Ported from the proven GoldShark EAs (PF 1.46-1.62). Plus momentum-exhaustion +
+  Playbook-A POC exits in `trade_manager.py`.
+- **ConfigCheckpointer (#27)** `src/learning/config_checkpointer.py` — revert to the
+  most-profitable config by realised expectancy + learn-from-failure (records failed
+  directions to the KnowledgeStore). Kill-switch `LEARNING_ADAPTATION_ENABLED` is the
+  safety floor. Wired live.
+- **mql5 knowledge RAG (#22)** `src/learning/mql5_knowledge.py` — offline seeded RAG
+  (+ optional Playwright crawler) grounding tuning/technique decisions.
+- **Continual researcher (#32)** `src/learning/continual_researcher.py` — DAILY ReAct:
+  review per-symbol results → query mql5 RAG → hypothesis → gate-enforced edge sweep →
+  AUTO-FILE GitHub issues for dev-worthy findings.
+- **Edge discovery (#31)** `src/learning/edge_discovery.py` — walk-forward sweep →
+  `data/edge_weights.json` overlay (replaces hand-edited `edge_weights.py`).
+- **ReAct alt-tuning (#25)** — optimizer draws mql5-grounded candidates + skips the
+  checkpointer's failed directions (PARAM_SPACE widened to reach the proven cluster).
+- **Whale confidence model (#26)** `src/cryptorti/wave_predictor.py` — historic-trained
+  confidence-to-enter, wired into the CryptoRTI strategy.
+- **#13** knowledge recall at startup + reflection write-back.
+- **Fixes:** giveback loosened + winner-cutting fixed (#11); long-bias guard (#3);
+  governor advisory in demo so it never freezes trading; per-account scoping +
+  demo/live switch safety (#21); same-level re-entry guard (#20); RSS-flood startup fix.
+
 ## Live trade / bot state
 
-- Run the bot: `python -m src.trading.scalp_engine` (from `langchain/`, venv active).
-  It calls `_adopt_existing_positions()` on start AND every cycle, so it manages
-  any open trades (bot-opened or manual) after a restart.
-- Mode is `TRADING_MODE` env (`.env`): currently `LIVE_MICRO` (real orders, 0.01
-  cap). Modes: OBSERVE / PAPER / LIVE_MICRO / LIVE (`src/config.py`).
-- **KNOWN ISSUE:** the trade-manager "rolling winner" EXIT path logs
-  `OBSERVE close (no real order)` even in LIVE_MICRO — manager-initiated exits are
-  simulated, so winners are left to the trailing broker SL instead of being
-  actively closed. Entries + SL trailing ARE real. Needs an issue + fix (decide:
-  should manager exits send real close orders in LIVE_MICRO?).
+- Run the bot (SINGLE launcher): `python app.py LIVE_MICRO` (from `langchain/`, venv).
+  This starts dashboard (:5000) + engine + research + CryptoRTI feed together.
+  `python -m src.trading.scalp_engine LIVE_MICRO` is engine-only (debug).
+  It calls `_adopt_existing_positions()` on start AND every cycle.
+- Mode is `TRADING_MODE` env (`.env`): `LIVE_MICRO` (real orders, 0.01 cap).
+  `.env` also sets `DISABLED_SYMBOLS` (focus = XAUUSD + GER40 + BTCUSD) and
+  `GOVERNOR_PAUSE_BLOCKS_ENTRIES=false` (advisory in demo/training).
+- Modes: OBSERVE / PAPER / LIVE_MICRO / LIVE (`src/config.py`).
+- **FIXED this session:** the "manager exits OBSERVE-only in LIVE_MICRO" bug —
+  manager close/modify now sends REAL orders and logs SIMULATED vs real accurately;
+  winners are actively closed, not just left to the broker SL.
 
 ## TODO (next session) — mirror these into GitHub Issues
 
-- [ ] File the "manager exits are OBSERVE-only in LIVE_MICRO" bug + decide behaviour.
-- [ ] Wire `whale_rag.lookup()` into the live CryptoRTI wave predictor / strategy.
-- [ ] Wire `knowledge_store` recall into the engine startup + reflection loop.
-- [ ] Build `src/cryptorti/wave_predictor.py` (Phase B) per CRYPTORTI_WAVE_DESIGN.md.
+- [ ] #24 graduation criteria (per-symbol edge → size-up gate) — spec ready.
+- [ ] #19/#30 dashboard as control panel (mode/scalping/config/account) + fix the
+      misleading "algo blocked" message; VPS deployment.
+- [ ] Apply the #21 `_account_clause` filter to every stats read (foundation is in).
+- [ ] #22 run the real mql5 Playwright crawl to populate the RAG beyond the seed.
+- [ ] Prove edge on XAUUSD + GER40 + BTCUSD with the new OsMA strategy (accumulate
+      real closed trades under it; watch the #27 checkpointer keep/revert).
+- [ ] Merge `fix/17-11-manage-live-positions` to main once reviewed; push.
 - [ ] `webhook_listener.py` once Danny provides the webhook spec (Q2).
-- [ ] Accumulate ~100 real closed trades; edge currently PF 0.44 (Phase 1, not proven).
-- [ ] Standalone-app packaging (remove any editor assumptions; entrypoint + config).
+- [ ] Standalone-app packaging / VPS (remove editor assumptions; #14/#19).
 
 ## Danny's issues (CryptoRTI side) — see `cryptorti/martin_qna.md`
 

@@ -200,3 +200,52 @@ on chat scrollback — use AGENTS.md + this log + GitHub Issues).
 
 ### Next
 See AGENTS.md "TODO" — mirror into GitHub Issues.
+
+---
+
+## Session 2026-08-01 — Continual ReAct learning loop + proven OsMA strategy
+
+Branch: fix/17-11-manage-live-positions (not merged). Full test suite: 59 passing.
+
+### Diagnosis (on CLEAN data: 294 real trades, synthetic/dup/legacy rows purged)
+- Root cause of losses: exit manager cut winners early (only 5 TP hits vs 198 early
+  "closed"), realised payoff 0.74 vs placed RR 2.0; long bias (buy -73 vs sell -19);
+  XAGUSD biggest bleeder. The bot was also silently running OBSERVE (no TRADING_MODE
+  in .env) so manager exits were simulated. Learning loop was NET-HARMFUL — every
+  symbol degraded 2nd-half; XAUUSD went +0.117 -> -0.669 as the loop engaged.
+- "No BTCUSD trades" root cause: NOT algo-blocked — the SymbolGovernor hard-paused
+  every symbol on old losing history. Fixed with advisory-in-demo.
+
+### Built (all with unit tests)
+- #29 OsMA 7-indicator confluence (PRIMARY strategy) ported from proven GoldShark
+  EAs (PF 1.46-1.62) + momentum-exhaustion & Playbook-A POC exits.
+- #27 ConfigCheckpointer: revert-to-best-config + learn-from-failure + kill-switch.
+- #22 mql5 knowledge RAG (offline seeded + optional Playwright crawler).
+- #32 continual daily ReAct researcher (review -> mql5 query -> hypothesis -> gated
+  edge sweep -> auto-file GitHub issues).
+- #31 automated per-symbol edge discovery -> data/edge_weights.json overlay.
+- #25 ReAct alt-tuning (mql5-grounded candidates + avoid failed directions;
+  PARAM_SPACE widened to reach the proven cluster).
+- #26 whale confidence model (historic-trained confidence-to-enter) wired into CryptoRTI.
+- #13 knowledge recall at startup + reflection write-back.
+- Fixes: #11 real manager closes + winner-cut fix; #3 long-bias guard; #21 per-account
+  scoping + demo/live switch safety; #20 same-level re-entry guard + purged synthetic/
+  legacy rows; governor advisory in demo; RSS-flood startup fix; single launcher (app.py).
+
+### Learning loop is now CLOSED (no open loops)
+mql5 RAG (#22) -> researcher (#32) -> edge discovery (#31) -> optimizer (#25 grounded,
+avoids failed) -> checkpointer keep/revert+learn (#27) -> knowledge store read/write (#13),
+with #29 OsMA confluence as the primary strategy. Every discovery auto-applies (if
+validated) or becomes a tracked GitHub issue.
+
+### Live bot
+- Run: `python app.py LIVE_MICRO` (single launcher: dashboard :5000 + engine + research +
+  CryptoRTI). Focus symbols XAUUSD + GER40 + BTCUSD. Restarted on the new code;
+  positions adopted; learning active (adaptation + auto-revert on).
+
+### Backlog filed this session: GitHub Issues #17-#32.
+
+### Next
+See AGENTS.md "TODO". Priorities: #24 graduation, #19/#30 dashboard control panel,
+apply #21 account filter to all stats reads, run the real mql5 crawl, prove edge on
+the 3 focus symbols under the new strategy, then merge the branch.
