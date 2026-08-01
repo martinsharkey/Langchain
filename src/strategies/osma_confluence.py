@@ -192,6 +192,6 @@ def register(registry):
         suitable_regimes=["trending", "volatile", "ranging", "quiet"],
         min_confidence=0.4,
         weight=1.5,          # primary strategy -> higher ensemble weight
-        status="testing",
+        status="active",     # #29: active so it can drive FOCUSED entries (not skipped)
     )
-    logger.info("Registered OsMA_Confluence strategy (status=testing, weight=1.5)")
+    logger.info("Registered OsMA_Confluence strategy (status=active, weight=1.5)")

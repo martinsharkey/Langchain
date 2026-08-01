@@ -972,6 +972,33 @@ class ScalpEngine:
         cache[ck] = result
         return result
 
+    def _whale_predict_for_btc(self) -> dict:
+        """
+        Hybrid layer (#26/#29): current whale confidence-to-enter from the live
+        CryptoRTI signal via the wave predictor. {} when no active signal. Cached
+        per cycle, non-fatal.
+        """
+        if getattr(self, "_whale_pred_cycle", None) == self.cycle:
+            return getattr(self, "_whale_pred_cache", {}) or {}
+        result = {}
+        try:
+            from src.cryptorti import signal_client
+            from src.cryptorti.wave_predictor import WhaleWavePredictor
+            bias = signal_client.current_short_bias()
+            if bias:
+                if not hasattr(self, "_wave_predictor"):
+                    self._wave_predictor = WhaleWavePredictor()
+                result = self._wave_predictor.predict(
+                    usd=float(bias.get("amount_usd", 0) or 0),
+                    exchange=str(bias.get("exchange", "") or ""),
+                    direction="sell" if bias.get("action") == "sell" else "buy",
+                    stage=bias.get("stage") or bias.get("status")) or {}
+        except Exception as e:
+            logger.debug(f"whale predict skip: {e}")
+        self._whale_pred_cycle = self.cycle
+        self._whale_pred_cache = result
+        return result
+
     def _current_symbol_config(self, base_symbol: str) -> dict:
         """The tunable config that affects this symbol's live behaviour: the
         optimizer's tuned indicator/exit params + the effective giveback."""
@@ -1621,6 +1648,30 @@ class ScalpEngine:
         if signal.action == "hold":
             return
 
+        # ── HYBRID whale/order-flow layer (#26/#29) for BTC ──
+        # OsMA drives regular entries; a live CryptoRTI whale signal that AGREES
+        # boosts confidence (stronger entry) and flags a lot SCALE; if it opposes,
+        # dampen. No whale signal -> trade the OsMA base normally.
+        self._whale_scale = 1.0
+        if "BTC" in resolved.upper():
+            try:
+                wp = self._whale_predict_for_btc()
+                if wp and wp.get("confidence", 0) >= 0.5 and wp.get("action"):
+                    if wp["action"] == signal.action:
+                        boost = 0.15 * wp["confidence"]
+                        signal.confidence = min(1.0, signal.confidence + boost)
+                        # scale lot up to 2x with strong aligned whale conviction
+                        self._whale_scale = 1.0 + min(1.0, wp["confidence"])
+                        signal.reason += f" | +whale {wp['action']} conf{wp['confidence']:.2f} (scale x{self._whale_scale:.1f})"
+                        logger.info(f"BTCUSD HYBRID: OsMA {signal.action} + aligned whale "
+                                    f"conf {wp['confidence']:.2f} -> boosted, scale x{self._whale_scale:.1f}")
+                    else:
+                        signal.confidence = max(0.0, signal.confidence - 0.15)
+                        logger.info(f"BTCUSD HYBRID: whale {wp['action']} OPPOSES OsMA "
+                                    f"{signal.action} -> dampened")
+            except Exception as e:
+                logger.debug(f"whale hybrid skip: {e}")
+
         # Self-managing mode: per-symbol TRAINING (loose, gather sample) vs LIVE
         # (tight, proven-edge only). Gives the effective entry thresholds so the
         # bot regulates its own selectivity — no manual loosen/tighten needed.
@@ -1779,7 +1830,13 @@ class ScalpEngine:
                 logger.info(f"{base}: entry blocked by risk ({risk.reason})")
             return
 
-        result = adapter.place(signal.action, self._position_lot(adapter), sl=sl, tp=tp, comment=comment)
+        # #26 hybrid: scale the lot when an aligned whale signal boosted conviction
+        # (clamped by the broker/LIVE_MICRO cap inside place()).
+        _lot = self._position_lot(adapter)
+        _ws = getattr(self, "_whale_scale", 1.0)
+        if _ws and _ws > 1.0:
+            _lot = round(_lot * _ws, 2)
+        result = adapter.place(signal.action, _lot, sl=sl, tp=tp, comment=comment)
 
         if not result.ok:
             logger.info(f"{base}: no entry ({result.reason})")

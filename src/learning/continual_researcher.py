@@ -87,6 +87,60 @@ class ContinualResearcher:
         })
         return out
 
+    # ── per-symbol INDICATOR SCALE profiling (indicator values differ hugely by symbol) ──
+    def profile_indicator_scale(self, base_symbol: str, resolved: str = None) -> dict:
+        """
+        Explore a symbol's indicator SCALE so thresholds are calibrated per symbol,
+        not copied from gold. Indicator absolute values differ by orders of
+        magnitude across symbols (BTC ~63000 vs XAUUSD ~2600), so ATR/OsMA/power
+        magnitudes are not comparable. Returns normalised, symbol-relative stats
+        (ATR as % of price, median |OsMA| relative to ATR, power ranges) and
+        stores them in the KnowledgeStore for the tuner/researcher to use.
+        """
+        prof = {"symbol": base_symbol.upper()}
+        try:
+            import statistics
+            from src.mt5.market_data import get_rates
+            from src.strategies.indicators import compute_indicator_series
+            from src import config as _cfg
+            rates = get_rates(resolved or base_symbol, timeframe=_cfg.ENTRY_TIMEFRAME, count=300)
+            if not rates or len(rates) < 60:
+                return prof
+            series = compute_indicator_series(rates, None)
+            closes = [b.get("close") for b in series if b.get("close")]
+            atrs = [b.get("atr") for b in series if b.get("atr")]
+            osmas = [abs(b.get("osma") or 0) for b in series if b.get("close")]
+            bulls = [b.get("bulls_power") or 0 for b in series if b.get("close")]
+            if closes and atrs:
+                med_price = statistics.median(closes)
+                med_atr = statistics.median(atrs)
+                prof.update({
+                    "median_price": round(med_price, 2),
+                    "median_atr": round(med_atr, 4),
+                    # ATR as % of price -> comparable across symbols
+                    "atr_pct_of_price": round(med_atr / med_price * 100, 4) if med_price else 0,
+                    "median_abs_osma": round(statistics.median(osmas), 4) if osmas else 0,
+                    # OsMA magnitude relative to ATR (symbol-agnostic entry-strength ref)
+                    "osma_over_atr": round(statistics.median(osmas) / med_atr, 3) if (osmas and med_atr) else 0,
+                    "median_abs_bulls": round(statistics.median([abs(b) for b in bulls]), 4) if bulls else 0,
+                })
+        except Exception as e:
+            logger.debug(f"indicator scale profile skip {base_symbol}: {e}")
+            return prof
+        if self.ks is not None and prof.get("atr_pct_of_price"):
+            try:
+                self.ks.remember(
+                    key=f"indicator_scale_{base_symbol.upper()}", kind="finding",
+                    topic=f"indicator scale {base_symbol.upper()}", source="continual_researcher",
+                    text=(f"{base_symbol.upper()} indicator SCALE (calibrate thresholds to THIS, "
+                          f"not gold): ATR ~{prof['atr_pct_of_price']}% of price, median |OsMA| "
+                          f"{prof['median_abs_osma']} (~{prof.get('osma_over_atr')}x ATR), median "
+                          f"|Bulls| {prof.get('median_abs_bulls')}. Absolute indicator values are "
+                          f"NOT comparable to other symbols; use ATR-relative / %-of-price gates."))
+            except Exception:
+                pass
+        return prof
+
     # ── 2+3. QUERY mql5 + REASON ──
     def research_symbol(self, base_symbol: str) -> dict:
         """Review + query mql5 RAG for a better technique; produce a hypothesis."""
@@ -182,10 +236,13 @@ class ContinualResearcher:
         summary = {"day": today, "symbols": {}, "issues_filed": []}
         for sym in symbols:
             r = self.research_symbol(sym)
+            # per-symbol indicator-scale profiling (calibrate thresholds per symbol)
+            scale = self.profile_indicator_scale(sym)
             summary["symbols"][sym.upper()] = {
                 "expectancy": r["review"].get("expectancy"),
                 "hypothesis": bool(r["hypothesis"]),
                 "knowledge_hits": len(r["knowledge"]),
+                "atr_pct_of_price": scale.get("atr_pct_of_price"),
             }
             # If a symbol persistently has no edge, propose a development issue
             rv = r["review"]
