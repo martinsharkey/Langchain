@@ -18,6 +18,7 @@ from __future__ import annotations
 import os
 import json
 import random
+from typing import Optional
 from dataclasses import dataclass
 
 from src import config
@@ -63,15 +64,24 @@ def _clamp(v, lo, hi, kind):
 
 
 class ParameterOptimizer:
-    def __init__(self, registry, backtest_fn):
+    def __init__(self, registry, backtest_fn, mql5_knowledge=None,
+                 is_failed_fn=None, config_fingerprint_fn=None):
         """
         registry: StrategyRegistry (for focused pockets + regime).
         backtest_fn: callable(symbol, params, sl_atr, tp_rr) -> walk-forward result
           dict {"pfs":[...], "wrs":[...], "n_total":int, "generalizes":bool,
                 "score": float}  (score = min PF across windows, the robust metric).
+        mql5_knowledge: optional MQL5Knowledge (#22/#25) to GROUND the next tuning
+          direction in the docs instead of blind random search.
+        is_failed_fn: optional callable(symbol, params_dict)->bool (#25) so the
+          search AVOIDS directions the #27 checkpointer already marked as failed.
+        config_fingerprint_fn: optional callable(params_dict)->str for logging.
         """
         self.registry = registry
         self.backtest_fn = backtest_fn
+        self.mql5_knowledge = mql5_knowledge
+        self.is_failed_fn = is_failed_fn
+        self.config_fingerprint_fn = config_fingerprint_fn
         self.tuned = self._load()
 
     def _load(self) -> dict:
@@ -135,6 +145,55 @@ class ParameterOptimizer:
             cand["osma_slow"] = cand["osma_fast"] + 8
         return cand
 
+    def _mql5_guided_candidate(self, symbol: str, params: dict) -> Optional[dict]:
+        """
+        #25 ReAct alternative: instead of a blind random mutation, ask the mql5
+        knowledge RAG for a tuning DIRECTION and nudge the relevant parameter that
+        way. Cheap keyword mapping from the retrieved text to a param delta.
+        Returns a candidate or None (fall back to random mutation).
+        """
+        if self.mql5_knowledge is None:
+            return None
+        try:
+            hits = self.mql5_knowledge.research(
+                f"better indicator parameters to improve {symbol} entry timing and reduce false signals", 2)
+        except Exception:
+            return None
+        if not hits:
+            return None
+        text = " ".join(h.get("text", "").lower() for h in hits)
+        cand = dict(params)
+        moved = False
+        # map doc guidance -> a concrete parameter nudge (grounded, not random)
+        if "faster" in text or "react faster" in text or "earlier" in text:
+            lo, hi, step, kind = PARAM_SPACE["osma_fast"]
+            cand["osma_fast"] = _clamp(cand.get("osma_fast", DEFAULTS["osma_fast"]) - step, lo, hi, kind)
+            moved = True
+        elif "smoother" in text or "fewer" in text or "reduce" in text or "noise" in text:
+            lo, hi, step, kind = PARAM_SPACE["osma_slow"]
+            cand["osma_slow"] = _clamp(cand.get("osma_slow", DEFAULTS["osma_slow"]) + step, lo, hi, kind)
+            moved = True
+        if "volatility" in text or "atr" in text:
+            lo, hi, step, kind = PARAM_SPACE["atr_period"]
+            cand["atr_period"] = _clamp(cand.get("atr_period", DEFAULTS["atr_period"]) - step, lo, hi, kind)
+            moved = True
+        if not moved:
+            return None
+        if cand["ema_fast"] >= cand["ema_slow"]:
+            cand["ema_slow"] = cand["ema_fast"] + 4
+        if cand["osma_fast"] >= cand["osma_slow"]:
+            cand["osma_slow"] = cand["osma_fast"] + 8
+        return cand
+
+    def _is_failed(self, symbol: str, cand: dict) -> bool:
+        """#25: True if this candidate matches a #27 checkpointer failed direction."""
+        if self.is_failed_fn is None:
+            return False
+        try:
+            return bool(self.is_failed_fn(symbol, cand))
+        except Exception:
+            return False
+
     def optimize(self, symbol: str, iterations: int = 12, candidates_per_iter: int = 1,
                  directives: dict = None) -> dict:
         """
@@ -158,12 +217,19 @@ class ParameterOptimizer:
         tried = 0
         directive_worked = False
 
-        # candidate list: reflection-guided first (if any), then random mutations
+        # candidate list: reflection-guided first, then a #25 mql5-grounded
+        # candidate, then random mutations. All skip #27 failed directions.
         guided = [self._apply_directives(base, directives)] if directives else []
+        mql5_cand = self._mql5_guided_candidate(symbol, best_params)
+        if mql5_cand is not None:
+            guided.append(mql5_cand)
 
         for idx in range(iterations + len(guided)):
             cand = guided[idx] if idx < len(guided) else self._mutate(best_params)
             is_guided = idx < len(guided)
+            # #25: never re-try a direction the checkpointer marked as failed
+            if self._is_failed(symbol, cand):
+                continue
             tried += 1
             res = self.backtest_fn(symbol, cand, cand.get("sl_atr", 1.0), cand.get("tp_rr", 2.0))
             if not res or not res.get("generalizes"):

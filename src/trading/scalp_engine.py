@@ -204,6 +204,16 @@ class ScalpEngine:
         except Exception as e:
             logger.warning(f"ContinualResearcher unavailable: {e}")
 
+        # #25: give the optimizer its ReAct alternatives — mql5-grounded tuning
+        # direction + avoid the checkpointer's failed directions (no blind search).
+        if self.param_optimizer is not None:
+            try:
+                self.param_optimizer.mql5_knowledge = self.mql5_knowledge
+                if self.checkpointer is not None:
+                    self.param_optimizer.is_failed_fn = self.checkpointer.is_failed
+            except Exception as e:
+                logger.debug(f"optimizer ReAct wiring skip: {e}")
+
         # Phase 3 — master risk gate
         from src.trading.risk_manager import RiskManager
         self.risk = RiskManager(
