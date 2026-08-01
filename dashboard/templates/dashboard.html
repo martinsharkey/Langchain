@@ -23,7 +23,8 @@
   .dot.g{background:var(--green)} .dot.r{background:var(--red)} .dot.a{background:var(--amber)} .dot.b{background:var(--blue)}
   .spacer{flex:1}
   .algo{font-weight:700;padding:5px 12px;border-radius:20px;border:1px solid}
-  .algo.on{color:var(--green);border-color:#238636;background:#23863618}
+.cp-btn{background:#161b22;color:var(--fg);border:1px solid #30363d;border-radius:6px;padding:5px 10px;cursor:pointer;font-size:13px}
+.cp-btn:hover{border-color:#58a6ff}  .algo.on{color:var(--green);border-color:#238636;background:#23863618}
   .algo.off{color:var(--red);border-color:#da3633;background:#da363318}
 
   /* grid + cards */
@@ -87,6 +88,27 @@
       <div class="card c3 kpi"><div class="label">Net P&L (closed)</div><div class="val" id="k-pnl">—</div><div class="sub" id="k-pnlsub"></div></div>
       <div class="card c3 kpi"><div class="label">Open Positions</div><div class="val" id="k-open">—</div><div class="sub" id="k-opensub"></div></div>
       <div class="card c3 kpi"><div class="label">Win Rate</div><div class="val" id="k-wr">—</div><div class="sub" id="k-wrsub"></div></div>
+    </div>
+
+    <!-- ROW 1b: CONTROL PANEL (#19) -->
+    <div class="grid" style="margin-bottom:14px">
+      <div class="card c12">
+        <h2>Control Panel <span id="cp-state" style="font-size:12px;color:var(--sub);margin-left:8px"></span></h2>
+        <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">
+          <label style="font-size:13px">Mode:
+            <select id="cp-mode" style="background:#0d1117;color:var(--fg);border:1px solid #30363d;border-radius:6px;padding:4px">
+              <option>OBSERVE</option><option>PAPER</option><option>LIVE_MICRO</option><option>LIVE</option>
+            </select>
+          </label>
+          <button class="cp-btn" onclick="ctl({mode:document.getElementById('cp-mode').value})">Set Mode</button>
+          <button class="cp-btn" id="cp-pause" onclick="ctl({paused:true})">Pause entries</button>
+          <button class="cp-btn" onclick="ctl({paused:false})">Resume</button>
+          <button class="cp-btn" onclick="ctl({scalping:false})">Scalping OFF</button>
+          <button class="cp-btn" onclick="ctl({scalping:true})">Scalping ON</button>
+          <span id="cp-result" style="font-size:12px;color:var(--sub)"></span>
+        </div>
+        <div id="cp-persym" style="font-size:12px;color:var(--sub);margin-top:8px"></div>
+      </div>
     </div>
 
     <!-- ROW 2: equity curve + readiness -->
@@ -208,6 +230,13 @@
 const fmt=(v,d=2)=>(v===null||v===undefined||isNaN(v))?'—':Number(v).toFixed(d);
 const cls=v=>Number(v)>=0?'pos':'neg';
 async function j(u){try{const r=await fetch(u);return await r.json();}catch(e){return null;}}
+async function ctl(body){
+  try{
+    const r=await fetch('/api/control',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+    const d=await r.json();
+    document.getElementById('cp-result').textContent = d.ok ? ('applied: '+JSON.stringify(body)+' (next cycle)') : ('error: '+(d.error||'?'));
+  }catch(e){ document.getElementById('cp-result').textContent='request failed'; }
+}
 function row(k,v){return `<div class="row"><span class="k">${k}</span><span class="v">${v}</span></div>`;}
 function setDot(id,ok){document.getElementById(id).className='dot '+(ok?'g':'r');}
 
@@ -238,18 +267,30 @@ function drawEquity(curve){
 }
 
 async function refresh(){
-  const [status,readiness,learning,strat,bot,history,research,equity,cryptorti]=await Promise.all([
+  const [status,readiness,learning,strat,bot,history,research,equity,cryptorti,tstate]=await Promise.all([
     j('/api/status'),j('/api/readiness'),j('/api/learning'),j('/api/strategies'),
-    j('/api/trades/bot'),j('/api/trades/history'),j('/api/research'),j('/api/equity'),j('/api/cryptorti')
+    j('/api/trades/bot'),j('/api/trades/history'),j('/api/research'),j('/api/equity'),j('/api/cryptorti'),j('/api/trading_state')
   ]);
 
   // status bar
   if(status){
     const a=status.algo_trading||{};
     const algo=document.getElementById('algo');
-    algo.textContent='ALGO: '+(a.can_trade?'LIVE ▶':'BLOCKED ■');
-    algo.className='algo '+(a.can_trade?'on':'off');
-    algo.title=a.reason||'';
+    // #30: show the REAL trading state, not a blanket "BLOCKED" whenever an entry
+    // isn't firing. Only ALGO_DISABLED means algo is actually blocked in MT5.
+    const ts=tstate||{};
+    let algoTxt, algoCls;
+    if(ts.state==='ALGO_DISABLED'){ algoTxt='ALGO: BLOCKED ■'; algoCls='off'; }
+    else if(ts.state==='RISK_HALTED'){ algoTxt='RISK: HALTED ■'; algoCls='off'; }
+    else if(ts.state==='TRADING'){ algoTxt='ALGO: LIVE ▶'; algoCls='on'; }
+    else { algoTxt='IDLE ·'; algoCls='on'; }
+    algo.textContent=algoTxt; algo.className='algo '+algoCls;
+    algo.title=(ts.reason||a.reason||'');
+    // control-panel state line
+    const cpState=document.getElementById('cp-state');
+    if(cpState){ cpState.textContent=`${ts.state||'—'} · mode ${status.mode||'—'} · ${ts.reason||''}`; }
+    const cpPer=document.getElementById('cp-persym');
+    if(cpPer && ts.per_symbol){ cpPer.textContent='per-symbol: '+Object.entries(ts.per_symbol).map(([k,v])=>`${k}=${v}`).join(' · '); }
     setDot('d-conn',a.connected);document.getElementById('s-conn').textContent=a.connected?'ok':'down';
     setDot('d-engine',status.engine_running);document.getElementById('s-engine').textContent=status.engine_running?'running':'stopped';
     document.getElementById('s-mode').textContent=status.mode||'—';
