@@ -1856,6 +1856,13 @@ class ScalpEngine:
         try:
             algo = get_algo_status()
             acct = get_account_info()
+            # #21: enrich with the resolved account identity for the dashboard badge
+            _aa = getattr(self, "_active_account", None) or {}
+            if isinstance(acct, dict):
+                acct = {**acct,
+                        "login": acct.get("login") or _aa.get("login"),
+                        "trade_mode": acct.get("trade_mode") or _aa.get("trade_mode"),
+                        "is_live": (_aa.get("trade_mode") == "REAL")}
             symbols = []
             for base, ad in self.adapters.items():
                 t = ad.live_tick()
