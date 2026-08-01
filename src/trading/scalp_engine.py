@@ -77,6 +77,15 @@ class ScalpEngine:
         except Exception as e:
             logger.warning(f"CryptoRTI strategy not registered: {e}")
 
+        # Register the PRIMARY OsMA 7-indicator confluence strategy (#29), ported
+        # from the proven GoldShark EAs. Symbol-agnostic; status=testing until it
+        # proves out per symbol via walk-forward + the #27 checkpointer.
+        try:
+            from src.strategies.osma_confluence import register as register_osma
+            register_osma(self.registry)
+        except Exception as e:
+            logger.warning(f"OsMA_Confluence strategy not registered: {e}")
+
         # one BrokerAdapter per base symbol
         self.adapters: dict[str, BrokerAdapter] = {}
         self.open_positions: dict[int, TrackedPosition] = {}   # by ticket

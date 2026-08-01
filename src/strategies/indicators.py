@@ -330,6 +330,26 @@ def _last(series: pd.Series, default=None):
         return default
 
 
+def _nth_last(series: pd.Series, n: int, default=None):
+    """Safe n-th-from-last value (n=1 last, n=2 prior bar) as a float."""
+    try:
+        v = series.iloc[-n]
+        if pd.isna(v):
+            return default
+        return float(v)
+    except Exception:
+        return default
+
+
+def _tail_list(series: pd.Series, k: int) -> list:
+    """Last k non-NaN values as a plain float list (oldest->newest)."""
+    try:
+        vals = [float(x) for x in series.iloc[-k:].tolist() if not pd.isna(x)]
+        return vals
+    except Exception:
+        return []
+
+
 def compute_full_indicators(data: list[dict], params: Optional[dict] = None) -> dict:
     """
     Compute a RICH, complete indicator snapshot for the latest candle.
@@ -420,6 +440,14 @@ def compute_full_indicators(data: list[dict], params: Optional[dict] = None) -> 
         "obv": _last(obv_s, 0.0),
         "bulls_power": _last(bulls_s, 0.0), "bears_power": _last(bears_s, 0.0),
         "osma": _last(osma_s, 0.0),
+        # OsMA history + ATR-prev for the confluence strategy (#29): zero-cross
+        # detection needs the prior closed bar; fresh-momentum/runway needs a few
+        # bars; ATR expansion needs atr[-2]. Provided here so signal_fn (which only
+        # gets the single-bar dict) can compute the cross without re-reading rates.
+        "osma_prev": _nth_last(osma_s, 2, 0.0),
+        "osma_recent": _tail_list(osma_s, 6),
+        "ema_prev": _nth_last(ema_fast_s, 2, ema_fast_v),
+        "atr_prev": _nth_last(atr_s, 2, atr_v),
         "support_levels": support, "resistance_levels": resistance,
         "trend": trend,
         "price_change_5": pct_change(5), "price_change_10": pct_change(10),
