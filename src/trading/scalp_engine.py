@@ -159,11 +159,19 @@ class ScalpEngine:
         # Config checkpointer (#27/#25): revert-to-best-config + learn-from-failure.
         # Keeps a per-symbol best-known config (by REALISED expectancy) and reverts
         # when a change degrades live results, recording the failed direction.
-        # KnowledgeStore is optional/lazy (heavy MiniLM load) — failure records
-        # still persist to disk even without it.
+        # A KnowledgeStore is wired in so failed tuning directions are stored
+        # SEMANTICALLY (not just to disk), closing the learn-from-failure loop so
+        # the reflection layer can recall "we tried this and it failed". Lazy +
+        # non-fatal (MiniLM downloads once; if unavailable we still persist to disk).
+        self.knowledge_store = None
+        try:
+            from src.learning.knowledge_store import KnowledgeStore
+            self.knowledge_store = KnowledgeStore()
+        except Exception as e:
+            logger.warning(f"KnowledgeStore unavailable (failures persist to disk only): {e}")
         try:
             from src.learning.config_checkpointer import ConfigCheckpointer
-            self.checkpointer = ConfigCheckpointer(knowledge_store=None)
+            self.checkpointer = ConfigCheckpointer(knowledge_store=self.knowledge_store)
         except Exception as e:
             logger.warning(f"ConfigCheckpointer unavailable: {e}")
             self.checkpointer = None
@@ -804,6 +812,33 @@ class ScalpEngine:
         if out:
             self._dir_winrate_cache = out
 
+    def _live_indicators(self, base_symbol: str, adapter) -> dict:
+        """
+        Lightweight recent-bar indicators for a symbol (bulls/bears/osma etc.),
+        used by the momentum-exhaustion exit (#29). Cached per cycle so managing
+        several positions doesn't recompute. Returns {} on any failure.
+        """
+        cache = getattr(self, "_live_ind_cache", None)
+        if cache is None:
+            cache = {}
+            self._live_ind_cache = cache
+        ck = (base_symbol, self.cycle)
+        if ck in cache:
+            return cache[ck]
+        result = {}
+        try:
+            resolved = adapter.resolved_symbol
+            rates = get_rates(resolved, timeframe=config.ENTRY_TIMEFRAME, count=60)
+            if rates and len(rates) >= 30:
+                ind = compute_full_indicators(rates, self._tuned_params(resolved))
+                if ind:
+                    result = ind
+        except Exception as e:
+            logger.debug(f"live indicators skip {base_symbol}: {e}")
+        cache.clear()  # keep only current cycle
+        cache[ck] = result
+        return result
+
     def _current_symbol_config(self, base_symbol: str) -> dict:
         """The tunable config that affects this symbol's live behaviour: the
         optimizer's tuned indicator/exit params + the effective giveback."""
@@ -1025,6 +1060,23 @@ class ScalpEngine:
                         continue
 
             intent = self.trade_manager.evaluate(st, price, adapter.spec.point, spread_pts)
+            # ── #29 proven GoldShark exits, layered over the giveback/trail logic ──
+            if intent is None:
+                # 1) WEAK counter-trend trade -> Playbook-A POC target (no trail)
+                intent = self.trade_manager.weak_trade_poc_exit(st, price, adapter.spec.point)
+            if intent is None:
+                # 2) momentum-exhaustion exit (peak-tracking Bulls/Bears + OsMA)
+                try:
+                    live = self._live_indicators(pos.base_symbol, adapter)
+                    if live:
+                        intent = self.trade_manager.momentum_exhaustion_exit(
+                            st, price, adapter.spec.point,
+                            bulls=live.get("bulls_power", 0.0),
+                            bears=live.get("bears_power", 0.0),
+                            osma=live.get("osma", 0.0),
+                        )
+                except Exception as e:
+                    logger.debug(f"exhaustion exit skip {ticket}: {e}")
             if intent:
                 if "modify_sl" in intent:
                     adapter.modify_sl(ticket, intent["modify_sl"])
@@ -1214,6 +1266,31 @@ class ScalpEngine:
                             pm = self.post_mortem.analyze(symbol=sym, limit=40)
                             if pm and pm.get("directives"):
                                 per_symbol_directives[sym] = pm["directives"]
+                                # CLOSE THE GIVEBACK LOOP (#18/#27): the post-mortem
+                                # 'giveback' directive was previously never consumed.
+                                # Apply it to this symbol's live giveback override
+                                # (clamped) so "winners cut too early" actually
+                                # loosens giveback, and record the lesson.
+                                gb = pm["directives"].get("giveback")
+                                if gb:
+                                    cur = self._giveback_override.get(
+                                        base.upper(), config.SCALP_GIVEBACK_FRAC)
+                                    new_gb = max(0.2, min(0.9, cur + float(gb)))
+                                    if abs(new_gb - cur) > 1e-6:
+                                        self._giveback_override[base.upper()] = new_gb
+                                        logger.info(f"[REFLECTION] {base}: giveback {cur:.2f}->{new_gb:.2f} "
+                                                    f"from post-mortem directive {gb:+.2f}")
+                                        if self.knowledge_store is not None:
+                                            try:
+                                                self.knowledge_store.remember(
+                                                    key=f"giveback_adj_{base.upper()}",
+                                                    kind="finding", topic=f"exit tuning {base.upper()}",
+                                                    source="post_mortem",
+                                                    text=(f"{base.upper()}: post-mortem found exit-timing leak; "
+                                                          f"adjusted giveback fraction to {new_gb:.2f} "
+                                                          f"(directive {gb:+.2f}). Findings: {pm.get('findings')}"))
+                                            except Exception:
+                                                pass
                         except Exception as e:
                             logger.debug(f"post-mortem {sym} skip: {e}")
 

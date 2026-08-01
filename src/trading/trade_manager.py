@@ -60,6 +60,12 @@ class ManagedState:
     peak_profit_points: float = 0.0  # best unrealized profit (points) ever seen
     trend_aligned: bool = False      # entry aligned with higher-TF trend (ride mode)
     htf_widened: bool = False        # HTF-blip stop-widen already applied (once)
+    # Peak-tracking momentum exhaustion (GoldShark11 exit, #29): track the best
+    # Bulls/Bears power and OsMA magnitude seen; exit when they fall off the peak.
+    peak_power: float = 0.0          # best (favourable) bulls/bears power seen
+    peak_osma_abs: float = 0.0       # best |OsMA| seen
+    weak_trade: bool = False         # counter-trend "Weak" trade (Playbook A: POC target, no trail)
+    poc_target: float = 0.0          # Point-of-Control / balance-area target for weak trades
 
 
 class TradeManager:
@@ -296,6 +302,70 @@ class TradeManager:
             return {"close": "pre-close: lock short-term profit before session gap"}
 
         # losing or breakeven short-term trade → keep (unless violent turn caught in evaluate)
+        return None
+
+    def momentum_exhaustion_exit(self, st: ManagedState, price: float, point: float,
+                                 bulls: float, bears: float, osma: float,
+                                 power_rev_pts: float = None,
+                                 osma_drop_frac: float = None) -> Optional[dict]:
+        """
+        GoldShark11 peak-tracking momentum-exhaustion exit (#29). Tracks the best
+        favourable power (Bulls for longs / Bears for shorts) and best |OsMA| seen
+        while in the trade; exits when momentum has fallen meaningfully off its
+        peak (a proxy for "the move is exhausted / balance reached"). Only acts
+        once the trade is in profit, so it locks gains rather than cutting early.
+        """
+        # only relevant once genuinely in profit
+        if st.action == "buy":
+            profit_points = (price - st.entry) / point if point else 0
+            fav_power = bulls
+        else:
+            profit_points = (st.entry - price) / point if point else 0
+            fav_power = -bears  # for shorts, more-negative bears = stronger; track magnitude
+        if profit_points <= 0:
+            return None
+
+        st.peak_power = max(st.peak_power, fav_power)
+        st.peak_osma_abs = max(st.peak_osma_abs, abs(osma))
+
+        # thresholds: default to fractions of the peak (symbol-agnostic), tunable.
+        # power reversal: favourable power dropped by this FRACTION of its peak.
+        power_frac = 0.5 if power_rev_pts is None else None
+        osma_frac = osma_drop_frac if osma_drop_frac is not None else 0.5
+
+        power_exhausted = False
+        if st.peak_power > 0:
+            if power_rev_pts is not None:
+                power_exhausted = fav_power < (st.peak_power - power_rev_pts)
+            else:
+                power_exhausted = fav_power < st.peak_power * power_frac
+
+        osma_exhausted = (st.peak_osma_abs > 0 and abs(osma) < st.peak_osma_abs * osma_frac)
+
+        # require a real profit buffer so we don't exit on noise near entry
+        armed = st.peak_profit_points >= max(self.giveback_arm_points(st) * 0.6, 1)
+        if armed and (power_exhausted and osma_exhausted):
+            self._log(st, "momentum_exhaustion_exit", price)
+            return {"close": (f"momentum exhausted: power {fav_power:.2f} off peak "
+                              f"{st.peak_power:.2f}, |OsMA| {abs(osma):.3f} off peak "
+                              f"{st.peak_osma_abs:.3f}")}
+        return None
+
+    def weak_trade_poc_exit(self, st: ManagedState, price: float, point: float) -> Optional[dict]:
+        """
+        Playbook-A exit for a WEAK (counter-trend) trade (#29): trailing is
+        disabled; the trade targets the previous balance-area Point of Control
+        (POC) and is closed there, before the macro trend resumes. If no POC was
+        set, this is a no-op (falls back to the normal manager logic).
+        """
+        if not st.weak_trade or not st.poc_target:
+            return None
+        if st.action == "buy" and price >= st.poc_target:
+            self._log(st, "weak_poc_target_exit", price)
+            return {"close": f"weak long: reached POC target {st.poc_target:.5f}"}
+        if st.action == "sell" and price <= st.poc_target:
+            self._log(st, "weak_poc_target_exit", price)
+            return {"close": f"weak short: reached POC target {st.poc_target:.5f}"}
         return None
 
     def llm_review_due(self, st: ManagedState, interval_sec: int = 180) -> bool:
