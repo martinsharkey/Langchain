@@ -214,6 +214,15 @@ class ScalpEngine:
             except Exception as e:
                 logger.debug(f"optimizer ReAct wiring skip: {e}")
 
+        # #24: per-symbol graduation (edge -> size-up gate). Non-fatal.
+        self.graduation = None
+        try:
+            from src.learning.graduation import Graduation
+            if self.edge is not None:
+                self.graduation = Graduation(self.edge, checkpointer=self.checkpointer)
+        except Exception as e:
+            logger.warning(f"Graduation unavailable: {e}")
+
         # Phase 3 — master risk gate
         from src.trading.risk_manager import RiskManager
         self.risk = RiskManager(
@@ -628,6 +637,13 @@ class ScalpEngine:
                     self._edge_cache = self.edge.status()
                 except Exception as e:
                     logger.debug(f"edge compute skip: {e}")
+            # #24: re-evaluate per-symbol graduation state (edge -> size-up gate)
+            if self.graduation is not None:
+                for _b in self.adapters:
+                    try:
+                        self.graduation.evaluate(_b)
+                    except Exception as e:
+                        logger.debug(f"graduation eval skip {_b}: {e}")
 
         # 2c) Adaptive intelligence: reflect -> synthesize -> backtest -> promote.
         #     Runs in a BACKGROUND thread (LLM + backtest are slow) so it never
@@ -703,6 +719,15 @@ class ScalpEngine:
         phase = edge.get("phase", 0)
         if phase < 2 or not adapter.spec:
             return base_lot
+        # #24: per-symbol graduation gate — only size UP a symbol that has proven
+        # its OWN realised edge (not just the pooled phase). Non-graduated symbols
+        # stay on the fixed micro lot even in global Phase 2.
+        if self.graduation is not None:
+            try:
+                if not self.graduation.is_graduated(adapter.base_symbol):
+                    return base_lot
+            except Exception:
+                return base_lot
         # Phase 2+: fixed-fractional risk sizing (gentle), still micro-capped in LIVE_MICRO
         try:
             acct = self._safe_account()
@@ -778,6 +803,12 @@ class ScalpEngine:
                             pnl=pnl, per_strategy=per_strat)
         decision = self.governor.evaluate(stats)
         paused = decision.status in ("paused", "failed")
+        # #24 safety: a governor pause can only LOWER graduation (never raise).
+        if paused and self.graduation is not None:
+            try:
+                self.graduation.force_probation(base_symbol, reason="governor pause")
+            except Exception:
+                pass
         # TRAINING/DEMO: advisory only — do not block entries unless explicitly enabled.
         if paused and not config.GOVERNOR_PAUSE_BLOCKS_ENTRIES:
             return False
@@ -969,6 +1000,13 @@ class ScalpEngine:
                 logger.debug(f"revert params apply skip {base_symbol}: {e}")
         if "giveback" in best_cfg:
             self._giveback_override[base_symbol.upper()] = float(best_cfg["giveback"])
+        # #24 safety: a config revert means the graduated config was abandoned ->
+        # drop the symbol to at least PROBATION (only lowers).
+        if self.graduation is not None:
+            try:
+                self.graduation.force_probation(base_symbol, reason="config revert")
+            except Exception:
+                pass
         logger.warning(f"[REVERT-APPLIED] {base_symbol}: restored best-known config "
                        f"{best_cfg} (live). Future trades use this until it is beaten.")
 
@@ -1853,6 +1891,7 @@ class ScalpEngine:
                 "post_mortem": (getattr(self, "_postmortem_cache", {}) or {}),
                 "learning_health": self._learning_health(),
                 "config_checkpoints": (self.checkpointer.snapshot() if self.checkpointer else {}),
+                "graduation": (self.graduation.snapshot() if self.graduation else {}),
                 "operating_modes": (self.mode_mgr.snapshot() if self.mode_mgr else {}),
                 "performance_research": (self.perf_researcher.status() if self.perf_researcher else {}),
                 "edge": (self._edge_cache or {}),

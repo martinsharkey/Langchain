@@ -53,12 +53,24 @@ class EdgeCalculator:
     def __init__(self, experience_db):
         self.experience_db = experience_db
 
-    def compute(self) -> Edge:
+    def compute(self, symbol: str = None) -> Edge:
         conn = sqlite3.connect(self.experience_db.db_path)
         conn.row_factory = sqlite3.Row
+        where = "WHERE outcome IN ('win','loss','breakeven') " \
+                "AND (exit_reason IS NULL OR exit_reason<>'pre_rebuild_synthetic')"
+        params = []
+        if symbol:
+            where += " AND symbol LIKE ?"
+            params.append(symbol.upper()[:6] + "%")
+        # account-scope (#21) when the experience DB has a current account set
+        try:
+            clause, aps = self.experience_db._account_clause()
+            where += clause
+            params += aps
+        except Exception:
+            pass
         rows = [dict(r) for r in conn.execute(
-            "SELECT outcome, profit_loss FROM trades "
-            "WHERE outcome IN ('win','loss','breakeven') ORDER BY id ASC"
+            f"SELECT outcome, profit_loss FROM trades {where} ORDER BY id ASC", params
         ).fetchall()]
         conn.close()
 
