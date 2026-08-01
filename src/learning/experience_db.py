@@ -127,7 +127,38 @@ class ExperienceDatabase:
         # Lightweight migrations (add columns if missing)
         self._migrate()
 
+        # #21: the currently-connected account; stats/writes scope to it when set.
+        # {"login": int, "server": str, "trade_mode": "DEMO"|"REAL"|...}
+        self.current_account = None
+
         logger.info(f"Experience database initialized at {self.db_path}")
+
+    def set_current_account(self, login=None, server=None, trade_mode=None):
+        """#21: set the connected account so writes stamp it and stats filter by it."""
+        self.current_account = {"login": login, "server": server, "trade_mode": trade_mode}
+        return self.current_account
+
+    def _account_clause(self, alias: str = ""):
+        """Return (sql_fragment, params) to scope a query to the current account.
+        Empty when no account is set (back-compat). alias like 't.' if joined."""
+        acct = getattr(self, "current_account", None)
+        if not acct or acct.get("login") in (None, 0):
+            return "", []
+        col_login = f"{alias}account_login"
+        col_server = f"{alias}account_server"
+        return (f" AND {col_login}=? AND {col_server}=?",
+                [acct["login"], acct.get("server")])
+
+    def backfill_account(self, login: int, server: str, trade_mode: str = "DEMO") -> int:
+        """One-shot: stamp existing NULL-account rows with a known account (#21)."""
+        conn = sqlite3.connect(self.db_path)
+        cur = conn.cursor()
+        cur.execute("UPDATE trades SET account_login=?, account_server=?, account_trade_mode=? "
+                    "WHERE account_login IS NULL", (login, server, trade_mode))
+        n = cur.rowcount
+        conn.commit(); conn.close()
+        logger.info(f"backfilled {n} trades to account {login}/{server}/{trade_mode}")
+        return n
 
     def _migrate(self):
         """Add newer columns to existing DBs without dropping data."""
@@ -142,11 +173,25 @@ class ExperienceDatabase:
             adds.append("ALTER TABLE trades ADD COLUMN timeframe TEXT")
         if "mt5_ticket" not in cols:
             adds.append("ALTER TABLE trades ADD COLUMN mt5_ticket INTEGER")
+        # #21: per-account scoping so demo/live and different demo accounts never
+        # blend. Backfilled to the current account or 'unknown_account' below.
+        if "account_login" not in cols:
+            adds.append("ALTER TABLE trades ADD COLUMN account_login INTEGER")
+        if "account_server" not in cols:
+            adds.append("ALTER TABLE trades ADD COLUMN account_server TEXT")
+        if "account_trade_mode" not in cols:
+            adds.append("ALTER TABLE trades ADD COLUMN account_trade_mode TEXT")
         for sql in adds:
             try:
                 cur.execute(sql)
             except Exception as e:
                 logger.debug(f"migrate skip: {e}")
+        # index for account-scoped stats
+        try:
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_trades_account "
+                        "ON trades(account_login, account_server, symbol, outcome)")
+        except Exception as e:
+            logger.debug(f"account index skip: {e}")
         conn.commit()
         conn.close()
 
@@ -270,8 +315,9 @@ class ExperienceDatabase:
                 take_profit, position_size, confidence, strategy_used,
                 strategy_combination, outcome, profit_loss, exit_price,
                 exit_reason, market_regime, indicators_snapshot,
-                rsi_value, trend, atr_value, mgmt_variant, timeframe, mt5_ticket
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                rsi_value, trend, atr_value, mgmt_variant, timeframe, mt5_ticket,
+                account_login, account_server, account_trade_mode
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (
             timestamp,
             signal.get("symbol", "XAUUSD"),
@@ -295,6 +341,9 @@ class ExperienceDatabase:
             mgmt_variant,
             timeframe,
             mt5_ticket,
+            (self.current_account or {}).get("login"),
+            (self.current_account or {}).get("server"),
+            (self.current_account or {}).get("trade_mode"),
         ))
         
         trade_id = cursor.lastrowid

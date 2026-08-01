@@ -286,6 +286,12 @@ class ScalpEngine:
         if not self.connector.is_connected():
             logger.error("MT5 not connected — cannot start scalp engine")
             return False
+        # #21: resolve + set the connected account so all writes/stats scope to it,
+        # and detect demo/live or account switches (never blend histories).
+        try:
+            self._resolve_and_set_account()
+        except Exception as e:
+            logger.debug(f"account resolve skip: {e}")
         for base in config.TRADING_SYMBOLS:
             adapter = BrokerAdapter(base, mode=config.TRADING_MODE)
             if adapter.spec is None:
@@ -1233,6 +1239,46 @@ class ScalpEngine:
             return a if isinstance(a, dict) else {}
         except Exception:
             return {}
+
+    def _resolve_and_set_account(self):
+        """#21: read the connected MT5 account identity, set it on the experience
+        DB (so writes/stats scope to it), and log demo/live + account switches."""
+        login = server = None
+        trade_mode = "UNKNOWN"
+        try:
+            if mt5 is not None:
+                ai = mt5.account_info()
+                if ai:
+                    login = getattr(ai, "login", None)
+                    server = getattr(ai, "server", None)
+                    tm = getattr(ai, "trade_mode", None)
+                    trade_mode = {0: "DEMO", 1: "CONTEST", 2: "REAL"}.get(tm, "UNKNOWN")
+        except Exception as e:
+            logger.debug(f"mt5 account_info skip: {e}")
+        if login is None:
+            a = self._safe_account()
+            login = a.get("login"); server = a.get("server")
+        prev = getattr(self, "_active_account", None)
+        acct = {"login": login, "server": server, "trade_mode": trade_mode}
+        self._active_account = acct
+        try:
+            self.experience_db.set_current_account(login=login, server=server, trade_mode=trade_mode)
+        except Exception as e:
+            logger.debug(f"set_current_account skip: {e}")
+        if prev and (prev.get("login") != login or prev.get("server") != server
+                     or prev.get("trade_mode") != trade_mode):
+            logger.warning(f"*** ACCOUNT SWITCH detected: {prev} -> {acct}. Starting a fresh "
+                           f"account-scoped track; histories are NOT blended. ***")
+            if prev.get("trade_mode") != "REAL" and trade_mode == "REAL":
+                logger.warning("*** DEMO->LIVE switch: prior demo edge is NOT live-proven. "
+                               "Live account starts with zero proven edge. ***")
+            # flush account-bound caches so old-account learning doesn't leak
+            for attr in ("_symbol_profit_cache", "_variant_perf_cache", "_dir_winrate_cache",
+                         "_symbol_personality_cache", "_edge_cache"):
+                if hasattr(self, attr):
+                    setattr(self, attr, {} if "cache" in attr else None)
+            self._giveback_override = {}
+        logger.info(f"[ACCOUNT] connected {trade_mode} login={login} server={server}")
 
     def _learning_health(self) -> dict:
         """
