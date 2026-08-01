@@ -1696,13 +1696,15 @@ class ScalpEngine:
                         except Exception as e:
                             logger.debug(f"fixer skip {_b}: {e}")
 
-                # #42: retrain the ONNX outcome predictor on accumulated trades
-                # (kept only if it beats the incumbent on holdout — verify/revert).
+                # #42: retrain PER-SYMBOL ONNX outcome predictors on accumulated
+                # trades (chronological holdout; kept only if it beats the bar +
+                # incumbent — verify/revert).
                 if self.onnx_predictor is not None:
                     try:
-                        res = self.onnx_predictor.train()
-                        if res.get("trained"):
-                            logger.info(f"[ONNX] train: {res}")
+                        res = self.onnx_predictor.train_all(list(self.adapters.keys()))
+                        kept = {k: v for k, v in res.items() if v.get("kept")}
+                        if kept:
+                            logger.info(f"[ONNX] retrained: {kept}")
                     except Exception as e:
                         logger.debug(f"onnx train skip: {e}")
             except Exception as e:
@@ -1852,22 +1854,27 @@ class ScalpEngine:
             except Exception as e:
                 logger.debug(f"RAG analyze skip: {e}")
 
-        # #42: LEARNED entry confidence — the ONNX model (trained on real outcomes)
-        # predicts P(win) for this entry fingerprint and blends it into confidence.
-        # A low learned probability can veto a nominally-confident entry (the old
-        # hand-weighted confidence was anti-calibrated). Falls back silently if no model.
+        # #42: LEARNED entry confidence — the PER-SYMBOL ONNX model (chronological
+        # holdout, scale-free features) predicts P(win). Given its validation is
+        # inherently the softest part of the pipeline, its live authority is
+        # CONSERVATIVE: a small NUDGE (not a 50/50 blend), and a veto only for
+        # genuinely low P(win) AND only once the symbol's model has a real sample.
         if self.onnx_predictor is not None:
             try:
                 p_win = self.onnx_predictor.predict_win_prob(indicators)
                 if p_win is not None:
+                    n_model = self.onnx_predictor.model_trades(indicators)
                     before = signal.confidence
-                    # blend 50/50 with the rule confidence, then hard-veto very low P(win)
-                    signal.confidence = round(0.5 * signal.confidence + 0.5 * p_win, 3)
-                    if p_win < 0.35:
-                        logger.info(f"{base}: ONNX veto (P(win) {p_win:.2f})")
+                    # small nudge: +/-0.10 max, scaled by how far P(win) is from 0.5
+                    nudge = max(-0.10, min(0.10, (p_win - 0.5) * 0.4))
+                    signal.confidence = round(max(0.0, min(1.0, signal.confidence + nudge)), 3)
+                    # veto only a genuinely bad entry, and only for a matured model
+                    if p_win < 0.30 and n_model >= 120:
+                        logger.info(f"{base}: ONNX veto (P(win) {p_win:.2f}, model n={n_model})")
                         return
                     if abs(signal.confidence - before) > 0.01:
-                        logger.info(f"{base}: ONNX P(win) {p_win:.2f} -> conf {before:.2f}->{signal.confidence:.2f}")
+                        logger.info(f"{base}: ONNX P(win) {p_win:.2f} (n={n_model}) "
+                                    f"nudge {before:.2f}->{signal.confidence:.2f}")
             except Exception as e:
                 logger.debug(f"onnx confidence skip: {e}")
 
