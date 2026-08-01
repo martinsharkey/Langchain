@@ -19,7 +19,7 @@ import json
 import sqlite3
 from datetime import datetime, timezone
 
-from flask import Flask, jsonify
+from flask import Flask, jsonify, request
 
 from src import config
 from src.utils.logger import get_logger
@@ -90,6 +90,98 @@ def api_status():
             return jsonify({"error": str(e), "engine_running": False})
     status["engine_running"] = status.get("running", False)
     return jsonify(status)
+
+
+@app.route("/api/trading_state")
+def api_trading_state():
+    """
+    The REAL reason trading is or isn't happening (#30) — so the dashboard never
+    shows a misleading 'algo blocked' when the true cause is a governor pause,
+    risk halt, closed market, or simply no signal. Precedence: algo/connection
+    -> risk halt -> per-symbol (market closed / governor paused / eligible).
+    """
+    status = _read_status() or {}
+    algo = status.get("algo_trading", {})
+    risk = status.get("risk", {})
+    gov = status.get("symbol_governance", {})
+    symbols = status.get("symbols", [])
+
+    if not algo.get("can_trade", True):
+        state = {"state": "ALGO_DISABLED",
+                 "reason": f"MT5 algo trading not permitted: {algo.get('reason','unknown')}"}
+    elif risk.get("halted"):
+        state = {"state": "RISK_HALTED", "reason": risk.get("reason", "risk manager halted trading")}
+    else:
+        per_symbol = {}
+        eligible = 0
+        for s in symbols:
+            base = s.get("base")
+            g = (gov.get(base) or {})
+            if not s.get("open", True):
+                per_symbol[base] = "market_closed"
+            elif g.get("status") in ("paused", "failed"):
+                per_symbol[base] = f"governor_{g.get('status')} (advisory)" \
+                    if not config.__dict__.get("GOVERNOR_PAUSE_BLOCKS_ENTRIES", False) else f"governor_{g.get('status')}"
+                eligible += 1  # advisory -> still eligible
+            else:
+                per_symbol[base] = "eligible"
+                eligible += 1
+        state = {"state": "TRADING" if eligible else "IDLE",
+                 "reason": ("eligible symbols present; entries occur when a signal clears the confidence gate"
+                            if eligible else "no eligible symbols right now (markets closed)"),
+                 "per_symbol": per_symbol}
+    state["algo_can_trade"] = algo.get("can_trade")
+    state["mode"] = status.get("mode")
+    return jsonify(state)
+
+
+@app.route("/api/control", methods=["GET", "POST"])
+def api_control():
+    """
+    Dashboard control channel (#19). GET returns the current control request;
+    POST writes one to data/control.json which the engine reads each cycle and
+    applies (trading mode, pause/resume, scalping toggle, per-symbol disable).
+    File-based so it survives restarts and works if dashboard/engine are separated.
+    """
+    import json as _json
+    path = os.path.join(config.DATA_DIR, "control.json")
+    if request.method == "GET":
+        try:
+            if os.path.exists(path):
+                with open(path) as f:
+                    return jsonify(_json.load(f))
+        except Exception as e:
+            return jsonify({"error": str(e)})
+        return jsonify({})
+    try:
+        req = request.get_json(force=True) or {}
+    except Exception:
+        req = {}
+    allowed = {}
+    if str(req.get("mode", "")).upper() in ("OBSERVE", "PAPER", "LIVE_MICRO", "LIVE"):
+        allowed["mode"] = str(req["mode"]).upper()
+    if "paused" in req:
+        allowed["paused"] = bool(req["paused"])
+    if "scalping" in req:
+        allowed["scalping"] = bool(req["scalping"])
+    if isinstance(req.get("disabled_symbols"), list):
+        allowed["disabled_symbols"] = [str(s).upper() for s in req["disabled_symbols"]]
+    if not allowed:
+        return jsonify({"error": "no valid control fields",
+                        "accepts": ["mode", "paused", "scalping", "disabled_symbols"]}), 400
+    import time as _t
+    allowed["requested_at"] = _t.time()
+    try:
+        os.makedirs(config.DATA_DIR, exist_ok=True)
+        tmp = path + ".tmp"
+        with open(tmp, "w") as f:
+            _json.dump(allowed, f, indent=2)
+        os.replace(tmp, path)
+        logger.info(f"dashboard control request: {allowed}")
+        return jsonify({"ok": True, "applied_request": allowed,
+                        "note": "engine applies this on its next cycle"})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 
 @app.route("/api/trades/history")
@@ -282,7 +374,11 @@ def api_readiness():
     conn_ok = algo.get("can_trade", False)
     conn_score = 20 if conn_ok else 0
     scores.append(conn_score)
-    details["connection"] = {"label": "Algo Trading enabled", "score": conn_score, "max": 20,
+    # accurate label: distinguish "algo disabled in MT5" from "connected/OK". The
+    # real not-trading reasons (governor pause, closed market, no signal) live in
+    # /api/trading_state, so we don't mislabel those as 'algo blocked' here.
+    algo_label = "Algo trading enabled" if conn_ok else "Algo trading NOT permitted by MT5"
+    details["connection"] = {"label": algo_label, "score": conn_score, "max": 20,
                              "value": algo.get("reason", "unknown")}
 
     # sample size (40) — driving toward target

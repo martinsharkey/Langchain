@@ -177,6 +177,10 @@ class ScalpEngine:
             self.checkpointer = None
         # per-symbol giveback override applied by a revert (None = use normal logic)
         self._giveback_override: dict[str, float] = {}
+        # dashboard control state (#19): live pause + scalping toggle
+        self._paused = False
+        self._scalping_enabled = True
+        self._last_control_ts = None
 
         # mql5 knowledge RAG (#22) + edge discovery (#31) + continual researcher (#32).
         # All optional/non-fatal; they make the learning loop continually improve.
@@ -552,10 +556,49 @@ class ScalpEngine:
         finally:
             self.running = False
 
+    def _apply_control(self):
+        """
+        Apply a pending dashboard control request from data/control.json (#19):
+        set trading mode live (config + every adapter), pause/resume new entries,
+        toggle scalping, or change the disabled-symbol set. Idempotent via the
+        request timestamp so we only act on a NEW request.
+        """
+        path = os.path.join(config.DATA_DIR, "control.json")
+        try:
+            if not os.path.exists(path):
+                return
+            with open(path) as f:
+                req = json.load(f)
+        except Exception:
+            return
+        ts = req.get("requested_at")
+        if ts is None or ts == getattr(self, "_last_control_ts", None):
+            return
+        self._last_control_ts = ts
+        m = req.get("mode")
+        if m and m != config.TRADING_MODE:
+            config.TRADING_MODE = m
+            for ad in self.adapters.values():
+                try:
+                    ad.mode = m
+                except Exception:
+                    pass
+            logger.warning(f"[CONTROL] trading mode -> {m} (from dashboard)")
+        if "paused" in req:
+            self._paused = bool(req["paused"])
+            logger.warning(f"[CONTROL] new entries {'PAUSED' if self._paused else 'RESUMED'} (dashboard)")
+        if "scalping" in req:
+            self._scalping_enabled = bool(req["scalping"])
+            logger.warning(f"[CONTROL] scalping {'ON' if self._scalping_enabled else 'OFF'} (dashboard)")
+        if isinstance(req.get("disabled_symbols"), list):
+            config.DISABLED_SYMBOLS = [s.upper() for s in req["disabled_symbols"]]
+            logger.warning(f"[CONTROL] disabled symbols -> {config.DISABLED_SYMBOLS} (dashboard)")
+
     def _run_cycle(self):
+        # 0) apply any pending dashboard control request (#19)
+        self._apply_control()
         # 0) adopt any NEW manual trades the user opened since last cycle
         self._adopt_existing_positions()
-
         # 1) reconcile any positions that closed since last cycle
         self._reconcile_closed()
 
@@ -1536,6 +1579,9 @@ class ScalpEngine:
         return True, f"aligned ({agree}/{len(dirs)} agree)", 0
 
     def _evaluate_and_trade(self, base: str, adapter: BrokerAdapter):
+        # dashboard control: new entries paused / scalping disabled (#19)
+        if getattr(self, "_paused", False) or not getattr(self, "_scalping_enabled", True):
+            return
         # don't open when the market is closed for this symbol
         if not self.sessions.is_open(base):
             return
