@@ -178,6 +178,32 @@ class ScalpEngine:
         # per-symbol giveback override applied by a revert (None = use normal logic)
         self._giveback_override: dict[str, float] = {}
 
+        # mql5 knowledge RAG (#22) + edge discovery (#31) + continual researcher (#32).
+        # All optional/non-fatal; they make the learning loop continually improve.
+        self.mql5_knowledge = None
+        self.edge_discovery = None
+        self.researcher = None
+        try:
+            from src.learning.mql5_knowledge import MQL5Knowledge
+            self.mql5_knowledge = MQL5Knowledge()
+        except Exception as e:
+            logger.warning(f"MQL5Knowledge unavailable: {e}")
+        try:
+            from src.learning.edge_discovery import EdgeDiscovery
+            from src.learning.backtester import Backtester
+            self.edge_discovery = EdgeDiscovery(
+                self.registry, Backtester(self.registry),
+                knowledge_store=self.knowledge_store)
+        except Exception as e:
+            logger.warning(f"EdgeDiscovery unavailable: {e}")
+        try:
+            from src.learning.continual_researcher import ContinualResearcher
+            self.researcher = ContinualResearcher(
+                self.experience_db, mql5_knowledge=self.mql5_knowledge,
+                knowledge_store=self.knowledge_store, edge_discovery=self.edge_discovery)
+        except Exception as e:
+            logger.warning(f"ContinualResearcher unavailable: {e}")
+
         # Phase 3 — master risk gate
         from src.trading.risk_manager import RiskManager
         self.risk = RiskManager(
@@ -1337,6 +1363,19 @@ class ScalpEngine:
                                             f"min-PF {r['score']} params {r['params']}")
                         except Exception as e:
                             logger.debug(f"optimizer {sym} skip: {e}")
+
+                # CONTINUAL RESEARCHER (#32): once-per-day ReAct pass that reviews
+                # per-symbol results, queries the mql5 RAG for better techniques,
+                # kicks a gate-enforced edge re-sweep, and auto-files GitHub issues
+                # for development-worthy discoveries. Idempotent per UTC day.
+                if self.researcher is not None:
+                    try:
+                        summ = self.researcher.daily_cycle(list(self.adapters.keys()))
+                        if not summ.get("skipped"):
+                            logger.info(f"[RESEARCHER] daily cycle: {summ.get('symbols')} "
+                                        f"issues_filed={summ.get('issues_filed')}")
+                    except Exception as e:
+                        logger.debug(f"continual researcher skip: {e}")
             except Exception as e:
                 logger.warning(f"adaptive loop error: {e}")
             finally:
