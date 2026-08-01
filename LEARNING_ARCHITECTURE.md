@@ -1,5 +1,20 @@
 # How Learning Works — Our System vs Hermes / TradingAgents
 
+> **Update (2026-08-01): the continual ReAct learning loop is now CLOSED.**
+> Flow: mql5 knowledge RAG (`mql5_knowledge.py`, #22) → continual daily researcher
+> (`continual_researcher.py`, #32: review per-symbol results → query mql5 → hypothesis
+> → auto-file GitHub issues for dev work) → per-symbol edge discovery
+> (`edge_discovery.py`, #31: walk-forward-gated sweep → `data/edge_weights.json`) →
+> param optimizer (#25: mql5-grounded candidates, skips failed directions) →
+> ConfigCheckpointer (`config_checkpointer.py`, #27: keep best-by-realised-expectancy /
+> auto-revert + learn-from-failure) → KnowledgeStore (#13: startup recall + reflection
+> write-back). Primary entry strategy = the proven 7-indicator OsMA confluence
+> (`osma_confluence.py`, #29). Safety: `LEARNING_ADAPTATION_ENABLED` kill-switch +
+> `LEARNING_AUTO_REVERT_ENABLED`; per-account scoping (#21) keeps demo edge from being
+> treated as live-proven. No open loops — every discovery auto-applies (if walk-forward
+> validated) or becomes a tracked GitHub issue.
+
+
 This document explains, truthfully and in detail, how our agent learns today
 (grounded in the actual code), how that compares to the Hermes and TradingAgents
 projects you studied, and a concrete plan to make our agent genuinely learn:
