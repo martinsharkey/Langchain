@@ -214,12 +214,15 @@ class ScalpEngine:
         try:
             from src.learning.continual_researcher import ContinualResearcher
             from src.learning.pattern_optimizer import PatternOptimizer
+            from src.learning.excursion_analyzer import ExcursionAnalyzer
             from src.mt5.data import get_rates as _get_rates
             _patopt = PatternOptimizer(_get_rates)
+            _exc = ExcursionAnalyzer(_get_rates)
             self.researcher = ContinualResearcher(
                 self.experience_db, mql5_knowledge=self.mql5_knowledge,
                 knowledge_store=self.knowledge_store, edge_discovery=self.edge_discovery,
-                pattern_optimizer=_patopt, apply_exit_config=self._apply_exit_config)
+                pattern_optimizer=_patopt, apply_exit_config=self._apply_exit_config,
+                excursion_analyzer=_exc)
         except Exception as e:
             logger.warning(f"ContinualResearcher unavailable: {e}")
 

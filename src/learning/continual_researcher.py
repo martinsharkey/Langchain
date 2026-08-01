@@ -43,7 +43,7 @@ logger = logging.getLogger("continual_researcher")
 class ContinualResearcher:
     def __init__(self, experience_db, mql5_knowledge=None, knowledge_store=None,
                  edge_discovery=None, repo: str = "martinsharkey/Langchain",
-                 pattern_optimizer=None, apply_exit_config=None):
+                 pattern_optimizer=None, apply_exit_config=None, excursion_analyzer=None):
         self.db = experience_db
         self.mql5 = mql5_knowledge
         self.ks = knowledge_store
@@ -54,6 +54,10 @@ class ContinualResearcher:
         self.pattern_optimizer = pattern_optimizer
         self.apply_exit_config = apply_exit_config  # callable(symbol, sl_atr, tp_rr)
         self._pattern_locked = {}
+        # #41: per-symbol OsMA-cycle excursion analyzer (how far the symbol moves,
+        # peak/trough, wick) -> symbol-specific exit calibration.
+        self.excursion_analyzer = excursion_analyzer
+        self._excursion = {}
 
     def lock_in_pattern(self, base_symbol: str, resolved: str = None) -> dict:
         """
@@ -100,6 +104,39 @@ class ContinualResearcher:
 
     def pattern_snapshot(self) -> dict:
         return dict(self._pattern_locked)
+
+    def measure_excursion(self, base_symbol: str, resolved: str = None) -> dict:
+        """#41: measure the symbol's OsMA-cycle excursion (peak/trough/wick) so the
+        exit is calibrated to how far THIS symbol actually moves. Stored in the RAG."""
+        if self.excursion_analyzer is None:
+            return {"found": False}
+        try:
+            r = self.excursion_analyzer.measure(resolved or base_symbol)
+        except Exception as e:
+            logger.debug(f"excursion measure skip {base_symbol}: {e}")
+            return {"found": False, "reason": str(e)[:80]}
+        if r.get("found"):
+            self._excursion[base_symbol.upper()] = r
+            if self.ks is not None:
+                try:
+                    rec = r["recommendation"]
+                    self.ks.remember(
+                        key=f"excursion_{base_symbol.upper()}", kind="finding",
+                        topic=f"excursion {base_symbol.upper()}", source="excursion_analyzer",
+                        text=(f"{base_symbol.upper()} OsMA-cycle excursion ({r['osma_cycles']} cycles): "
+                              f"median peak-in-favour {r['median_peak_pts']}pts, adverse "
+                              f"{r['median_trough_pts']}pts, wick {r['median_wick_pts']}pts, "
+                              f"peak/trough {r['peak_to_trough_ratio']}. Exit rec: sl_atr "
+                              f"{rec['suggested_sl_atr']}, tp_rr {rec['suggested_tp_rr']} (stop wide "
+                              f"enough to survive adverse+wick; TP ~70% of typical peak = exit near "
+                              f"OsMA reversal, don't give it back). Entries ~95% correct direction; "
+                              f"exit management is the leak."))
+                except Exception:
+                    pass
+        return r
+
+    def excursion_snapshot(self) -> dict:
+        return {k: v.get("recommendation") for k, v in self._excursion.items()}
 
     # ── 1. REVIEW ──
     def review_symbol(self, base_symbol: str, limit: int = 40) -> dict:
@@ -291,12 +328,15 @@ class ContinualResearcher:
             scale = self.profile_indicator_scale(sym)
             # #40: discover + lock in the MACD-leads-OsMA pattern's best exits
             pat = self.lock_in_pattern(sym)
+            # #41: measure per-symbol OsMA-cycle excursion (calibrate exits to movement)
+            exc = self.measure_excursion(sym)
             summary["symbols"][sym.upper()] = {
                 "expectancy": r["review"].get("expectancy"),
                 "hypothesis": bool(r["hypothesis"]),
                 "knowledge_hits": len(r["knowledge"]),
                 "atr_pct_of_price": scale.get("atr_pct_of_price"),
                 "pattern_locked": pat.get("found", False),
+                "excursion_peak_pts": (exc.get("median_peak_pts") if exc.get("found") else None),
             }
             # If a symbol persistently has no edge, propose a development issue
             rv = r["review"]
