@@ -213,9 +213,13 @@ class ScalpEngine:
             logger.warning(f"EdgeDiscovery unavailable: {e}")
         try:
             from src.learning.continual_researcher import ContinualResearcher
+            from src.learning.pattern_optimizer import PatternOptimizer
+            from src.mt5.data import get_rates as _get_rates
+            _patopt = PatternOptimizer(_get_rates)
             self.researcher = ContinualResearcher(
                 self.experience_db, mql5_knowledge=self.mql5_knowledge,
-                knowledge_store=self.knowledge_store, edge_discovery=self.edge_discovery)
+                knowledge_store=self.knowledge_store, edge_discovery=self.edge_discovery,
+                pattern_optimizer=_patopt, apply_exit_config=self._apply_exit_config)
         except Exception as e:
             logger.warning(f"ContinualResearcher unavailable: {e}")
 
@@ -1110,6 +1114,16 @@ class ScalpEngine:
                     self._apply_reverted_config(base, decision.get("best_config") or {})
             except Exception as e:
                 logger.debug(f"checkpointer skip {base}: {e}")
+
+    def _apply_exit_config(self, base_symbol: str, sl_atr: float, tp_rr: float):
+        """#40: lock a discovered MACD-leads-OsMA exit config into the LIVE per-symbol
+        override (entry sizing reads _exit_override). The #27 checkpointer then
+        verifies realised expectancy and reverts if it doesn't hold up."""
+        ov = self._exit_override.setdefault(base_symbol.upper(), {})
+        ov["sl_atr"] = round(float(sl_atr), 2)
+        ov["tp_rr"] = round(float(tp_rr), 2)
+        logger.warning(f"[PATTERN-LOCK] {base_symbol}: live exit config set sl_atr {ov['sl_atr']} "
+                       f"tp_rr {ov['tp_rr']} (let winners run / cut losers early)")
 
     def _apply_reverted_config(self, base_symbol: str, best_cfg: dict):
         """Restore a best-known config live: tuned params -> optimizer, giveback -> override."""

@@ -42,13 +42,64 @@ logger = logging.getLogger("continual_researcher")
 
 class ContinualResearcher:
     def __init__(self, experience_db, mql5_knowledge=None, knowledge_store=None,
-                 edge_discovery=None, repo: str = "martinsharkey/Langchain"):
+                 edge_discovery=None, repo: str = "martinsharkey/Langchain",
+                 pattern_optimizer=None, apply_exit_config=None):
         self.db = experience_db
         self.mql5 = mql5_knowledge
         self.ks = knowledge_store
         self.edge_discovery = edge_discovery
         self.repo = repo
         self._last_run_day = None
+        # #40: discover + LOCK IN the MACD-leads-OsMA pattern's best exits per symbol
+        self.pattern_optimizer = pattern_optimizer
+        self.apply_exit_config = apply_exit_config  # callable(symbol, sl_atr, tp_rr)
+        self._pattern_locked = {}
+
+    def lock_in_pattern(self, base_symbol: str, resolved: str = None) -> dict:
+        """
+        #40 CORE: discover the best exit config for the MACD-leads-OsMA pattern on
+        this symbol and LOCK IT IN (write to live tuned params). This is how the
+        bot auto-finds "let winners run / cut losers early" per symbol. Gated by
+        the pattern optimizer's PF/sample gate; the #27 checkpointer then verifies
+        realised expectancy and reverts if it doesn't hold up.
+        """
+        if self.pattern_optimizer is None:
+            return {"found": False, "reason": "no pattern optimizer"}
+        sym = resolved or base_symbol
+        try:
+            res = self.pattern_optimizer.discover(sym)
+        except Exception as e:
+            logger.debug(f"pattern discover skip {base_symbol}: {e}")
+            return {"found": False, "reason": str(e)[:80]}
+        if not res.get("found"):
+            return res
+        best = res["best"]
+        # write the winning exit config live (sl_atr / tp_rr) if a writer is wired
+        if self.apply_exit_config is not None:
+            try:
+                self.apply_exit_config(base_symbol, best["sl_atr"], best["tp_rr"])
+            except Exception as e:
+                logger.debug(f"apply exit config skip {base_symbol}: {e}")
+        self._pattern_locked[base_symbol.upper()] = best
+        logger.warning(f"[PATTERN-LOCK] {base_symbol}: MACD-leads-OsMA best exits "
+                       f"sl_atr {best['sl_atr']} tp_rr {best['tp_rr']} "
+                       f"({res['alt_filter']} filter, WR {best['win_rate']}% PF {best['profit_factor']}, "
+                       f"n {best['trades']}) -> locked into live tuned params")
+        if self.ks is not None:
+            try:
+                self.ks.remember(
+                    key=f"pattern_lock_{base_symbol.upper()}", kind="finding",
+                    topic=f"pattern exits {base_symbol.upper()}", source="pattern_optimizer",
+                    text=(f"{base_symbol.upper()} MACD-leads-OsMA best exits: sl_atr {best['sl_atr']}, "
+                          f"tp_rr {best['tp_rr']} ({res['alt_filter']} MTF filter) -> WR {best['win_rate']}% "
+                          f"PF {best['profit_factor']} exp {best['expectancy']} over {best['trades']} triggers. "
+                          f"Wide-stop/right-TP = let winners run, cut losers early. Locked live; checkpointer verifies."))
+            except Exception:
+                pass
+        return res
+
+    def pattern_snapshot(self) -> dict:
+        return dict(self._pattern_locked)
 
     # ── 1. REVIEW ──
     def review_symbol(self, base_symbol: str, limit: int = 40) -> dict:
@@ -238,11 +289,14 @@ class ContinualResearcher:
             r = self.research_symbol(sym)
             # per-symbol indicator-scale profiling (calibrate thresholds per symbol)
             scale = self.profile_indicator_scale(sym)
+            # #40: discover + lock in the MACD-leads-OsMA pattern's best exits
+            pat = self.lock_in_pattern(sym)
             summary["symbols"][sym.upper()] = {
                 "expectancy": r["review"].get("expectancy"),
                 "hypothesis": bool(r["hypothesis"]),
                 "knowledge_hits": len(r["knowledge"]),
                 "atr_pct_of_price": scale.get("atr_pct_of_price"),
+                "pattern_locked": pat.get("found", False),
             }
             # If a symbol persistently has no edge, propose a development issue
             rv = r["review"]
