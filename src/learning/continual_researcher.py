@@ -100,7 +100,7 @@ class ContinualResearcher:
         prof = {"symbol": base_symbol.upper()}
         try:
             import statistics
-            from src.mt5.market_data import get_rates
+            from src.mt5.data import get_rates
             from src.strategies.indicators import compute_indicator_series
             from src import config as _cfg
             rates = get_rates(resolved or base_symbol, timeframe=_cfg.ENTRY_TIMEFRAME, count=300)

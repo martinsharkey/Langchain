@@ -181,6 +181,10 @@ class ScalpEngine:
         self._paused = False
         self._scalping_enabled = True
         self._last_control_ts = None
+        # #36 live per-symbol exit override (sl_atr/tp_rr) set by the DynamicFixer,
+        # bypassing the backtest gate so a diagnosed "SL too tight" fix reaches
+        # live trades immediately (checkpointer verifies + reverts if worse).
+        self._exit_override: dict = {}
 
         # mql5 knowledge RAG (#22) + edge discovery (#31) + continual researcher (#32).
         # All optional/non-fatal; they make the learning loop continually improve.
@@ -226,6 +230,15 @@ class ScalpEngine:
                 self.graduation = Graduation(self.edge, checkpointer=self.checkpointer)
         except Exception as e:
             logger.warning(f"Graduation unavailable: {e}")
+
+        # #36: intelligent per-symbol ReAct fixer (applies post-mortem fixes LIVE,
+        # escalates exit-fix -> retune -> strategy-switch -> research). Non-fatal.
+        self.fixer = None
+        try:
+            from src.learning.dynamic_fixer import DynamicFixer
+            self.fixer = DynamicFixer(self)
+        except Exception as e:
+            logger.warning(f"DynamicFixer unavailable: {e}")
 
         # Phase 3 — master risk gate
         from src.trading.risk_manager import RiskManager
@@ -972,6 +985,33 @@ class ScalpEngine:
         cache[ck] = result
         return result
 
+    def _weak_poc_target(self, pos, live: dict) -> float:
+        """
+        #29 Playbook-A: pick a Point-of-Control / balance-area target for a WEAK
+        (counter-trend) trade = the nearest structural level in the trade's favour,
+        so we exit into the prior balance area before the macro trend resumes.
+        Uses support/resistance from the live indicators; falls back to ~1.2x ATR.
+        Returns 0.0 if unavailable.
+        """
+        if not live:
+            return 0.0
+        entry = getattr(pos, "entry", None) or getattr(pos, "entry_price", None)
+        atr = live.get("atr") or 0
+        if not entry:
+            return 0.0
+        res = live.get("resistance_levels") or []
+        sup = live.get("support_levels") or []
+        if pos.action == "buy":
+            above = sorted([r for r in res if r > entry])
+            if above:
+                return float(above[0])
+            return float(entry + 1.2 * atr) if atr else 0.0
+        else:
+            below = sorted([s for s in sup if s < entry], reverse=True)
+            if below:
+                return float(below[0])
+            return float(entry - 1.2 * atr) if atr else 0.0
+
     def _whale_predict_for_btc(self) -> dict:
         """
         Hybrid layer (#26/#29): current whale confidence-to-enter from the live
@@ -1169,6 +1209,20 @@ class ScalpEngine:
                     pass
                 st = self.trade_manager.register(pos, atr_points=atr_pts,
                                                  trend_aligned=trend_aligned)
+                # #29 Playbook-A: a COUNTER-TREND (not HTF-aligned) trade is "weak"
+                # -> target the nearest balance-area POC and disable trailing. Use
+                # the recent support/resistance as a POC proxy from live indicators.
+                if not trend_aligned:
+                    try:
+                        live = self._live_indicators(pos.base_symbol, adapter)
+                        poc = self._weak_poc_target(pos, live)
+                        if poc:
+                            st.weak_trade = True
+                            st.poc_target = poc
+                            logger.info(f"{pos.base_symbol} #{ticket}: WEAK (counter-trend) "
+                                        f"-> Playbook-A POC target {poc:.5f}, trailing off")
+                    except Exception as e:
+                        logger.debug(f"weak-poc set skip {ticket}: {e}")
                 pos.mgmt_variant = st.variant
                 self.managed[ticket] = st
                 # persist the variant on the DB row so outcomes are attributable
@@ -1564,6 +1618,17 @@ class ScalpEngine:
                                         f"issues_filed={summ.get('issues_filed')}")
                     except Exception as e:
                         logger.debug(f"continual researcher skip: {e}")
+
+                # #36 INTELLIGENT PER-SYMBOL FIXER: for each LOSING symbol, run one
+                # ReAct fix step (exit-fix -> retune -> strategy-switch -> research),
+                # applying the post-mortem's diagnosed fix LIVE. The #27 checkpointer
+                # then verifies realised expectancy and reverts if it didn't help.
+                if self.fixer is not None:
+                    for _b in self.adapters:
+                        try:
+                            self.fixer.fix_symbol(_b)
+                        except Exception as e:
+                            logger.debug(f"fixer skip {_b}: {e}")
             except Exception as e:
                 logger.warning(f"adaptive loop error: {e}")
             finally:
@@ -1783,8 +1848,13 @@ class ScalpEngine:
         # for this symbol if the self-learning loop found a validated set, else
         # the config defaults. This is how learned exit params reach live trades.
         _tp = self._tuned_params(resolved)
-        sl_atr_mult = _tp.get("sl_atr", config.SCALP_SL_ATR_MULT)
-        tp_rr = _tp.get("tp_rr", config.SCALP_TP_RR)
+        # #29/#36 DYNAMIC FIX: the post-mortem ReAct fixer can set a LIVE per-symbol
+        # sl_atr/tp_rr override that bypasses the backtest gate (the diagnosed
+        # "SL too tight" fix must reach live trades, not be stuck behind WR>=50).
+        # The #27 checkpointer verifies realised expectancy and reverts if worse.
+        _ov = (getattr(self, "_exit_override", {}) or {}).get(base.upper(), {})
+        sl_atr_mult = _ov.get("sl_atr", _tp.get("sl_atr", config.SCALP_SL_ATR_MULT))
+        tp_rr = _ov.get("tp_rr", _tp.get("tp_rr", config.SCALP_TP_RR))
         atr_pts = (indicators.get("atr", 0) or 0) / pt if pt else 0
         sl_pts = max(sl_atr_mult * atr_pts, min_dist_pts) if atr_pts > 0 \
             else max(config.SCALP_SL_POINTS, min_dist_pts)
@@ -2004,6 +2074,7 @@ class ScalpEngine:
                 "learning_health": self._learning_health(),
                 "config_checkpoints": (self.checkpointer.snapshot() if self.checkpointer else {}),
                 "graduation": (self.graduation.snapshot() if self.graduation else {}),
+                "dynamic_fixer": (self.fixer.snapshot() if self.fixer else {}),
                 "operating_modes": (self.mode_mgr.snapshot() if self.mode_mgr else {}),
                 "performance_research": (self.perf_researcher.status() if self.perf_researcher else {}),
                 "edge": (self._edge_cache or {}),
