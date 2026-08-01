@@ -35,26 +35,31 @@ TUNED_PATH = os.path.join(config.DATA_DIR, "tuned_params.json")
 # ATR period 14..82 (was not tunable at all). Without this, auto-tune literally
 # cannot find the region where the confluence strategy tests PF 1.46-1.62.
 PARAM_SPACE = {
-    "ema_fast":    (5, 40, 1, int),
-    "ema_slow":    (18, 130, 2, int),
-    "rsi_period":  (8, 21, 1, int),
-    "cci_period":  (14, 28, 2, int),
-    "osma_fast":   (8, 66, 2, int),
-    "osma_slow":   (20, 120, 2, int),
-    "osma_signal": (6, 43, 1, int),
-    "atr_period":  (14, 82, 2, int),           # confluence: ATR period (proven 14..82)
-    "atr_min":     (0.5, 4.0, 0.5, float),     # confluence: min ATR (volatility floor, ATR-relative)
-    "atr_max":     (3.0, 12.0, 1.0, float),    # confluence: max ATR (volatility ceiling)
-    "min_ema_slope": (0.02, 0.5, 0.02, float), # confluence: min |EMA slope| for trend confirm
-    "sl_atr":      (0.6, 1.8, 0.2, float),     # exit: stop distance in ATR
-    "tp_rr":       (1.5, 3.0, 0.5, float),     # exit: reward:risk
+    # AUTHORITATIVE mql5-doc optimization ranges for the 7-indicator confluence.
+    # MACD + OsMA share the same fast/slow/signal bounds.
+    "osma_fast":   (5, 34, 1, int),        # mql5: OsMA/MACD fast (def 12)
+    "osma_slow":   (20, 144, 2, int),      # mql5: OsMA/MACD slow (def 26)
+    "osma_signal": (5, 55, 1, int),        # mql5: OsMA/MACD signal (def 9)
+    "ema_period":  (3, 200, 1, int),       # mql5: EMA (def 14)
+    "atr_period":  (5, 50, 1, int),        # mql5: ATR (def 14)
+    "power_period": (5, 26, 1, int),       # mql5: Bulls/Bears Power (def 13)
+    "rsi_period":  (2, 30, 1, int),        # mql5: RSI (def 14)
+    # confluence strengths (ATR-relative gates) + exit
+    "atr_min":     (0.0, 4.0, 0.5, float),
+    "atr_max":     (0.0, 12.0, 1.0, float),
+    "min_ema_slope": (0.0, 0.5, 0.02, float),
+    "price_stretch_mult": (1.0, 4.0, 0.5, float),
+    "min_confluence": (1, 5, 1, int),
+    "sl_atr":      (0.5, 3.0, 0.5, float),
+    "tp_rr":       (0.5, 3.0, 0.5, float),
 }
 
 DEFAULTS = {
-    "ema_fast": 9, "ema_slow": 21, "rsi_period": 14, "cci_period": 20,
     "osma_fast": 12, "osma_slow": 26, "osma_signal": 9,
-    "atr_period": 14, "atr_min": 1.4, "atr_max": 4.5, "min_ema_slope": 0.05,
-    "sl_atr": 1.0, "tp_rr": 2.0,
+    "ema_period": 14, "atr_period": 14, "power_period": 13, "rsi_period": 14,
+    "atr_min": 0.0, "atr_max": 0.0, "min_ema_slope": 0.02,
+    "price_stretch_mult": 2.0, "min_confluence": 3,
+    "sl_atr": 2.0, "tp_rr": 1.0,
 }
 
 
@@ -120,8 +125,6 @@ class ParameterOptimizer:
             direction = random.choice([-1, 1])
             cand[k] = _clamp(cur + direction * step, lo, hi, kind)
         # keep ema_fast < ema_slow, osma_fast < osma_slow (sane ordering)
-        if cand["ema_fast"] >= cand["ema_slow"]:
-            cand["ema_slow"] = cand["ema_fast"] + 4
         if cand["osma_fast"] >= cand["osma_slow"]:
             cand["osma_slow"] = cand["osma_fast"] + 8
         return cand
@@ -139,8 +142,6 @@ class ParameterOptimizer:
             lo, hi, step, kind = PARAM_SPACE[k]
             cur = cand.get(k, DEFAULTS[k])
             cand[k] = _clamp(cur + delta, lo, hi, kind)
-        if cand["ema_fast"] >= cand["ema_slow"]:
-            cand["ema_slow"] = cand["ema_fast"] + 4
         if cand["osma_fast"] >= cand["osma_slow"]:
             cand["osma_slow"] = cand["osma_fast"] + 8
         return cand
@@ -179,8 +180,6 @@ class ParameterOptimizer:
             moved = True
         if not moved:
             return None
-        if cand["ema_fast"] >= cand["ema_slow"]:
-            cand["ema_slow"] = cand["ema_fast"] + 4
         if cand["osma_fast"] >= cand["osma_slow"]:
             cand["osma_slow"] = cand["osma_fast"] + 8
         return cand

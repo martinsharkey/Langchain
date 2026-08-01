@@ -218,11 +218,17 @@ class ScalpEngine:
             from src.mt5.data import get_rates as _get_rates
             _patopt = PatternOptimizer(_get_rates)
             _exc = ExcursionAnalyzer(_get_rates)
+            _robust = None
+            try:
+                from scripts.robust_tester import RobustTester
+                _robust = RobustTester(days=40, n_random=8, iters=6)
+            except Exception as e:
+                logger.debug(f"RobustTester unavailable: {e}")
             self.researcher = ContinualResearcher(
                 self.experience_db, mql5_knowledge=self.mql5_knowledge,
                 knowledge_store=self.knowledge_store, edge_discovery=self.edge_discovery,
                 pattern_optimizer=_patopt, apply_exit_config=self._apply_exit_config,
-                excursion_analyzer=_exc)
+                excursion_analyzer=_exc, robust_tester=_robust)
         except Exception as e:
             logger.warning(f"ContinualResearcher unavailable: {e}")
 

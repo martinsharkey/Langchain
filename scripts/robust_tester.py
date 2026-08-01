@@ -337,3 +337,21 @@ if __name__ == "__main__":
     nrand = int(sys.argv[3]) if len(sys.argv) > 3 else 8
     iters = int(sys.argv[4]) if len(sys.argv) > 4 else 10
     run(sym, days, nrand, iters)
+
+
+class RobustTester:
+    """Callable wrapper so the continual researcher can run random-window robust
+    optimisation per symbol on a cadence and receive the winning config."""
+
+    def __init__(self, days: int = 40, n_random: int = 8, iters: int = 6):
+        self.days = days
+        self.n_random = n_random
+        self.iters = iters
+
+    def optimise(self, symbol: str) -> dict:
+        """Run the walk-forward random-window optimiser; return the payload
+        (final_config + robustness + full_window). Non-fatal."""
+        try:
+            return run(symbol, self.days, self.n_random, self.iters) or {}
+        except Exception as e:
+            return {"error": str(e)[:120]}

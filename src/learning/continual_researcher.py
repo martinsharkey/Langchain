@@ -43,7 +43,8 @@ logger = logging.getLogger("continual_researcher")
 class ContinualResearcher:
     def __init__(self, experience_db, mql5_knowledge=None, knowledge_store=None,
                  edge_discovery=None, repo: str = "martinsharkey/Langchain",
-                 pattern_optimizer=None, apply_exit_config=None, excursion_analyzer=None):
+                 pattern_optimizer=None, apply_exit_config=None, excursion_analyzer=None,
+                 robust_tester=None):
         self.db = experience_db
         self.mql5 = mql5_knowledge
         self.ks = knowledge_store
@@ -58,6 +59,11 @@ class ContinualResearcher:
         # peak/trough, wick) -> symbol-specific exit calibration.
         self.excursion_analyzer = excursion_analyzer
         self._excursion = {}
+        # #44: robust random-window optimiser (full confluence, mql5 ranges) — the
+        # researcher's own discovery loop. Runs on a slow cadence; applies the
+        # winning config only if it passes a MAJORITY of random windows.
+        self.robust_tester = robust_tester
+        self._robust = {}
 
     def lock_in_pattern(self, base_symbol: str, resolved: str = None) -> dict:
         """
@@ -149,6 +155,52 @@ class ContinualResearcher:
 
     def excursion_snapshot(self) -> dict:
         return {k: v.get("recommendation") for k, v in self._excursion.items()}
+
+    def robust_optimise(self, base_symbol: str, resolved: str = None) -> dict:
+        """
+        #44: run the FULL-confluence random-window robust optimiser (mql5-doc ranges)
+        for this symbol and, if the winning config passes a MAJORITY of random date
+        windows (regime-agnostic), APPLY its exit config live + store the finding.
+        This is the researcher's own discovery loop, closing to real actions.
+        """
+        if self.robust_tester is None:
+            return {"found": False}
+        try:
+            payload = self.robust_tester.optimise(resolved or base_symbol)
+        except Exception as e:
+            logger.debug(f"robust optimise skip {base_symbol}: {e}")
+            return {"found": False, "reason": str(e)[:80]}
+        rb = (payload or {}).get("final_robustness", {})
+        cfg = (payload or {}).get("final_config", {})
+        if not cfg or rb.get("pass_rate", 0) < 0.6:
+            return {"found": False, "robustness": rb}
+        self._robust[base_symbol.upper()] = {"config": cfg, "robustness": rb,
+                                              "full_window": payload.get("full_window")}
+        # ACTION: apply the robust exit config live (checkpointer then verifies/reverts)
+        if self.apply_exit_config is not None and cfg.get("sl_atr") and cfg.get("tp_rr"):
+            try:
+                self.apply_exit_config(base_symbol, cfg["sl_atr"], cfg["tp_rr"], source="robust")
+            except TypeError:
+                self.apply_exit_config(base_symbol, cfg["sl_atr"], cfg["tp_rr"])
+            except Exception:
+                pass
+        if self.ks is not None:
+            try:
+                self.ks.remember(
+                    key=f"robust_config_{base_symbol.upper()}", kind="finding",
+                    topic=f"robust config {base_symbol.upper()}", source="robust_tester",
+                    text=(f"{base_symbol.upper()} full-confluence robust config (mql5-range tuned): "
+                          f"pass_rate {rb.get('pass_rate')} median PF {rb.get('median_pf')} across "
+                          f"random date windows. sl_atr {cfg.get('sl_atr')} tp_rr {cfg.get('tp_rr')} "
+                          f"osma {cfg.get('osma_fast')}/{cfg.get('osma_slow')} ema {cfg.get('ema_period')} "
+                          f"power {cfg.get('power_period')} rsi {cfg.get('rsi_period')} "
+                          f"min_confluence {cfg.get('min_confluence')}. Applied live; checkpointer verifies."))
+            except Exception:
+                pass
+        return {"found": True, "config": cfg, "robustness": rb}
+
+    def robust_snapshot(self) -> dict:
+        return dict(self._robust)
 
     # ── 1. REVIEW ──
     def review_symbol(self, base_symbol: str, limit: int = 40) -> dict:
@@ -342,6 +394,9 @@ class ContinualResearcher:
             pat = self.lock_in_pattern(sym)
             # #41: measure per-symbol OsMA-cycle excursion (calibrate exits to movement)
             exc = self.measure_excursion(sym)
+            # #44: full-confluence random-window robust optimisation (mql5 ranges);
+            # applies the winning config live if it passes a majority of windows.
+            rob = self.robust_optimise(sym)
             summary["symbols"][sym.upper()] = {
                 "expectancy": r["review"].get("expectancy"),
                 "hypothesis": bool(r["hypothesis"]),
@@ -349,6 +404,7 @@ class ContinualResearcher:
                 "atr_pct_of_price": scale.get("atr_pct_of_price"),
                 "pattern_locked": pat.get("found", False),
                 "excursion_peak_pts": (exc.get("median_peak_pts") if exc.get("found") else None),
+                "robust_applied": rob.get("found", False),
             }
             # If a symbol persistently has no edge, propose a development issue
             rv = r["review"]
