@@ -24,7 +24,7 @@ from __future__ import annotations
 import logging
 import pandas as pd
 
-from src.strategies.indicators import macd as macd_fn, osma as osma_fn, atr as atr_fn
+from src.strategies.confluence_signal import find_confluence_triggers
 
 logger = logging.getLogger("pattern_optimizer")
 
@@ -32,52 +32,12 @@ SL_GRID = (1.0, 1.5, 2.0, 2.5)
 TP_GRID = (0.7, 1.0, 1.5, 2.0)
 
 
-def _series(rates, fast=12, slow=26, sig=9):
-    df = pd.DataFrame(rates)
-    close = df["close"]
-    macd_line, _sig, _h = macd_fn(close, fast, slow, sig)
-    osma = osma_fn(close, fast, slow, sig)
-    a = atr_fn(df, 14)
-    return df, macd_line.reset_index(drop=True), osma.reset_index(drop=True), a.reset_index(drop=True)
-
-
-def _htf_side_at(ts, htf_df, htf_macd):
-    idx = htf_df.index[htf_df["time"] <= ts]
-    if len(idx) == 0:
-        return 0
-    v = htf_macd.iloc[idx[-1]] if idx[-1] < len(htf_macd) else 0
-    return 1 if v > 0 else (-1 if v < 0 else 0)
-
-
-def find_triggers(m1, m5, m15, macd_lead_bars=5):
-    df1, macd1, osma1, atr1 = _series(m1)
-    df5, macd5, _o5, _a5 = _series(m5)
-    df15, macd15, _o15, _a15 = _series(m15)
-    out = []
-    for i in range(30, len(df1) - 1):
-        cu = osma1[i - 1] <= 0 < osma1[i]
-        cd = osma1[i - 1] >= 0 > osma1[i]
-        if not (cu or cd):
-            continue
-        direction = "buy" if cu else "sell"
-        lead = False
-        for k in range(1, macd_lead_bars + 1):
-            j = i - k
-            if j < 1:
-                break
-            if (direction == "buy" and macd1[j - 1] <= 0 < macd1[j]) or \
-               (direction == "sell" and macd1[j - 1] >= 0 > macd1[j]):
-                lead = True
-                break
-        if not lead:
-            continue
-        ts = df1["time"].iloc[i]
-        want = 1 if direction == "buy" else -1
-        out.append({"i": i, "direction": direction, "entry": float(df1["close"].iloc[i]),
-                    "atr": float(atr1[i] or 0),
-                    "m5_aligned": _htf_side_at(ts, df5, macd5) == want,
-                    "m15_aligned": _htf_side_at(ts, df15, macd15) == want})
-    return out, df1
+def find_triggers(m1, m5, m15, cfg=None):
+    """FULL 7-indicator confluence triggers (shared definition). m1/m5/m15 are
+    lists of rate dicts; wrap as DataFrames for the shared module."""
+    d1 = pd.DataFrame(m1); d5 = pd.DataFrame(m5); d15 = pd.DataFrame(m15)
+    trg, _ = find_confluence_triggers(d1, d5, d15, cfg)
+    return trg, d1
 
 
 def _simulate(triggers, df1, sl_atr, tp_atr, require_m5, require_m15, max_hold=60):
@@ -86,9 +46,9 @@ def _simulate(triggers, df1, sl_atr, tp_atr, require_m5, require_m15, max_hold=6
     closes = df1["close"].values; highs = df1["high"].values; lows = df1["low"].values
     n = len(closes)
     for t in triggers:
-        if require_m5 and not t["m5_aligned"]:
+        if require_m5 and not t.get("m5_ok"):
             continue
-        if require_m15 and not t["m15_aligned"]:
+        if require_m15 and not t.get("m15_ok"):
             continue
         atr = t["atr"]
         if atr <= 0:

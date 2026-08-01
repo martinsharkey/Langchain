@@ -42,41 +42,16 @@ def _macd_side_at(ts, htf_df, htf_macd):
 
 
 def find_triggers(m1_rates, m5_rates, m15_rates, macd_lead_bars=5):
-    """Return list of trigger dicts: M1 MACD zero-cross THEN M1 OsMA zero-cross same dir."""
-    df1, macd1, osma1, atr1 = _series(m1_rates)
-    df5, macd5, _o5, _a5 = _series(m5_rates)
-    df15, macd15, _o15, _a15 = _series(m15_rates)
-    triggers = []
-    for i in range(30, len(df1) - 1):
-        # M1 OsMA zero-cross on this bar
-        cu = osma1[i - 1] <= 0 < osma1[i]
-        cd = osma1[i - 1] >= 0 > osma1[i]
-        if not (cu or cd):
-            continue
-        direction = "buy" if cu else "sell"
-        # did M1 MACD cross zero the SAME direction within the preceding N bars (MACD LEADS)?
-        lead = False
-        for k in range(1, macd_lead_bars + 1):
-            j = i - k
-            if j < 1:
-                break
-            mu = macd1[j - 1] <= 0 < macd1[j]
-            md = macd1[j - 1] >= 0 > macd1[j]
-            if (direction == "buy" and mu) or (direction == "sell" and md):
-                lead = True
-                break
-        if not lead:
-            continue
-        ts = df1["time"].iloc[i]
-        m5_side = _macd_side_at(ts, df5, macd5)
-        m15_side = _macd_side_at(ts, df15, macd15)
-        want = 1 if direction == "buy" else -1
-        triggers.append({
-            "i": i, "direction": direction, "entry": float(df1["close"].iloc[i]),
-            "atr": float(atr1[i] or 0),
-            "m5_aligned": m5_side == want, "m15_aligned": m15_side == want,
-        })
-    return triggers, df1
+    """FULL 7-indicator confluence triggers (shared src.strategies.confluence_signal).
+    Returns dicts with m5_aligned/m15_aligned keys for backward compatibility."""
+    import pandas as pd
+    from src.strategies.confluence_signal import find_confluence_triggers
+    d1 = pd.DataFrame(m1_rates); d5 = pd.DataFrame(m5_rates); d15 = pd.DataFrame(m15_rates)
+    trg, _ = find_confluence_triggers(d1, d5, d15, {"macd_lead_bars": macd_lead_bars})
+    for t in trg:
+        t["m5_aligned"] = t.get("m5_ok", False)
+        t["m15_aligned"] = t.get("m15_ok", False)
+    return trg, d1
 
 
 def simulate(triggers, df1, sl_atr, tp_atr, require_m5=False, require_m15=False, max_hold=60):
