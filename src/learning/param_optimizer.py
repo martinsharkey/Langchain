@@ -28,21 +28,32 @@ logger = get_logger("param_optimizer")
 TUNED_PATH = os.path.join(config.DATA_DIR, "tuned_params.json")
 
 # Parameter search space: name -> (min, max, step, kind)
+# Ranges WIDENED (#29/#31) to reach the PROVEN GoldShark optimizer cluster that
+# the old ranges could not touch: EMA 13..130 (proven ~13 and up to 113),
+# OsMA fast up to ~66 / slow up to ~120 (proven cluster fast=44 slow=69-117),
+# ATR period 14..82 (was not tunable at all). Without this, auto-tune literally
+# cannot find the region where the confluence strategy tests PF 1.46-1.62.
 PARAM_SPACE = {
-    "ema_fast":    (5, 15, 1, int),
-    "ema_slow":    (18, 34, 2, int),
+    "ema_fast":    (5, 40, 1, int),
+    "ema_slow":    (18, 130, 2, int),
     "rsi_period":  (8, 21, 1, int),
     "cci_period":  (14, 28, 2, int),
-    "osma_fast":   (8, 16, 1, int),
-    "osma_slow":   (20, 34, 2, int),
-    "osma_signal": (6, 12, 1, int),
-    "sl_atr":      (0.6, 1.8, 0.2, float),   # exit: stop distance in ATR
-    "tp_rr":       (1.5, 3.0, 0.5, float),   # exit: reward:risk
+    "osma_fast":   (8, 66, 2, int),
+    "osma_slow":   (20, 120, 2, int),
+    "osma_signal": (6, 43, 1, int),
+    "atr_period":  (14, 82, 2, int),           # confluence: ATR period (proven 14..82)
+    "atr_min":     (0.5, 4.0, 0.5, float),     # confluence: min ATR (volatility floor, ATR-relative)
+    "atr_max":     (3.0, 12.0, 1.0, float),    # confluence: max ATR (volatility ceiling)
+    "min_ema_slope": (0.02, 0.5, 0.02, float), # confluence: min |EMA slope| for trend confirm
+    "sl_atr":      (0.6, 1.8, 0.2, float),     # exit: stop distance in ATR
+    "tp_rr":       (1.5, 3.0, 0.5, float),     # exit: reward:risk
 }
 
 DEFAULTS = {
     "ema_fast": 9, "ema_slow": 21, "rsi_period": 14, "cci_period": 20,
-    "osma_fast": 12, "osma_slow": 26, "osma_signal": 9, "sl_atr": 1.0, "tp_rr": 2.0,
+    "osma_fast": 12, "osma_slow": 26, "osma_signal": 9,
+    "atr_period": 14, "atr_min": 1.4, "atr_max": 4.5, "min_ema_slope": 0.05,
+    "sl_atr": 1.0, "tp_rr": 2.0,
 }
 
 
