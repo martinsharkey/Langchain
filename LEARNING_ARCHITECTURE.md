@@ -1,18 +1,31 @@
 # How Learning Works — Our System vs Hermes / TradingAgents
 
-> **Update (2026-08-01): the continual ReAct learning loop is now CLOSED.**
-> Flow: mql5 knowledge RAG (`mql5_knowledge.py`, #22) → continual daily researcher
-> (`continual_researcher.py`, #32: review per-symbol results → query mql5 → hypothesis
-> → auto-file GitHub issues for dev work) → per-symbol edge discovery
-> (`edge_discovery.py`, #31: walk-forward-gated sweep → `data/edge_weights.json`) →
-> param optimizer (#25: mql5-grounded candidates, skips failed directions) →
-> ConfigCheckpointer (`config_checkpointer.py`, #27: keep best-by-realised-expectancy /
-> auto-revert + learn-from-failure) → KnowledgeStore (#13: startup recall + reflection
-> write-back). Primary entry strategy = the proven 7-indicator OsMA confluence
-> (`osma_confluence.py`, #29). Safety: `LEARNING_ADAPTATION_ENABLED` kill-switch +
-> `LEARNING_AUTO_REVERT_ENABLED`; per-account scoping (#21) keeps demo edge from being
-> treated as live-proven. No open loops — every discovery auto-applies (if walk-forward
-> validated) or becomes a tracked GitHub issue.
+> **Update (2026-08-02): full current architecture — the continual learning loop is
+> CLOSED and every loop verified wired end-to-end (audit 2026-08-02).**
+>
+> **Entry:** M1 7-indicator CONFLUENCE (`confluence_signal.py`, single source of truth)
+> — MACD, OsMA, Bears Power, Bulls Power, EMA, ATR, RSI — OsMA zero-cross trigger with
+> MACD-lead, hard gates (MACD align + ATR expanding), soft confirmations (EMA slope,
+> ATR range, price-stretch, Bulls/Bears, RSI), M5/M15 HTF support. Enter on M1 (early),
+> confirmed by HTF.
+> **CryptoRTI whale hybrid (BTC):** live boost via `wave_predictor` (conservative,
+> capped — not yet walk-forward validated); backtest validation via `feature_align`
+> (S3 whale/VPIN attached causally to bars) — see #43 / `validate_whale_backtest.py`.
+> **Optimisation:** `param_optimizer` PARAM_SPACE = authoritative mql5-doc ranges
+> (OsMA/MACD 5-34/20-144/5-55, EMA 3-200, ATR 5-50, Bulls/Bears 5-26, RSI 2-30);
+> mql5-guided candidates + avoids checkpointer failed directions. Tuned params flow
+> `tuned_params.json → compute_full_indicators → live entry` (macd_line/ema follow the
+> tuned OsMA/EMA periods so ONNX/MTF features match live).
+> **Continual researcher** (`continual_researcher.py`, hourly): review results → query
+> mql5 RAG → hypothesis → robust random-window optimise (`robust_tester`) → edge
+> discovery sweep (`edge_discovery` → `data/edge_weights.json` overlay) → excursion
+> exit calibration → auto-file GitHub issues. All applied LIVE via `apply_exit_config`.
+> **Safety:** ConfigCheckpointer keeps best-by-realised-expectancy per symbol, auto-
+> reverts degrading changes, records failed directions (learn-from-failure). Graduation
+> gates sizing (TRAINING = micro lot). Kill-switch + auto-revert. ONNX per-symbol
+> (chronological split, scale-free features) nudges confidence conservatively.
+> **Testing:** see TESTING.md — unit suite (79) + offline harnesses (backtest_macd_osma,
+> iterative_walkforward, robust_tester, validate_whale_backtest) + the live loop.
 
 
 This document explains, truthfully and in detail, how our agent learns today
