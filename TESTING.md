@@ -1,5 +1,17 @@
 # TESTING & CALIBRATION — Complete Reference
 
+> **RE-BASELINED 2026-08-02 on the UNIFIED confluence (commit 4b3a0b3+).** Prior
+> edge numbers were measured on a DRIFTED variant (live != backtest) and are
+> superseded. Current trustworthy baseline (BTCUSD, unified rules):
+> - `robust_tester` (40d, 10 random windows): pass_rate 0.60, **median PF 2.98**;
+>   full-window PF 1.32, WR 52.7%, expectancy +8.48.
+> - `iterative_walkforward` (chronological OOS, 67 OOS triggers): **OOS PF 1.29,
+>   WR 62.7%, expectancy +7.11** (positive, not overfit).
+> - `validate_whale_backtest`: **≥$6M whale gate PF 1.37 / WR 53.2%** (whale_active
+>   PF 1.05 vs NOT 0.76) — the live whale boost is now backtest-justified.
+> - Winning config: sl_atr ~3.0, tp_rr ~0.7, min_confluence 4, require_m5, EMA 50.
+> Still small-sample (~40d M1, one broker) — keep accumulating.
+
 > How this bot is tested, backtested, calibrated, and continually self-adjusted.
 > Covers the unit-test suite, the offline backtest/optimisation harnesses, the
 > live self-learning loops, and how they connect. Last updated 2026-08-02.
