@@ -34,7 +34,7 @@ DEFAULT_CFG = {
     # can refine; atr_min/atr_max (absolute) stay available for explicit per-symbol tuning.
     "atr_min_rel": 0.7,
     "power_period": 13, "rsi_period": 14, "rsi_long_max": 72.0, "rsi_short_min": 28.0,
-    "min_confluence": 3,
+    "min_confluence": 4,   # re-baseline (#47): 4/5 soft checks lifted PF 1.56->2.98 vs 3
 }
 
 

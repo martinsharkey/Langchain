@@ -58,7 +58,7 @@ DEFAULTS = {
     "osma_fast": 12, "osma_slow": 26, "osma_signal": 9,
     "ema_period": 14, "atr_period": 14, "power_period": 13, "rsi_period": 14,
     "atr_min": 0.0, "atr_max": 0.0, "min_ema_slope": 0.02,
-    "price_stretch_mult": 2.0, "min_confluence": 3,
+    "price_stretch_mult": 2.0, "min_confluence": 4,
     "sl_atr": 2.0, "tp_rr": 1.0,
 }
 
