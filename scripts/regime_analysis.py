@@ -98,6 +98,30 @@ def main():
     print("\nVERDICT: if winning months cluster on a descriptor (clear avg gap), gate on it; "
           "if the win/lose averages overlap, there is NO detectable regime edge and the entry needs rework.")
 
+    # WIRE INTO LEARNING: store the verdict so it isn't lost
+    try:
+        from src.learning.continual_researcher import ContinualResearcher
+        from src.learning.knowledge_store import KnowledgeStore
+        from src.learning.experience_db import ExperienceDatabase
+        rr = ContinualResearcher(ExperienceDatabase(), knowledge_store=KnowledgeStore())
+        vol_gap = abs(avg(win, "vol_bps") - avg(lose, "vol_bps"))
+        atr_gap = abs(avg(win, "atr_pct") - avg(lose, "atr_pct"))
+        ret_gap = abs(avg(win, "month_ret_pct") - avg(lose, "month_ret_pct"))
+        # a gate is worthwhile only if some descriptor clearly separates
+        separated = vol_gap > 2 or atr_gap > 0.02 or ret_gap > 6
+        rr.validate_hypothesis(
+            f"regime_gate_{symbol}",
+            f"A detectable regime (vol/ATR/trend/direction) separates winning from losing "
+            f"months for {symbol} technical confluence (=> gate-able edge)",
+            {"n_win": len(win), "n_lose": len(lose), "vol_gap": vol_gap,
+             "atr_gap": atr_gap, "ret_gap": ret_gap,
+             "win_avg_ret": avg(win, "month_ret_pct"), "lose_avg_ret": avg(lose, "month_ret_pct")},
+            verdict="agree" if separated else "disagree",
+            confidence="medium (5yr monthly, sampled)")
+        print("[LEARNING] regime verdict stored via the researcher.")
+    except Exception as e:
+        print(f"[LEARNING] could not store regime verdict: {e}")
+
 
 if __name__ == "__main__":
     main()

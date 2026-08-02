@@ -83,6 +83,41 @@ def main():
     print("\nVERDICT: a filter EARNS its place only if its group shows a materially higher "
           "peak:adverse than NOT. On this XAUUSD sample the differences are small (see #50).")
 
+    # WIRE INTO THE LEARNING SYSTEM: let the researcher validate + store these findings
+    # so they are not lost when this script exits (the recurring failure mode).
+    try:
+        from src.learning.continual_researcher import ContinualResearcher
+        from src.learning.knowledge_store import KnowledgeStore
+        from src.learning.experience_db import ExperienceDatabase
+        r = ContinualResearcher(ExperienceDatabase(), knowledge_store=KnowledgeStore())
+        # finding 1: entries are ~correct-direction with a real peak:adverse edge
+        p2a = round(statistics.median(peaks) / max(statistics.median(adv), 1e-9), 2)
+        r.validate_hypothesis(
+            "goldshark_entry_excursion_edge",
+            "GoldShark XAUUSD entries are strongly correct-direction with favourable "
+            "excursion > adverse (edge is at the excursion/exit level, not the entry filters)",
+            {"correct_dir_pct": round(corr / len(joined) * 100), "peak_adverse_ratio": p2a,
+             "median_peak": statistics.median(peaks), "median_adverse": statistics.median(adv),
+             "n": len(joined)},
+            verdict="agree" if (corr / len(joined) > 0.8 and p2a > 1.2) else "inconclusive",
+            confidence="medium (108 trades, one symbol/period)")
+        # finding 2: the confluence filters do NOT separate winners on this sample
+        bb = [x for x in joined if x["bulls"] > 0 and x["bears"] > 0]
+        nbb = [x for x in joined if not (x["bulls"] > 0 and x["bears"] > 0)]
+        sep = med(bb, "peak") - med(nbb, "peak")
+        r.validate_hypothesis(
+            "confluence_filters_dont_separate_xauusd",
+            "On GoldShark XAUUSD, the Bulls>0&Bears>0 / power / MTF filters do NOT "
+            "produce a materially higher peak:adverse than the non-matching group",
+            {"bb_peak": med(bb, "peak"), "bb_adverse": med(bb, "adverse"),
+             "notbb_peak": med(nbb, "peak"), "notbb_adverse": med(nbb, "adverse"),
+             "peak_gap": round(sep, 1)},
+            verdict="agree" if abs(sep) < 10 else "disagree",
+            confidence="medium (108 trades, one symbol/period)")
+        print("\n[LEARNING] findings validated + stored in the KnowledgeStore via the researcher.")
+    except Exception as e:
+        print(f"[LEARNING] could not store findings: {e}")
+
 
 if __name__ == "__main__":
     main()

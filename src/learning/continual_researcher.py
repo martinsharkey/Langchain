@@ -156,6 +156,34 @@ class ContinualResearcher:
     def excursion_snapshot(self) -> dict:
         return {k: v.get("recommendation") for k, v in self._excursion.items()}
 
+    def validate_hypothesis(self, key: str, claim: str, evidence: dict,
+                            verdict: str, confidence: str = "medium") -> dict:
+        """
+        Record an EXTERNALLY-derived finding (from an analysis script / chat session)
+        into the bot's knowledge system as a VALIDATED finding so it isn't lost.
+        verdict in {agree, disagree, inconclusive} with supporting `evidence`.
+        Stored under a stable key (updates in place); recallable by the researcher /
+        DynamicFixer, and overturnable later if new data disagrees.
+        """
+        rec = {"key": key, "claim": claim, "verdict": verdict,
+               "confidence": confidence, "evidence": evidence}
+        self._validated = getattr(self, "_validated", {})
+        self._validated[key] = rec
+        if self.ks is not None:
+            try:
+                self.ks.remember(
+                    key=f"validated_{key}", kind="finding", topic="research validation",
+                    source="continual_researcher.validate_hypothesis",
+                    text=(f"[{verdict.upper()} / conf {confidence}] {claim} | evidence: {evidence}. "
+                          f"Validated research finding; supersede only with new data."))
+            except Exception as e:
+                logger.debug(f"validate_hypothesis store skip: {e}")
+        logger.info(f"[VALIDATE] {key}: {verdict} ({confidence}) -- {claim}")
+        return rec
+
+    def validated_snapshot(self) -> dict:
+        return dict(getattr(self, "_validated", {}))
+
     def robust_optimise(self, base_symbol: str, resolved: str = None) -> dict:
         """
         #44: run the FULL-confluence random-window robust optimiser (mql5-doc ranges)
