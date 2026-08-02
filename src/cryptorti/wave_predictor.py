@@ -84,6 +84,22 @@ class WhaleWavePredictor:
         if stage and stage not in ("selling_confirmed", "selling", "confirmed"):
             conf *= 0.5
 
+        # #44/#46: blend in the bot's OWN learned, size-gated confidence from its
+        # accumulated whale-outcome dataset (Danny-seeded + grows from live events).
+        # This makes the signal self-sustaining and size-aware without re-querying
+        # Danny history at decision time.
+        learned = 0.0
+        try:
+            store = getattr(self, "_outcome_store", None)
+            if store is None:
+                from src.cryptorti.whale_outcome_store import WhaleOutcomeStore
+                self._outcome_store = store = WhaleOutcomeStore()
+            learned = store.confidence_for(usd)
+        except Exception:
+            learned = 0.0
+        if learned > 0:
+            conf = 0.5 * conf + 0.5 * learned  # blend RAG prior with learned outcome prob
+
         conf = round(max(0.0, min(conf, 1.0)), 3)
         action = "sell" if (direction or "sell").lower().startswith("s") else "buy"
         reason = (f"whale wave: {source} match sim={similarity:.2f} hit_rate={hit_rate:.0f}% "

@@ -59,6 +59,15 @@ class SignalStore:
         if not sid:
             return
         self.signals[sid] = signal
+        # #44/#46: record every live whale signal into the bot's OWN outcome store
+        # so it builds a self-sustaining labeled dataset (no reliance on Danny history).
+        try:
+            from src.cryptorti.whale_outcome_store import WhaleOutcomeStore
+            if not hasattr(self, "_outcome_store"):
+                self._outcome_store = WhaleOutcomeStore()
+            self._outcome_store.record_signal(signal, source="websocket")
+        except Exception:
+            pass
         # drop resolved/expired after recording
         self._persist()
 

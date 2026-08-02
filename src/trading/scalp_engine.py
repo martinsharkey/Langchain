@@ -251,6 +251,18 @@ class ScalpEngine:
         except Exception as e:
             logger.warning(f"Graduation unavailable: {e}")
 
+        # #44/#46: whale outcome store — the bot records live whale signals + their
+        # realised candle response, building its OWN dataset (self-sustaining, no
+        # reliance on Danny history). Seeded once from the Danny correlation study.
+        self.whale_outcomes = None
+        try:
+            from src.cryptorti.whale_outcome_store import WhaleOutcomeStore
+            self.whale_outcomes = WhaleOutcomeStore()
+            if self.whale_outcomes.stats()["resolved"] == 0:
+                self.whale_outcomes.seed_from_study()
+        except Exception as e:
+            logger.warning(f"WhaleOutcomeStore unavailable: {e}")
+
         # #36: intelligent per-symbol ReAct fixer (applies post-mortem fixes LIVE,
         # escalates exit-fix -> retune -> strategy-switch -> research). Non-fatal.
         self.fixer = None
@@ -724,6 +736,14 @@ class ScalpEngine:
                         self.researcher.lock_in_pattern(_b, self.adapters[_b].resolved_symbol)
                     except Exception as e:
                         logger.debug(f"exit calibration skip {_b}: {e}")
+            # #44/#46: resolve pending whale-signal outcomes against realised candles
+            # (labels the bot's own whale dataset as the window elapses).
+            if self.whale_outcomes is not None and self.cycle % config.EXIT_CALIBRATION_CYCLES == 11:
+                try:
+                    from src.mt5.data import get_rates as _gr
+                    self.whale_outcomes.resolve_pending(_gr, "BTCUSD")
+                except Exception as e:
+                    logger.debug(f"whale outcome resolve skip: {e}")
             # proactive self-performance research (what's working?)
             if self.perf_researcher is not None:
                 try:
