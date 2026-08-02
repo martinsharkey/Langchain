@@ -78,91 +78,14 @@ def _htf_macd_side(ts, htf_times, htf_macd):
 
 
 def find_triggers(m1, m5, m15, cfg):
-    """
-    M1 MACD-leads-OsMA trigger + the FULL 7-indicator confluence confirmation
-    (MACD, OsMA, Bears Power, Bulls Power, EMA, ATR, RSI) + HTF support — matching
-    src/strategies/osma_confluence.py. Only bars passing the hard gates AND >=
-    min_confluence soft checks (+ required HTF alignment) become triggers.
-    """
-    ind = _indicators(m1, cfg)
-    macd1, osma1, atr1 = ind["macd"], ind["osma"], ind["atr"]
-    ema1, rsi1, bulls1, bears1 = ind["ema"], ind["rsi"], ind["bulls"], ind["bears"]
-    m5_macd = _indicators(m5, cfg)["macd"]; m5_t = m5["time"].tolist()
-    m15_macd = _indicators(m15, cfg)["macd"]; m15_t = m15["time"].tolist()
-    times = m1["time"].tolist(); closes = m1["close"].tolist()
-    lead = cfg["macd_lead_bars"]
-    min_slope = cfg.get("min_ema_slope_atr", 0.02)
-    stretch_mult = cfg.get("price_stretch_mult", 2.0)
-    rsi_long_max = cfg.get("rsi_long_max", 72.0)
-    rsi_short_min = cfg.get("rsi_short_min", 28.0)
-    atr_min = cfg.get("atr_min", 0.0); atr_max = cfg.get("atr_max", 0.0)
-    min_conf = cfg.get("min_confluence", 3)
-    start = max(cfg["osma_slow"] + cfg["osma_signal"], cfg.get("ema_period", 50), 30)
-    out = []
-    for i in range(start, len(m1) - 1):
-        cu = osma1[i - 1] <= 0 < osma1[i]
-        cd = osma1[i - 1] >= 0 > osma1[i]
-        if not (cu or cd):
-            continue
-        direction = "buy" if cu else "sell"
-        # MACD leads: MACD crossed zero same direction within `lead` bars before
-        led = False
-        for k in range(1, lead + 1):
-            j = i - k
-            if j < 1:
-                break
-            if (direction == "buy" and macd1[j - 1] <= 0 < macd1[j]) or \
-               (direction == "sell" and macd1[j - 1] >= 0 > macd1[j]):
-                led = True; break
-        if not led:
-            continue
-        atr = float(atr1[i] or 0)
-        if atr <= 0:
-            continue
-        macd = float(macd1[i]); ema = float(ema1[i]); ema_prev = float(ema1[i - 1])
-        close = closes[i]; rsi = float(rsi1[i] or 50)
-        bulls = float(bulls1[i] or 0); bears = float(bears1[i] or 0)
-        atr_prev = float(atr1[i - 1] or atr)
-        # HARD gates (both must hold): MACD aligned side-of-zero + ATR expanding
-        if direction == "buy" and not (macd > 0):
-            continue
-        if direction == "sell" and not (macd < 0):
-            continue
-        if not (atr > atr_prev):
-            continue
-        # SOFT confluence (each of the 5 adds to the score)
-        def _atr_in_range():
-            if atr_min <= 0 and atr_max <= 0:
-                return True
-            if atr_min > 0 and atr < atr_min:
-                return False
-            if atr_max > 0 and atr > atr_max:
-                return False
-            return True
-        if direction == "buy":
-            checks = [
-                (ema - ema_prev) >= min_slope * atr and close > ema,   # EMA trend
-                _atr_in_range(),                                        # ATR range
-                abs(close - ema) <= stretch_mult * atr,                 # price stretch
-                bulls > 0 and bears > -abs(bulls),                      # buyers in control
-                rsi < rsi_long_max,                                     # RSI not exhausted
-            ]
-        else:
-            checks = [
-                (ema - ema_prev) <= -min_slope * atr and close < ema,
-                _atr_in_range(),
-                abs(close - ema) <= stretch_mult * atr,
-                bears < 0 and bulls < abs(bears),
-                rsi > rsi_short_min,
-            ]
-        if sum(1 for c in checks if c) < min_conf:
-            continue
-        ts = times[i]; want = 1 if direction == "buy" else -1
-        out.append({"i": i, "direction": direction, "entry": close, "atr": atr,
-                    "confluence": sum(1 for c in checks if c),
-                    "m5_ok": _htf_macd_side(ts, m5_t, m5_macd) == want,
-                    "m15_ok": _htf_macd_side(ts, m15_t, m15_macd) == want})
-    return out, m1
+    """FULL 7-indicator confluence triggers via the SHARED single source of truth
+    (src.strategies.confluence_signal) so the robust tester validates EXACTLY the
+    rules that trade live. Returns (triggers, m1_df) with i/direction/entry/atr/
+    m5_ok/m15_ok/trigger_kind keys."""
+    from src.strategies.confluence_signal import find_confluence_triggers
+    trg, df1 = find_confluence_triggers(m1, m5, m15, cfg)
+    return trg, df1
+
 
 
 def simulate(triggers, m1, cfg, lo=None, hi=None, max_hold=120):

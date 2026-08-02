@@ -28,6 +28,11 @@ DEFAULT_CFG = {
     "osma_fast": 12, "osma_slow": 26, "osma_signal": 9, "macd_lead_bars": 5,
     "ema_period": 50, "min_ema_slope_atr": 0.02, "price_stretch_mult": 2.0,
     "atr_period": 14, "atr_min": 0.0, "atr_max": 0.0,
+    # #45.5/#5: volatility FLOOR active from day one, symbol-agnostic. ATR at entry
+    # must be >= atr_min_rel x the symbol's recent median ATR (not a raw point value,
+    # which would mis-gate BTC vs gold). 0.7 = skip unusually-quiet bars. Optimizer
+    # can refine; atr_min/atr_max (absolute) stay available for explicit per-symbol tuning.
+    "atr_min_rel": 0.7,
     "power_period": 13, "rsi_period": 14, "rsi_long_max": 72.0, "rsi_short_min": 28.0,
     "min_confluence": 3,
 }
@@ -70,8 +75,11 @@ def _htf_side(ts, htf_times, htf_macd):
     return 1 if v > 0 else (-1 if v < 0 else 0)
 
 
-def _soft_checks(direction, close, ema, ema_prev, atr, bulls, bears, rsi, c):
+def _soft_checks(direction, close, ema, ema_prev, atr, bulls, bears, rsi, c, med_atr=0.0):
     def atr_in_range():
+        # relative volatility floor (symbol-agnostic): active from day one
+        if c.get("atr_min_rel", 0) > 0 and med_atr > 0 and atr < c["atr_min_rel"] * med_atr:
+            return False
         if c["atr_min"] <= 0 and c["atr_max"] <= 0:
             return True
         if c["atr_min"] > 0 and atr < c["atr_min"]:
@@ -84,16 +92,62 @@ def _soft_checks(direction, close, ema, ema_prev, atr, bulls, bears, rsi, c):
             (ema - ema_prev) >= c["min_ema_slope_atr"] * atr and close > ema,
             atr_in_range(),
             abs(close - ema) <= c["price_stretch_mult"] * atr,
-            bulls > 0 and bears > -abs(bulls),
+            bulls > 0 and bears > 0,   # long: BOTH Bulls Power AND Bears Power > 0 (stated rule)
             rsi < c["rsi_long_max"],
         ]
     return [
         (ema - ema_prev) <= -c["min_ema_slope_atr"] * atr and close < ema,
         atr_in_range(),
         abs(close - ema) <= c["price_stretch_mult"] * atr,
-        bears < 0 and bulls < abs(bears),
+        bears < 0 and bulls < 0,       # short: BOTH Bears Power AND Bulls Power < 0 (stated rule)
         rsi > c["rsi_short_min"],
     ]
+
+
+def evaluate_confluence_bar(ind: dict, cfg=None) -> dict:
+    """
+    SHARED per-bar confluence decision used by BOTH the backtest bar-loop and the
+    LIVE single-bar path (osma_confluence.py) -- one rule set, no drift (#unify).
+
+    `ind` = single-bar snapshot: osma, osma_prev, macd_line, ema_fast, ema_prev,
+    atr, atr_prev, bulls_power, bears_power, rsi, close; optionally macd_led (bool)
+    and med_atr (symbol median ATR for the relative vol floor).
+    Returns {action: buy|sell|hold, trigger_kind: cross|anticipated|None,
+             confluence: int, reason: str}. Keeps the anticipated-cross trigger.
+    """
+    c = _cfg(cfg)
+    close = float(ind.get("close") or ind.get("ema_fast") or 0)
+    atr = float(ind.get("atr") or 0)
+    if atr <= 0 or close <= 0:
+        return {"action": "hold", "trigger_kind": None, "confluence": 0, "reason": "no atr/price"}
+    osma_now = float(ind.get("osma") or 0); osma_prev = float(ind.get("osma_prev") or 0)
+    macd = float(ind.get("macd_line") or 0); atr_prev = float(ind.get("atr_prev") or atr)
+    cu = osma_prev <= 0 < osma_now
+    cd = osma_prev >= 0 > osma_now
+    band = c.get("osma_anticipate_atr", 0.15) * atr
+    au = (not cu) and (-band <= osma_now <= 0) and (osma_now > osma_prev)
+    ad = (not cd) and (0 <= osma_now <= band) and (osma_now < osma_prev)
+    if not (cu or cd or au or ad):
+        return {"action": "hold", "trigger_kind": None, "confluence": 0, "reason": "no OsMA cross"}
+    direction = "buy" if (cu or au) else "sell"
+    trigger_kind = "cross" if (cu or cd) else "anticipated"
+    if (direction == "buy" and not macd > 0) or (direction == "sell" and not macd < 0):
+        return {"action": "hold", "trigger_kind": trigger_kind, "confluence": 0, "reason": "MACD not aligned"}
+    if "macd_led" in ind and not ind["macd_led"]:
+        return {"action": "hold", "trigger_kind": trigger_kind, "confluence": 0, "reason": "MACD did not lead"}
+    if not atr > atr_prev:
+        return {"action": "hold", "trigger_kind": trigger_kind, "confluence": 0, "reason": "ATR not expanding"}
+    checks = _soft_checks(direction, close, float(ind.get("ema_fast") or close),
+                          float(ind.get("ema_prev") or ind.get("ema_fast") or close),
+                          atr, float(ind.get("bulls_power") or 0), float(ind.get("bears_power") or 0),
+                          float(ind.get("rsi") or 50), c, float(ind.get("med_atr") or 0))
+    conf = sum(1 for x in checks if x)
+    if conf < c["min_confluence"]:
+        return {"action": "hold", "trigger_kind": trigger_kind, "confluence": conf,
+                "reason": f"weak confluence {conf}/{len(checks)}"}
+    return {"action": direction, "trigger_kind": trigger_kind, "confluence": conf,
+            "reason": f"OsMA {trigger_kind} {direction}, confluence {conf}/{len(checks)}"}
+
 
 
 def find_confluence_triggers(m1, m5, m15, cfg=None):
@@ -107,14 +161,30 @@ def find_confluence_triggers(m1, m5, m15, cfg=None):
     m15_macd = compute_confluence(m15, c)["macd"]; m15_t = m15["time"].tolist()
     times = m1["time"].tolist(); closes = m1["close"].tolist()
     lead = c["macd_lead_bars"]
+    anticip_band = c.get("osma_anticipate_atr", 0.15)  # anticipated-cross band (frac of ATR)
+    # median ATR for the symbol-agnostic relative volatility floor (#5)
+    _atr_vals = [float(a) for a in atr1 if a and a > 0]
+    med_atr = (sorted(_atr_vals)[len(_atr_vals) // 2] if _atr_vals else 0.0)
     start = max(c["osma_slow"] + c["osma_signal"], c["ema_period"], 30)
     out = []
     for i in range(start, len(m1) - 1):
-        cu = osma1[i - 1] <= 0 < osma1[i]
-        cd = osma1[i - 1] >= 0 > osma1[i]
-        if not (cu or cd):
+        atr = float(atr1[i] or 0)
+        if atr <= 0:
             continue
-        direction = "buy" if cu else "sell"
+        osma_now = float(osma1[i]); osma_prev = float(osma1[i - 1])
+        # CONFIRMED cross
+        cu = osma_prev <= 0 < osma_now
+        cd = osma_prev >= 0 > osma_now
+        # ANTICIPATED cross (#4, KEPT): OsMA still the wrong side but within a band
+        # of zero and moving TOWARD it. Tagged so the learning loop evaluates it vs
+        # confirmed crosses (kept until there is clear evidence it doesn't work).
+        band = anticip_band * atr
+        au = (not cu) and (-band <= osma_now <= 0) and (osma_now > osma_prev)
+        ad = (not cd) and (0 <= osma_now <= band) and (osma_now < osma_prev)
+        if not (cu or cd or au or ad):
+            continue
+        direction = "buy" if (cu or au) else "sell"
+        trigger_kind = "cross" if (cu or cd) else "anticipated"
         led = False
         for k in range(1, lead + 1):
             j = i - k
@@ -125,9 +195,6 @@ def find_confluence_triggers(m1, m5, m15, cfg=None):
                 led = True; break
         if not led:
             continue
-        atr = float(atr1[i] or 0)
-        if atr <= 0:
-            continue
         macd = float(macd1[i]); atr_prev = float(atr1[i - 1] or atr)
         # HARD gates: MACD aligned + ATR expanding
         if (direction == "buy" and not macd > 0) or (direction == "sell" and not macd < 0):
@@ -136,13 +203,13 @@ def find_confluence_triggers(m1, m5, m15, cfg=None):
             continue
         checks = _soft_checks(direction, closes[i], float(ema1[i]), float(ema1[i - 1]),
                               atr, float(bulls1[i] or 0), float(bears1[i] or 0),
-                              float(rsi1[i] or 50), c)
+                              float(rsi1[i] or 50), c, med_atr)
         conf = sum(1 for x in checks if x)
         if conf < c["min_confluence"]:
             continue
         ts = times[i]; want = 1 if direction == "buy" else -1
         trig = {"i": i, "direction": direction, "entry": closes[i], "atr": atr,
-                "confluence": conf,
+                "confluence": conf, "trigger_kind": trigger_kind,
                 "m5_ok": _htf_side(ts, m5_t, m5_macd) == want,
                 "m15_ok": _htf_side(ts, m15_t, m15_macd) == want}
         # #43: carry CryptoRTI whale features if attached to the bars (causal), so
