@@ -8,7 +8,7 @@
 
 ## 1. Unit test suite (`tests/`, pytest)
 
-Run: `python -m pytest tests -q` (79 passing as of 2026-08-02).
+Run: `python -m pytest tests -q` (82 passing as of 2026-08-02).
 
 | Test file | Covers |
 |---|---|
@@ -23,6 +23,7 @@ Run: `python -m pytest tests -q` (79 passing as of 2026-08-02).
 | `test_edge_discovery.py` | Strategy×regime sweep → overlay; no-edge → empty focused entry |
 | `test_continual_researcher.py` | Review + mql5 hypothesis + daily idempotency |
 | `test_wave_predictor.py` | Whale confidence model (confirmed→high, thin→discounted) |
+| `test_whale_outcome_store.py` | Self-sustaining whale learning: record signal → resolve/label vs candles → size-gated model → seed from Danny study |
 | `test_account_scoping.py` | Per-account journal scoping + backfill |
 | `test_trade_manager_giveback.py` | Giveback/exit (winners run, arm threshold, TP-awareness) |
 | `test_control_channel.py` | Dashboard control.json → engine apply |
@@ -66,6 +67,14 @@ Attaches S3 whale/VPIN features onto BTC M1 bars CAUSALLY (`feature_align`), the
 compares confluence-trigger outcomes whale_active vs NOT — so the live whale boost is
 validated on history. **Verdict rule:** if whale_active PF/WR ≤ NOT, keep the live
 boost conservative/observe-only.
+
+### 2d-ii. `whale_candle_study.py` — whale-order → 1m-candle correlation (#43/#44)
+`python -m scripts.whale_candle_study <MIN_USD> <WINDOW_MIN> [dates]`
+Cross-references Danny's S3 `whale_events` with MT5 BTC M1 candles on the SAME dates
+(validation only, no look-ahead). Buckets by order size and measures the candle
+response (# large 1m candles, net move, direction). Caches Danny's slow S3 pulls to
+`data/whale_cache/`. Output → `data/whale_candle_study.json` + `docs/whale_candle_correlation.md`.
+**Finding:** ≥$6M orders move BTC the expected direction ~78% (vs 50–63% smaller).
 
 ### 2e. `backtest_peak_capture.py` — exit-capture study (caveated)
 Replays per-trade telemetry under peak-capture trailing rules. NOTE: the GoldShark
@@ -115,6 +124,18 @@ CryptoRTI whale: live boost (wave_predictor) + backtest validation (feature_alig
 - Sizing only increases when a symbol is GRADUATED and OperatingMode==LIVE.
 - Whale boost authority capped (`WHALE_BOOST_MAX`/`WHALE_SCALE_MAX`) until validated.
 
+### CryptoRTI whale — self-sustaining learning (#44/#46; see docs/whale_self_learning.md)
+Closed loop, independent of Danny history at decision time:
+- `signal_client.SignalStore.update` → `WhaleOutcomeStore.record_signal` captures every
+  live WebSocket whale signal into `data/whale_outcomes.db`.
+- On the exit-calibration cadence the engine calls `resolve_pending(get_rates)` → labels
+  each event against realised MT5 candles once its window elapses.
+- `WhaleOutcomeStore.model()`/`confidence_for(size)` learns P(move_right) by size bucket
+  (seeded from `whale_candle_study.json`, GROWS from live events); `wave_predictor` blends
+  it (50/50) with the RAG prior. Defers to the prior until a bucket has ≥5 samples.
+- Tested by `tests/test_whale_outcome_store.py`; validated on history by
+  `scripts/validate_whale_backtest.py` + `scripts/whale_candle_study.py`.
+
 ---
 
 ## 4. How we continually test + adjust (the process)
@@ -133,4 +154,6 @@ CryptoRTI whale: live boost (wave_predictor) + backtest validation (feature_alig
 ### Artifacts written by the running bot (all under `data/`, gitignored)
 `tuned_params.json`, `robust_config.json`, `edge_weights.json`, `config_checkpoints.json`,
 `graduation.json`, `walkforward_results.json`, `models/outcome_*.onnx`,
-`trading_experience.db`, `chromadb_store/` (knowledge + whale + mql5 RAGs).
+`trading_experience.db`, `chromadb_store/` (knowledge + whale + mql5 RAGs),
+`whale_outcomes.db` (self-learned whale events + outcomes), `whale_candle_study.json`,
+`whale_cache/` (cached Danny events).

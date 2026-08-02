@@ -30,11 +30,23 @@ all runtime code editor-agnostic and offline-capable (no Kilo/editor deps at run
 
 ## What we are doing (current focus)
 
-1. **CryptoRTI whale-wave prediction.** A large whale movement (e.g. ~$6M) is
-   broken into ~$1M chunks that print ~6 large BTCUSD candles in a window after
-   the event. We mine this correlation and store it in RAG so the bot surfs the wave.
-2. **Local, lightning-fast, portable knowledge** via embedded ChromaDB (no server).
+1. **CryptoRTI whale-wave prediction — now SELF-SUSTAINING.** Large whale orders
+   (≥$6M) move BTC in the expected direction ~78% (validated vs Danny S3 +MT5
+   candles, `docs/whale_candle_correlation.md`). The bot records every live
+   WebSocket whale signal + its realised candle outcome (`WhaleOutcomeStore`,
+   `data/whale_outcomes.db`), learns a size-gated model (Danny-seeded, grows from
+   live events), and feeds it to `wave_predictor` — no reliance on Danny history at
+   decision time. Design: `docs/whale_self_learning.md`. Tracking: #43/#44/#46.
+2. **Prove the edge in backtest + forward test.** Harnesses: `robust_tester`
+   (random-window, mql5 ranges), `iterative_walkforward` (chronological OOS),
+   `validate_whale_backtest`, `whale_candle_study`. Full reference: **`TESTING.md`**.
 3. **Keeping the live bot healthy** while it accumulates real closed trades.
+
+> **Latest state (2026-08-02):** on `main` (pushed). Full 7-indicator confluence is
+> the single source of truth (`confluence_signal.py`); optimizer uses authoritative
+> mql5 ranges; all learning loops audited WIRED end-to-end; ONNX per-symbol; CryptoRTI
+> whale wired into BOTH live + backtest paths. 82 tests passing. Architecture:
+> `LEARNING_ARCHITECTURE.md`; testing: `TESTING.md`.
 
 ## What we fixed / built THIS session (2026-07-31)
 
