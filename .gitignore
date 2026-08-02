@@ -80,3 +80,5 @@ env_out.txt
 *.env.txt
 
 data/learning_log_archive/
+
+data/history_cache/
