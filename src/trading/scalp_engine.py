@@ -1797,25 +1797,33 @@ class ScalpEngine:
         if signal.action == "hold":
             return
 
-        # ── HYBRID whale/order-flow layer (#26/#29) for BTC ──
+        # ── HYBRID whale/order-flow layer (#26/#29/#43) for BTC ──
         # OsMA drives regular entries; a live CryptoRTI whale signal that AGREES
-        # boosts confidence (stronger entry) and flags a lot SCALE; if it opposes,
-        # dampen. No whale signal -> trade the OsMA base normally.
+        # boosts confidence + flags a lot SCALE; if it opposes, dampen.
+        # AUTHORITY IS CONSERVATIVE: the whale hybrid boost is NOT yet walk-forward
+        # validated (validate_whale_backtest showed whale_active PF ~0.70 vs 0.60,
+        # marginal/inconclusive on ~20d). So we keep a SMALL boost + capped scale
+        # until it proves out on more data (config WHALE_BOOST_MAX / WHALE_SCALE_MAX).
+        # NOTE (#43 follow-up): the live boost uses wave_predictor/signal_client;
+        # the backtest validates the feature_align whale_active/VPIN column. These
+        # should be reconciled so we validate exactly what we trade.
         self._whale_scale = 1.0
         if "BTC" in resolved.upper():
             try:
                 wp = self._whale_predict_for_btc()
+                boost_max = getattr(config, "WHALE_BOOST_MAX", 0.06)
+                scale_max = getattr(config, "WHALE_SCALE_MAX", 0.5)
                 if wp and wp.get("confidence", 0) >= 0.5 and wp.get("action"):
                     if wp["action"] == signal.action:
-                        boost = 0.15 * wp["confidence"]
+                        boost = boost_max * wp["confidence"]
                         signal.confidence = min(1.0, signal.confidence + boost)
-                        # scale lot up to 2x with strong aligned whale conviction
-                        self._whale_scale = 1.0 + min(1.0, wp["confidence"])
-                        signal.reason += f" | +whale {wp['action']} conf{wp['confidence']:.2f} (scale x{self._whale_scale:.1f})"
+                        # conservative lot scale (capped) until the boost validates
+                        self._whale_scale = 1.0 + min(scale_max, scale_max * wp["confidence"])
+                        signal.reason += f" | +whale {wp['action']} conf{wp['confidence']:.2f} (scale x{self._whale_scale:.2f})"
                         logger.info(f"BTCUSD HYBRID: OsMA {signal.action} + aligned whale "
-                                    f"conf {wp['confidence']:.2f} -> boosted, scale x{self._whale_scale:.1f}")
+                                    f"conf {wp['confidence']:.2f} -> +{boost:.3f}, scale x{self._whale_scale:.2f} (conservative, unvalidated)")
                     else:
-                        signal.confidence = max(0.0, signal.confidence - 0.15)
+                        signal.confidence = max(0.0, signal.confidence - boost_max)
                         logger.info(f"BTCUSD HYBRID: whale {wp['action']} OPPOSES OsMA "
                                     f"{signal.action} -> dampened")
             except Exception as e:

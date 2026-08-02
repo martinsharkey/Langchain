@@ -287,6 +287,10 @@ REENTRY_MIN_ATR_GAP = float(os.getenv("REENTRY_MIN_ATR_GAP", "0.75"))
 # #41: how often (in cycles) to re-measure per-symbol excursion + re-lock the
 # MACD-leads-OsMA exit config LIVE (continuous, not once/day). ~40 cycles.
 EXIT_CALIBRATION_CYCLES = int(os.getenv("EXIT_CALIBRATION_CYCLES", "40"))
+# #43: conservative authority for the (not-yet-validated) CryptoRTI whale boost.
+# Small until validate_whale_backtest shows a clear whale_active edge, then raise.
+WHALE_BOOST_MAX = float(os.getenv("WHALE_BOOST_MAX", "0.06"))   # max confidence boost
+WHALE_SCALE_MAX = float(os.getenv("WHALE_SCALE_MAX", "0.5"))    # max extra lot fraction
 # Persisted kill switch file — create/toggle from dashboard or by touching the file.
 KILL_SWITCH_FILE = os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data", "KILL_SWITCH"
