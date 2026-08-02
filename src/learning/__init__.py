@@ -20,9 +20,26 @@ from src.learning.vector_store import PatternVectorStore
 from src.learning.strategy_registry import StrategyRegistry
 from src.learning.pattern_matcher import PatternMatcher
 from src.learning.experience_db import ExperienceDatabase
-from src.learning.meta_strategy_agent import MetaStrategyAgent
-from src.learning.knowledge_base import KnowledgeBase
-from src.learning.curiosity_agent import CuriosityAgent
+
+# #46 cleanup: MetaStrategyAgent / KnowledgeBase / CuriosityAgent are part of the
+# legacy full-agent path (src/main.py) that nothing live imports. Eager-importing
+# them here pulled the heavy LLM/langchain chain into EVERY `import src.learning.*`,
+# which broke pure-logic tests on machines without those deps. They are now
+# LAZY-loaded via __getattr__ so `from src.learning import MetaStrategyAgent` still
+# works if the legacy path is ever revived, without the import-time cost/coupling.
+_LAZY = {
+    "MetaStrategyAgent": "src.learning.meta_strategy_agent",
+    "KnowledgeBase": "src.learning.knowledge_base",
+    "CuriosityAgent": "src.learning.curiosity_agent",
+}
+
+
+def __getattr__(name):
+    if name in _LAZY:
+        import importlib
+        return getattr(importlib.import_module(_LAZY[name]), name)
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
 
 __all__ = [
     "PatternVectorStore",

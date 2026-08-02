@@ -20,25 +20,6 @@ import sys
 import pandas as pd
 
 from src.mt5.data import get_rates
-from src.strategies.indicators import macd as macd_fn, osma as osma_fn, atr as atr_fn
-
-
-def _series(rates, fast=12, slow=26, sig=9):
-    df = pd.DataFrame(rates)
-    close = df["close"]
-    macd_line, macd_signal, _ = macd_fn(close, fast, slow, sig)
-    osma = osma_fn(close, fast, slow, sig)
-    a = atr_fn(df, 14)
-    return df, macd_line.reset_index(drop=True), osma.reset_index(drop=True), a.reset_index(drop=True)
-
-
-def _macd_side_at(ts, htf_df, htf_macd):
-    """Sign of the HTF MACD line at/just before the M1 timestamp ts (+1/-1/0)."""
-    idx = htf_df.index[htf_df["time"] <= ts]
-    if len(idx) == 0:
-        return 0
-    v = htf_macd.iloc[idx[-1]] if idx[-1] < len(htf_macd) else 0
-    return 1 if v > 0 else (-1 if v < 0 else 0)
 
 
 def find_triggers(m1_rates, m5_rates, m15_rates, macd_lead_bars=5):

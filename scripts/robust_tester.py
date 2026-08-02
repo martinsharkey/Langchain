@@ -30,10 +30,6 @@ from datetime import datetime, timedelta, timezone
 
 import pandas as pd
 
-from src.strategies.indicators import (
-    macd as macd_fn, osma as osma_fn, atr as atr_fn, ema as ema_fn,
-    rsi as rsi_fn, bulls_power as bulls_fn, bears_power as bears_fn,
-)
 
 
 def _load_range(symbol, tf_const, days):
@@ -44,37 +40,6 @@ def _load_range(symbol, tf_const, days):
     if r is None or len(r) == 0:
         return None
     return pd.DataFrame(r)
-
-
-def _indicators(df, cfg):
-    """Compute the FULL 7-indicator confluence set as aligned series."""
-    close = df["close"].reset_index(drop=True)
-    fast, slow, sig = cfg["osma_fast"], cfg["osma_slow"], cfg["osma_signal"]
-    macd_line = macd_fn(close, fast, slow, sig)[0].reset_index(drop=True)
-    osma = osma_fn(close, fast, slow, sig).reset_index(drop=True)
-    a = atr_fn(df, cfg.get("atr_period", 14)).reset_index(drop=True)
-    ema_f = ema_fn(close, cfg.get("ema_period", 50)).reset_index(drop=True)
-    r = rsi_fn(close, cfg.get("rsi_period", 14)).reset_index(drop=True)
-    bp = bulls_fn(df, cfg.get("power_period", 13)).reset_index(drop=True)
-    brp = bears_fn(df, cfg.get("power_period", 13)).reset_index(drop=True)
-    return {"macd": macd_line, "osma": osma, "atr": a, "ema": ema_f,
-            "rsi": r, "bulls": bp, "bears": brp}
-
-
-def _htf_macd_side(ts, htf_times, htf_macd):
-    # last HTF bar at/before ts
-    lo, hi = 0, len(htf_times) - 1
-    idx = -1
-    while lo <= hi:
-        mid = (lo + hi) // 2
-        if htf_times[mid] <= ts:
-            idx = mid; lo = mid + 1
-        else:
-            hi = mid - 1
-    if idx < 0 or idx >= len(htf_macd):
-        return 0
-    v = htf_macd[idx]
-    return 1 if v > 0 else (-1 if v < 0 else 0)
 
 
 def find_triggers(m1, m5, m15, cfg):
