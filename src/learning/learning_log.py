@@ -45,9 +45,9 @@ class LearningLog:
         sym = f"`{symbol}`" if symbol else "-"
         parts = [f"- **{ts}** [{kind}] {sym}", what]
         if why:
-            parts.append(f"— _why:_ {why}")
+            parts.append(f"-- why: {why}")
         if metric:
-            parts.append(f"— _metric:_ {metric}")
+            parts.append(f"-- metric: {metric}")
         return " ".join(p for p in parts if p)
 
     def record(self, kind: str, symbol: str = "", what: str = "", why: str = "",
@@ -92,7 +92,7 @@ class LearningLog:
     def _split(self, text: str):
         title = ("# Learning & Adjustments Log\n\n"
                  "> Auto-generated digest of what the self-learning loop changed and why.\n"
-                 "> Most-recent-first. Reporting only — never gates a live decision (#45.1).\n\n")
+                 "> Most-recent-first. Reporting only -- never gates a live decision (#45.1).\n\n")
         if text and text.lstrip().startswith("# Learning"):
             idx = text.find("\n- ")
             if idx != -1:
