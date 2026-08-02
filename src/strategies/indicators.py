@@ -371,7 +371,7 @@ def compute_full_indicators(data: list[dict], params: Optional[dict] = None) -> 
     open_ = df["open"] if "open" in df.columns else close
     volume = df["volume"] if "volume" in df.columns else pd.Series([0] * len(df))
 
-    ema_fast_s = ema(close, p.get("ema_fast", 9))
+    ema_fast_s = ema(close, p.get("ema_period", p.get("ema_fast", 9)))
     ema_slow_s = ema(close, p.get("ema_slow", 21))
     ema_200_s = ema(close, 200) if len(close) >= 200 else ema(close, min(len(close) - 1, 100))
     sma_50_s = sma(close, 50) if len(close) >= 50 else sma(close, min(len(close) - 1, 20))
@@ -475,7 +475,7 @@ def compute_indicator_series(data: list[dict], params: Optional[dict] = None):
     open_ = df["open"] if "open" in df.columns else close
     volume = df["volume"] if "volume" in df.columns else pd.Series([0] * n, index=df.index)
 
-    ema_fast_s = ema(close, p.get("ema_fast", 9))
+    ema_fast_s = ema(close, p.get("ema_period", p.get("ema_fast", 9)))
     ema_slow_s = ema(close, p.get("ema_slow", 21))
     ema_200_s = ema(close, 200)
     sma_50_s = sma(close, 50)
