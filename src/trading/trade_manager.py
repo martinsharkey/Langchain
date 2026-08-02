@@ -57,7 +57,8 @@ class ManagedState:
     best_price: float = 0.0    # most favourable price seen (for trailing)
     actions: list = field(default_factory=list)
     last_llm_review: float = 0.0   # epoch of last HYBRID_LLM review (throttle)
-    peak_profit_points: float = 0.0  # best unrealized profit (points) ever seen
+    peak_profit_points: float = 0.0  # best unrealized profit (points) ever seen (MFE)
+    worst_profit_points: float = 0.0 # worst unrealized profit (points) ever seen (MAE, <=0)
     trend_aligned: bool = False      # entry aligned with higher-TF trend (ride mode)
     htf_widened: bool = False        # HTF-blip stop-widen already applied (once)
     # Peak-tracking momentum exhaustion (GoldShark11 exit, #29): track the best
@@ -203,6 +204,7 @@ class TradeManager:
         # winner rolling into a loser — cut it. The giveback fraction and the
         # minimum peak to arm it are per-symbol, learned/tunable via config.
         st.peak_profit_points = max(st.peak_profit_points, profit_points)
+        st.worst_profit_points = min(st.worst_profit_points, profit_points)  # MAE tracking
         arm_peak = max(self.giveback_arm_points(st), spread_points + 15)
         if st.peak_profit_points >= arm_peak and profit_points > 0:
             giveback_frac = self.giveback_fraction(st)

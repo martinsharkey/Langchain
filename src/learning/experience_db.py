@@ -181,6 +181,15 @@ class ExperienceDatabase:
             adds.append("ALTER TABLE trades ADD COLUMN account_server TEXT")
         if "account_trade_mode" not in cols:
             adds.append("ALTER TABLE trades ADD COLUMN account_trade_mode TEXT")
+        # exit-capture study: persist per-trade excursion so we can compute the real
+        # capture-ratio (how much of the favourable peak the exit captured) and prove
+        # a better exit from our OWN trades. Points, from the trade manager's tracking.
+        if "mfe_points" not in cols:
+            adds.append("ALTER TABLE trades ADD COLUMN mfe_points REAL")   # max favourable excursion
+        if "mae_points" not in cols:
+            adds.append("ALTER TABLE trades ADD COLUMN mae_points REAL")   # max adverse excursion
+        if "exit_points" not in cols:
+            adds.append("ALTER TABLE trades ADD COLUMN exit_points REAL")  # realised points at exit
         for sql in adds:
             try:
                 cur.execute(sql)
@@ -399,16 +408,22 @@ class ExperienceDatabase:
         profit_loss: float,
         exit_price: Optional[float] = None,
         exit_reason: Optional[str] = None,
+        mfe_points: Optional[float] = None,
+        mae_points: Optional[float] = None,
+        exit_points: Optional[float] = None,
     ):
         """
         Update a trade's outcome after it closes.
-        
+
         Args:
             trade_id: The trade ID to update.
             outcome: "win", "loss", or "breakeven".
             profit_loss: Final P&L.
             exit_price: Exit price.
             exit_reason: Why the trade was closed.
+            mfe_points: Max favourable excursion (points) reached during the trade.
+            mae_points: Max adverse excursion (points).
+            exit_points: Realised points at exit (for the capture ratio = exit/mfe).
         """
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
@@ -418,9 +433,13 @@ class ExperienceDatabase:
                 outcome = ?,
                 profit_loss = ?,
                 exit_price = ?,
-                exit_reason = ?
+                exit_reason = ?,
+                mfe_points = COALESCE(?, mfe_points),
+                mae_points = COALESCE(?, mae_points),
+                exit_points = COALESCE(?, exit_points)
             WHERE id = ?
-        """, (outcome, profit_loss, exit_price, exit_reason, trade_id))
+        """, (outcome, profit_loss, exit_price, exit_reason,
+              mfe_points, mae_points, exit_points, trade_id))
         
         # Also update strategy performance
         cursor.execute("SELECT strategy_used, confidence FROM trades WHERE id = ?", (trade_id,))
@@ -461,6 +480,39 @@ class ExperienceDatabase:
         ).fetchall()]
         conn.close()
         return rows
+
+    def capture_stats(self, symbol: str = None, limit: int = 200) -> dict:
+        """
+        Exit-capture study: how much of the favourable peak (MFE) do our exits
+        actually capture? Uses per-trade mfe_points/exit_points recorded on close.
+        Returns median capture ratio, MFE/MAE + count — the real data to prove a
+        better exit from our OWN trades. Empty until trades close with excursion.
+        """
+        import statistics as _st
+        conn = sqlite3.connect(self.db_path); conn.row_factory = sqlite3.Row
+        where = "WHERE mfe_points IS NOT NULL AND outcome IN ('win','loss','breakeven')"
+        params = []
+        if symbol:
+            where += " AND symbol LIKE ?"; params.append(symbol.upper()[:6] + "%")
+        try:
+            ac, ap = self._account_clause(); where += ac; params += ap
+        except Exception:
+            pass
+        rows = [dict(r) for r in conn.execute(
+            f"SELECT mfe_points, mae_points, exit_points FROM trades {where} "
+            f"ORDER BY id DESC LIMIT ?", params + [limit]).fetchall()]
+        conn.close()
+        if not rows:
+            return {"n": 0}
+        mfe = [r["mfe_points"] for r in rows if r["mfe_points"] is not None]
+        mae = [r["mae_points"] for r in rows if r["mae_points"] is not None]
+        caps = [r["exit_points"] / r["mfe_points"] for r in rows
+                if r["mfe_points"] and r["mfe_points"] > 5 and r["exit_points"] is not None]
+        return {"n": len(rows),
+                "median_mfe": round(_st.median(mfe), 1) if mfe else 0,
+                "median_mae": round(_st.median(mae), 1) if mae else 0,
+                "median_capture_ratio": round(_st.median(caps), 3) if caps else None,
+                "left_on_table_pct": round((1 - _st.median(caps)) * 100, 1) if caps else None}
 
     def get_open_trade_id_by_ticket(self, ticket: int) -> Optional[int]:
         """

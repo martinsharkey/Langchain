@@ -1597,6 +1597,7 @@ class ScalpEngine:
             "adaptation_enabled": config.LEARNING_ADAPTATION_ENABLED,
             "auto_revert_enabled": config.LEARNING_AUTO_REVERT_ENABLED,
             "knowledge_entries": (self.knowledge_store.count() if self.knowledge_store else 0),
+            "exit_capture": (self.experience_db.capture_stats() if self.experience_db else {}),
             "recent_expectancy": {},
         }
         try:
@@ -2136,8 +2137,18 @@ class ScalpEngine:
                 logger.info(f"Ticket {ticket} closed but no exit deal yet; will retry")
                 continue
             tp = self.open_positions.pop(ticket)
-            self.managed.pop(ticket, None)   # clear management state
+            _mst = self.managed.pop(ticket, None)   # clear management state (capture excursion first)
             outcome = "win" if profit > 0 else "loss" if profit < 0 else "breakeven"
+            # exit-capture study: pull MFE/MAE/exit-points from the manager's tracking
+            _mfe = round(_mst.peak_profit_points, 1) if _mst else None
+            _mae = round(_mst.worst_profit_points, 1) if _mst else None
+            _exit_pts = None
+            try:
+                if _mst and tp.spec and tp.spec.point:
+                    _exit_pts = round((exit_price - tp.entry) / tp.spec.point
+                                      * (1 if tp.action == "buy" else -1), 1)
+            except Exception:
+                _exit_pts = None
 
             # feed realized P&L to the risk manager (drives the daily-loss halt)
             try:
@@ -2150,6 +2161,7 @@ class ScalpEngine:
                     self.experience_db.update_trade_outcome(
                         trade_id=tp.db_trade_id, outcome=outcome,
                         profit_loss=profit, exit_price=exit_price, exit_reason=exit_reason,
+                        mfe_points=_mfe, mae_points=_mae, exit_points=_exit_pts,
                     )
                 except Exception as e:
                     logger.warning(f"update_trade_outcome failed: {e}")
