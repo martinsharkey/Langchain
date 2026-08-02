@@ -70,3 +70,6 @@ htmlcov/
 
 # ONNX model artifacts (machine-local, rebuilt from the experience DB)
 data/models/
+
+# cached Danny whale events (machine-local)
+data/whale_cache/
