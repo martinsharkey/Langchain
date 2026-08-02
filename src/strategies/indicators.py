@@ -372,11 +372,13 @@ def compute_full_indicators(data: list[dict], params: Optional[dict] = None) -> 
     volume = df["volume"] if "volume" in df.columns else pd.Series([0] * len(df))
 
     ema_fast_s = ema(close, p.get("ema_period", p.get("ema_fast", 9)))
-    ema_slow_s = ema(close, p.get("ema_slow", 21))
+    ema_slow_s = ema(close, p.get("ema_slow", p.get("ema_period", 21)))
     ema_200_s = ema(close, 200) if len(close) >= 200 else ema(close, min(len(close) - 1, 100))
     sma_50_s = sma(close, 50) if len(close) >= 50 else sma(close, min(len(close) - 1, 20))
     rsi_s = rsi(close, p.get("rsi_period", 14))
-    macd_line, macd_sig, macd_hist = macd(close, p.get("macd_fast", 12), p.get("macd_slow", 26), p.get("macd_signal", 9))
+    macd_line, macd_sig, macd_hist = macd(close, p.get("osma_fast", p.get("macd_fast", 12)),
+                                          p.get("osma_slow", p.get("macd_slow", 26)),
+                                          p.get("osma_signal", p.get("macd_signal", 9)))
     bb_u, bb_m, bb_l = bollinger_bands(close, p.get("bb_period", 20), p.get("bb_std", 2.0))
     atr_s = atr(df, p.get("atr_period", 14))
     atr_slow_s = atr(df, p.get("atr_period", 14) * 3)
@@ -476,12 +478,14 @@ def compute_indicator_series(data: list[dict], params: Optional[dict] = None):
     volume = df["volume"] if "volume" in df.columns else pd.Series([0] * n, index=df.index)
 
     ema_fast_s = ema(close, p.get("ema_period", p.get("ema_fast", 9)))
-    ema_slow_s = ema(close, p.get("ema_slow", 21))
+    ema_slow_s = ema(close, p.get("ema_slow", p.get("ema_period", 21)))
     ema_200_s = ema(close, 200)
     sma_50_s = sma(close, 50)
     vol_sma_s = sma(volume, 20)
     rsi_s = rsi(close, p.get("rsi_period", 14))
-    macd_line, macd_sig, macd_hist = macd(close, p.get("macd_fast", 12), p.get("macd_slow", 26), p.get("macd_signal", 9))
+    macd_line, macd_sig, macd_hist = macd(close, p.get("osma_fast", p.get("macd_fast", 12)),
+                                          p.get("osma_slow", p.get("macd_slow", 26)),
+                                          p.get("osma_signal", p.get("macd_signal", 9)))
     bb_u, bb_m, bb_l = bollinger_bands(close, p.get("bb_period", 20), p.get("bb_std", 2.0))
     atr_s = atr(df, p.get("atr_period", 14))
     atr_slow_s = atr(df, p.get("atr_period", 14) * 3)
