@@ -710,15 +710,17 @@ class ExperienceDatabase:
                 WHERE outcome IN ('win', 'loss')
             """
             
+            params = []
             if strategy_name:
-                query += f" AND strategy_used = '{strategy_name}'"
+                query += " AND strategy_used = ?"       # parameterized (was f-string; SQLi shape)
+                params.append(strategy_name)
             ac, ap = self._account_clause()
             query += ac
             query += " GROUP BY strategy_used ORDER BY win_rate DESC"
             
             conn = sqlite3.connect(self.db_path)
             cursor = conn.cursor()
-            cursor.execute(query, tuple(ap))
+            cursor.execute(query, tuple(params + ap))
             rows = cursor.fetchall()
             conn.close()
             

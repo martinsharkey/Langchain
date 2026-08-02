@@ -1610,7 +1610,6 @@ class ScalpEngine:
 
     def _maybe_run_adaptive(self):
         """Run the adaptive intelligence loop in a background thread (non-blocking)."""
-        import threading
 
         def _work():
             self._adaptive_running = True

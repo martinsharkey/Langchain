@@ -73,3 +73,8 @@ data/models/
 
 # cached Danny whale events (machine-local)
 data/whale_cache/
+
+# SECRETS - never commit (contain MT5 password + API keys)
+env.txt
+env_out.txt
+*.env.txt

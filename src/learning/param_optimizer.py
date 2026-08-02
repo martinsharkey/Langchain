@@ -248,7 +248,7 @@ class ParameterOptimizer:
                 "pfs": best_res.get("pfs"),
                 "wrs": best_res.get("wrs"),
                 "n": best_res.get("n_total"),
-                "updated_at": __import__("datetime").datetime.utcnow().isoformat(),
+                "updated_at": __import__("datetime").datetime.now(__import__("datetime").timezone.utc).isoformat(),
             }
             self._persist()
             logger.info(f"[OPTIMIZER] {symbol}: IMPROVED -> min-PF {best_score:.2f} "
