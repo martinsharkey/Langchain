@@ -27,12 +27,24 @@ be judged against this full-history baseline, not a recent window.**
 
 ## What this means (honest)
 1. The 7-indicator confluence, as configured, does **not** have a durable standalone
-   edge across market regimes.
-2. The next real question (not another param sweep): **is there a detectable regime
-   signal that separates the winning ~30% of months from the losing 70%?** If yes,
-   gate entries on it. If no, the entry edge isn't there yet and needs rework.
-3. Small-sample / recent-window results are not trustworthy for edge claims — this
-   file is the reference.
+   edge across market regimes **on OHLCV alone**.
+2. **BUT — important reframe (BTCUSD is special):** BTCUSD is the only symbol with
+   **Level-2 orderbook data**, and its *intended* edge is technical confluence **+
+   L2/orderbook/VPIN/whale confirmation**. The 5-year OHLCV baseline structurally
+   **cannot** measure that — it only tested the technical half. So the 0.30 pass-rate
+   condemns the *OHLCV-only technical config*, not BTC's real (L2-enhanced) thesis.
+3. **Data reality that limits testing the real BTC edge:** L2 orderbook + v5 features
+   (vpin/ob_/flow_) on S3 only cover ~**30 days** (2026-07-03 → present) — the RT
+   collectors are new. OHLCV goes back 5 years but has no L2. So the L2-enhanced BTC
+   edge can currently only be tested on ~30 days (still small-sample).
+4. **XAUUSD / GER40** have NO L2 — they must stand on the technical confluence alone,
+   which the 5yr baseline says is not (yet) a durable edge → they need the regime
+   analysis (#50) or rework.
+5. The next real question splits by symbol:
+   - **BTC:** does L2/VPIN/whale confirmation turn the technical confluence positive
+     on the ~30-day L2 window? (test #43/#50) — and gather more L2 days over time.
+   - **XAU/GER:** is there a detectable regime gate (#50), or does the entry need rework?
+
 
 ## Data / storage note
 The 5-year OHLCV lives in CryptoRTI S3 (`data/history_bars/coinbase/...`, ~195MB for
