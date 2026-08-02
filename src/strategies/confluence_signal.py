@@ -141,8 +141,16 @@ def find_confluence_triggers(m1, m5, m15, cfg=None):
         if conf < c["min_confluence"]:
             continue
         ts = times[i]; want = 1 if direction == "buy" else -1
-        out.append({"i": i, "direction": direction, "entry": closes[i], "atr": atr,
-                    "confluence": conf,
-                    "m5_ok": _htf_side(ts, m5_t, m5_macd) == want,
-                    "m15_ok": _htf_side(ts, m15_t, m15_macd) == want})
+        trig = {"i": i, "direction": direction, "entry": closes[i], "atr": atr,
+                "confluence": conf,
+                "m5_ok": _htf_side(ts, m5_t, m5_macd) == want,
+                "m15_ok": _htf_side(ts, m15_t, m15_macd) == want}
+        # #43: carry CryptoRTI whale features if attached to the bars (causal), so
+        # backtests can validate the whale hybrid boost. whale_active is 1 when a
+        # deposit/credit-window/flow is active at-or-before this bar.
+        if "whale_active" in m1.columns:
+            trig["whale_active"] = int(m1["whale_active"].iloc[i]) if i < len(m1) else 0
+            if "vpin_percentile" in m1.columns:
+                trig["vpin_pct"] = float(m1["vpin_percentile"].iloc[i] or 0)
+        out.append(trig)
     return out, m1
