@@ -1,18 +1,11 @@
 """
-run_trader.py — single entry point for the REAL trading engine.
+run_trader.py -- DEPRECATED (#46). Use `python app.py LIVE_MICRO` instead.
 
-Starts the ScalpEngine which trades the configured symbols on the connected
-MT5 demo account, records real outcomes, and drives toward the learning target.
+app.py is the SINGLE supported launcher (dashboard + engine + research + CryptoRTI
+feed together, with mode from CLI arg). This script is kept only for backward
+reference and forwards to the same engine; do not add new logic here.
 
-Usage:
-    python run_trader.py                 # uses TRADING_MODE from .env (default OBSERVE)
-    TRADING_MODE=LIVE_MICRO python run_trader.py
-
-Modes (safety gate):
-    OBSERVE     analyze only, no orders
-    PAPER       simulated fills at live prices
-    LIVE_MICRO  REAL orders on demo, capped to 0.01 lots
-    LIVE        REAL orders, full sizing
+Original: single entry point for the REAL trading engine (ScalpEngine).
 """
 
 import os
