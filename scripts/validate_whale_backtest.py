@@ -58,15 +58,21 @@ def main():
     trg, _ = find_confluence_triggers(m1w, m5, m15)
     whale_on = [t for t in trg if t.get("whale_active")]
     whale_off = [t for t in trg if not t.get("whale_active")]
-    print(f"\nConfluence triggers: {len(trg)} total | {len(whale_on)} whale-active | {len(whale_off)} not")
-    print("Outcome comparison (does whale_active improve the edge?):")
+    # #45.2 reconciliation: also evaluate the SIZE-GATED rule the LIVE path uses
+    # (>=$6M order → high-conviction boost), not just the whale_active boolean.
+    big = [t for t in trg if (t.get("whale_usd") or 0) >= 6_000_000]
+    print(f"\nConfluence triggers: {len(trg)} total | {len(whale_on)} whale-active | "
+          f"{len(whale_off)} not | {len(big)} >=$6M (live gate)")
+    print("Outcome comparison (does whale_active / >=$6M improve the edge?):")
     _stats(trg, m1w, "ALL confluence")
     if whale_on:
         _stats(whale_on, m1w, "whale_active ONLY")
     if whale_off:
         _stats(whale_off, m1w, "NOT whale_active")
-    print("\nVerdict: if whale_active PF/WR > NOT whale_active, the live boost is "
-          "justified; if not, demote it to observe-only until it validates.")
+    if big:
+        _stats(big, m1w, ">=$6M (live-gated)")
+    print("\nVerdict: if whale_active/>=$6M PF/WR > NOT, the live boost is justified; "
+          "if not, keep it conservative/observe-only. The >=$6M row is the LIVE rule.")
 
 
 if __name__ == "__main__":

@@ -122,10 +122,13 @@ class TradePostMortem:
     _TF = {}  # lazy MT5 timeframe const map
 
     def _tf_const(self, name):
+        # MT5 timeframe codes are FIXED integers; use plain-int fallbacks so this
+        # (and its tests) work without the MetaTrader5 package (#45.3 / I3).
+        _TF_INT = {"M1": 1, "M5": 5, "M15": 15, "M30": 30, "H1": 16385, "H4": 16388}
         try:
             import MetaTrader5 as mt5
         except Exception:
-            return name  # tests/fakes override _bars_range so the value is unused
+            return _TF_INT.get(name, 1)  # tests/fakes override _bars_range anyway
         if not self._TF:
             self._TF = {"M1": mt5.TIMEFRAME_M1, "M5": mt5.TIMEFRAME_M5,
                         "M15": mt5.TIMEFRAME_M15, "M30": mt5.TIMEFRAME_M30,

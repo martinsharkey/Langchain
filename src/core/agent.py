@@ -100,6 +100,8 @@ def create_main_agent():
     # Define the agent node with verbose logging and rate limit handling
     def agent_node(state: MessagesState) -> dict:
         """Process messages and decide next action."""
+        nonlocal llm_with_tools  # #45.4: assigned in the rate-limit retry below;
+        # without this it'd be a local var and the read below raises UnboundLocalError.
         messages = prompt.invoke({"messages": state["messages"]})
         
         # Log what the agent is thinking (last user message)

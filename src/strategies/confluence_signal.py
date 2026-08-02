@@ -152,5 +152,9 @@ def find_confluence_triggers(m1, m5, m15, cfg=None):
             trig["whale_active"] = int(m1["whale_active"].iloc[i]) if i < len(m1) else 0
             if "vpin_percentile" in m1.columns:
                 trig["vpin_pct"] = float(m1["vpin_percentile"].iloc[i] or 0)
+            # #45.2: carry the whale ORDER SIZE so backtests gate on the same
+            # >=$6M threshold the live path uses (validate what we trade).
+            if "whale_deposit_usd_1h" in m1.columns:
+                trig["whale_usd"] = float(m1["whale_deposit_usd_1h"].iloc[i] or 0)
         out.append(trig)
     return out, m1

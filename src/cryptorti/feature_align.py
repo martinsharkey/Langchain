@@ -26,8 +26,13 @@ import pandas as pd
 logger = logging.getLogger("cryptorti.feature_align")
 
 # compact causal feature subset surfaced onto each bar
+# compact causal feature subset surfaced onto each bar.
+# whale_deposit_usd_1h is the ORDER SIZE — included so the backtest can gate on the
+# SAME >=$6M size threshold the live path uses (#45.2 reconciliation), i.e. validate
+# what we actually trade, not just a boolean whale_active.
 WHALE_FEATURES = ["vpin", "vpin_percentile", "flow_delta_5m",
-                  "whale_deposit_flag", "whale_credit_window", "whale_flow_active"]
+                  "whale_deposit_flag", "whale_deposit_usd_1h", "whale_credit_window",
+                  "whale_flow_active"]
 
 
 def _bar_dt(ts) -> datetime:

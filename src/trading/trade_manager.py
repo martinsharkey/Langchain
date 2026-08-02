@@ -183,11 +183,9 @@ class TradeManager:
         if st.action == "buy":
             profit_points = (price - st.entry) / point if point else 0
             st.best_price = max(st.best_price, price)
-            fav_points = (st.best_price - st.entry) / point if point else 0
         else:
             profit_points = (st.entry - price) / point if point else 0
             st.best_price = min(st.best_price, price)
-            fav_points = (st.entry - st.best_price) / point if point else 0
 
         v = st.variant
 

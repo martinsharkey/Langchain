@@ -78,3 +78,5 @@ data/whale_cache/
 env.txt
 env_out.txt
 *.env.txt
+
+data/learning_log_archive/

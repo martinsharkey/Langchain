@@ -263,6 +263,14 @@ class ScalpEngine:
         except Exception as e:
             logger.warning(f"WhaleOutcomeStore unavailable: {e}")
 
+        # #45.1: GitHub-visible learning-adjustments log (reporting only, non-fatal).
+        self.learning_log = None
+        try:
+            from src.learning.learning_log import LearningLog
+            self.learning_log = LearningLog()
+        except Exception as e:
+            logger.warning(f"LearningLog unavailable: {e}")
+
         # #36: intelligent per-symbol ReAct fixer (applies post-mortem fixes LIVE,
         # escalates exit-fix -> retune -> strategy-switch -> research). Non-fatal.
         self.fixer = None
@@ -1184,6 +1192,13 @@ class ScalpEngine:
         logger.warning(f"[EXIT-LOCK] {base_symbol}: {source} sl_atr {sl_atr} tp_rr {tp_rr} "
                        f"-> blended live sl_atr {ov['sl_atr']} tp_rr {ov['tp_rr']} "
                        f"(let winners run / cut losers early)")
+        if self.learning_log is not None:
+            try:
+                exp, n = self._recent_expectancy(base_symbol)
+                self.learning_log.exit_lock(base_symbol, ov["sl_atr"], ov["tp_rr"], source,
+                                            metric=f"recent expectancy {exp} (n={n})")
+            except Exception:
+                pass
 
     def _apply_reverted_config(self, base_symbol: str, best_cfg: dict):
         """Restore a best-known config live: tuned params -> optimizer, giveback -> override."""
@@ -1213,6 +1228,12 @@ class ScalpEngine:
                 pass
         logger.warning(f"[REVERT-APPLIED] {base_symbol}: restored best-known config "
                        f"{best_cfg} (live). Future trades use this until it is beaten.")
+        if self.learning_log is not None:
+            try:
+                self.learning_log.revert(base_symbol, why="live expectancy degraded vs best-known",
+                                         metric=f"restored sl_atr {best_cfg.get('sl_atr')} tp_rr {best_cfg.get('tp_rr')}")
+            except Exception:
+                pass
 
     def _refresh_personalities(self):
         """Compute per-symbol personality from closed trades (called on a cadence)."""
@@ -1730,6 +1751,12 @@ class ScalpEngine:
                         kept = {k: v for k, v in res.items() if v.get("kept")}
                         if kept:
                             logger.info(f"[ONNX] retrained: {kept}")
+                            if self.learning_log is not None:
+                                for k, v in kept.items():
+                                    try:
+                                        self.learning_log.onnx(k, v.get("auc"), True, v.get("n", 0))
+                                    except Exception:
+                                        pass
                     except Exception as e:
                         logger.debug(f"onnx train skip: {e}")
             except Exception as e:
