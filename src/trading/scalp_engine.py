@@ -405,7 +405,50 @@ class ScalpEngine:
         self._adopt_existing_positions()
         # Close the loop for any trades left 'pending' from prior runs / manual closes.
         self._reconcile_pending_from_db()
+        # Arm the reversal-signature exit from ANY data already in the DB (incl. the
+        # seeded GoldShark lifecycle records) so the gated signal-driven exit/hold is
+        # active from cycle 1, not only after the background researcher loop first runs.
+        self._load_seeded_signatures()
         return True
+
+    def _load_seeded_signatures(self):
+        """Populate _reversal_signatures at startup from whatever the DB already holds
+        (seeded GoldShark + prior live trades). Uses the same per-symbol scale-free
+        analyzer + the same >=20-trade activation gate as the live loop."""
+        if self.reversal_analyzer is None:
+            return
+        for _b in list(self.adapters.keys()):
+            try:
+                sig = self.reversal_analyzer.signature_from_captured(_b)
+                meta = sig.get("_meta", {}) if sig else {}
+                if meta.get("n_trades", 0) >= 20:
+                    self._reversal_signatures[_b] = sig
+                    osma = sig.get("osma", {})
+                    logger.info(f"[REVERSAL-SEED] {_b}: armed from {meta.get('n_trades')} trades "
+                                f"(osma retain {osma.get('median_retained_frac')}, "
+                                f"shrinks {osma.get('shrank_toward_neutral_pct')}%, "
+                                f"capture {meta.get('median_capture_ratio')})")
+                    # persist to the KnowledgeStore so the RESEARCHER recalls the
+                    # seeded exit signature (integration into the learning loop).
+                    if self.knowledge_store is not None:
+                        try:
+                            self.knowledge_store.remember(
+                                key=f"reversal_signature_{_b.upper()}", kind="finding",
+                                topic="exit_signature",
+                                text=(f"{_b} seeded reversal signature (n={meta.get('n_trades')}, "
+                                      f"GoldShark real-tick): osma retained-at-exit "
+                                      f"{osma.get('median_retained_frac')} (shrinks toward neutral "
+                                      f"{osma.get('shrank_toward_neutral_pct')}% of trades), "
+                                      f"osma peak ~{osma.get('median_peak_over_atr')}xATR, "
+                                      f"capture {meta.get('median_capture_ratio')}. Use OsMA reversal "
+                                      f"depth as the per-symbol exit tell."))
+                        except Exception:
+                            pass
+            except Exception as e:
+                logger.debug(f"seed signature skip {_b}: {e}")
+        if not self._reversal_signatures:
+            logger.info("[REVERSAL-SEED] no symbol has >=20 captured trades yet; "
+                        "signal-driven exit stays in measuring mode")
 
     def _adopt_existing_positions(self):
         """
