@@ -29,14 +29,15 @@ def _mgr():
 
 
 def test_small_profit_does_not_arm_giveback():
-    """A modest profit (< arm threshold) must never trigger a giveback close."""
+    """A TINY profit (below the retention-ratchet arm) must never trigger a close —
+    only genuinely meaningful peaks are protected."""
     mgr = _mgr()
-    st = _state(atr_points=100.0)  # arm ~ 1.5*100 = 150 pts
-    # push to +80pts peak then pull back to +30pts (a big % giveback, but small $)
-    mgr.evaluate(st, price=180.0, point=1.0, spread_points=2.0)   # peak +80
-    intent = mgr.evaluate(st, price=130.0, point=1.0, spread_points=2.0)  # back to +30
+    st = _state(atr_points=100.0)  # retention arm ~ 0.35*100 = 35 pts
+    # peak +30pts (below the 35pt arm) then pull back to +10pts
+    mgr.evaluate(st, price=130.0, point=1.0, spread_points=2.0)   # peak +30
+    intent = mgr.evaluate(st, price=110.0, point=1.0, spread_points=2.0)  # back to +10
     assert not (intent and intent.get("close")), (
-        f"giveback armed on a small (+80pt) peak below the ~150pt arm threshold: {intent}"
+        f"ratchet/giveback armed on a tiny (+30pt) peak below the ~35pt arm: {intent}"
     )
 
 

@@ -139,7 +139,7 @@ SCALP_GIVEBACK_ARM_ATR = float(os.getenv("SCALP_GIVEBACK_ARM_ATR", "1.5"))
 # floor that fires BEFORE the looser giveback guard. Arms earlier (0.8*ATR) and
 # protects harder (keep >=50%) so winners still run but can't hand the move back.
 SCALP_RETAIN_FLOOR_FRAC = float(os.getenv("SCALP_RETAIN_FLOOR_FRAC", "0.5"))
-SCALP_RETAIN_ARM_ATR = float(os.getenv("SCALP_RETAIN_ARM_ATR", "0.8"))
+SCALP_RETAIN_ARM_ATR = float(os.getenv("SCALP_RETAIN_ARM_ATR", "0.35"))
 # FOCUSED mode: trade only validated high-edge (strategy x regime) pockets
 # instead of the broad ensemble vote. Backtest: PF 1.24 vs 1.04.
 FOCUSED_MODE = os.getenv("FOCUSED_MODE", "true").lower() in ("true", "1", "yes")

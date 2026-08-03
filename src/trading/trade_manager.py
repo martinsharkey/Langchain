@@ -342,7 +342,12 @@ class TradeManager:
         # requires a real absolute buffer (>= 1*ATR of peak) so tiny winners that
         # never built a meaningful cushion are left for the trail/giveback, not
         # scratched by the ratchet.
-        ratchet_arm = max(self.retain_arm_points(st), (st.atr_points or 0), spread_points + 20)
+        # Arm as soon as there is a MEANINGFUL profit buffer — NOT a full ATR. Live
+        # data showed a 1xATR arm never engaged on most BTC trades (median MFE 14347
+        # < 1xATR 14995), leaving big winners unprotected. Arm at a fraction of ATR
+        # (or a spread-based floor), so the retain-floor can protect any real peak.
+        # The 50% retain floor already prevents scratching tiny winners.
+        ratchet_arm = max(self.retain_arm_points(st), spread_points + 20)
         if st.peak_profit_points >= ratchet_arm:
             retain_frac = self.retain_floor_frac(st)          # e.g. 0.5 -> keep >=50% of peak
             floor_points = st.peak_profit_points * retain_frac
