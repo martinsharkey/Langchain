@@ -346,30 +346,24 @@ class TradeManager:
         if st.peak_profit_points >= ratchet_arm:
             retain_frac = self.retain_floor_frac(st)          # e.g. 0.5 -> keep >=50% of peak
             floor_points = st.peak_profit_points * retain_frac
-            # 1) HARD BROKER STOP at the floor — the critical fix. The 15s poll cannot
-            #    catch a peak->reversal that happens BETWEEN cycles, so we push a real
-            #    stop-loss to the protected floor price. The BROKER then enforces the
-            #    floor tick-by-tick even while Python is asleep. This ratchets: it only
-            #    ever moves the stop toward more profit, never back.
-            floor_price = (st.entry + floor_points * point) if st.action == "buy" \
-                else (st.entry - floor_points * point)
-            if self._sl_improves(st, floor_price):
-                st.sl = floor_price
-                st.moved_to_be = True   # past breakeven now; stop is in profit
-                self._log(st, "retention_ratchet_sl", floor_price)
-                # if we're ALREADY below the floor at poll time, close outright too
-                if profit_points > 0 and profit_points <= floor_points:
-                    self._log(st, "retention_ratchet_exit", price)
-                    return {"close": (f"profit retention: banked {st.peak_profit_points:.0f}pts peak, "
-                                      f"protecting {retain_frac:.0%} floor ({floor_points:.0f}pts), "
-                                      f"now {profit_points:.0f}pts")}
-                return {"modify_sl": round(floor_price, 6)}
-            # stop already at/above the floor; still close if we've dipped to it
-            if profit_points > 0 and profit_points <= floor_points:
+            # If price has ALREADY fallen to/through the floor, a stop there would sit
+            # on the wrong side of market (retcode 10016). CLOSE now — that captures
+            # the floor immediately and is what a broker stop would have done anyway.
+            if profit_points <= floor_points:
                 self._log(st, "retention_ratchet_exit", price)
                 return {"close": (f"profit retention: banked {st.peak_profit_points:.0f}pts peak, "
                                   f"protecting {retain_frac:.0%} floor ({floor_points:.0f}pts), "
                                   f"now {profit_points:.0f}pts")}
+            # Otherwise price is still comfortably above the floor: place a REAL broker
+            # stop at the floor (valid, below market) so it protects tick-by-tick even
+            # between fast-manage ticks. Ratchets: only ever tightens toward profit.
+            floor_price = (st.entry + floor_points * point) if st.action == "buy" \
+                else (st.entry - floor_points * point)
+            if self._sl_improves(st, floor_price):
+                st.sl = floor_price
+                st.moved_to_be = True
+                self._log(st, "retention_ratchet_sl", floor_price)
+                return {"modify_sl": round(floor_price, 6)}
 
         # ── SIGNAL-DRIVEN EXIT / HOLD (gated: only when a proven signature exists) ──
         # Our confluence indicators are strong for ENTRY; the reversal-signature
