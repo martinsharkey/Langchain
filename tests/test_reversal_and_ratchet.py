@@ -178,6 +178,25 @@ def test_intra_cycle_extreme_updates_peak_not_missed():
     assert r and "retention" in str(r.get("close", "")), r
 
 
+def test_retention_ratchet_places_broker_stop_at_floor():
+    """The critical fix: once armed, the ratchet must push a REAL broker stop-loss to
+    the protected floor so the BROKER enforces it between 15s polls (intra-cycle
+    peak->reversal can't be caught by polling alone)."""
+    tm = TradeManager()
+    st = _state(action="buy", entry=2000.0, atr_points=300.0)
+    point = 0.01
+    # peak +600pts (arms ratchet: >= max(0.8*300, 300) = 300)
+    r = tm.evaluate(st, price=2000.0 + 600 * point, point=point, spread_points=5)
+    # should return a modify_sl at the 50% floor = +300pts => price 2003.0
+    assert r and "modify_sl" in r, r
+    expected_floor = 2000.0 + 0.5 * 600 * point   # 2003.0
+    assert abs(r["modify_sl"] - expected_floor) < 1e-6, (r, expected_floor)
+    assert st.sl == expected_floor
+    # ratchet only tightens: a later, higher peak moves the stop UP, never down
+    r2 = tm.evaluate(st, price=2000.0 + 1000 * point, point=point, spread_points=5)
+    assert r2 and "modify_sl" in r2 and r2["modify_sl"] > expected_floor, r2
+
+
 if __name__ == "__main__":
     test_retention_ratchet_cuts_after_giving_back_floor()
     test_retention_ratchet_does_not_arm_below_threshold()
@@ -188,4 +207,5 @@ if __name__ == "__main__":
     test_signal_ignored_when_signature_unproven()
     test_reversal_tell_is_scale_free_across_symbols()
     test_intra_cycle_extreme_updates_peak_not_missed()
+    test_retention_ratchet_places_broker_stop_at_floor()
     print("reversal + ratchet tests passed")

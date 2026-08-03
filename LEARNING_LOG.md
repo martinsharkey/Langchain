@@ -3,6 +3,8 @@
 > Auto-generated digest of what the self-learning loop changed and why.
 > Most-recent-first. Reporting only — never gates a live decision (#45.1).
 
+- **2026-08-03 18:07** [EXIT-LOCK] `BTCUSD` exit set sl_atr 1.81 tp_rr 0.89 -- why: robust -- metric: recent expectancy 0.0197 (n=30)
+- **2026-08-03 17:55** [EXIT-LOCK] `BTCUSD` exit set sl_atr 1.62 tp_rr 0.78 -- why: excursion -- metric: recent expectancy 0.0043 (n=30)
 - **2026-08-03 16:46** [EXIT-LOCK] `BTCUSD` exit set sl_atr 1.8 tp_rr 0.9 -- why: robust -- metric: recent expectancy -0.0747 (n=30)
 - **2026-08-03 16:35** [EXIT-LOCK] `BTCUSD` exit set sl_atr 1.6 tp_rr 0.79 -- why: excursion -- metric: recent expectancy -0.008 (n=30)
 - **2026-08-03 16:14** [EXIT-LOCK] `BTCUSD` exit set sl_atr 1.61 tp_rr 0.79 -- why: excursion -- metric: recent expectancy -0.0003 (n=30)
