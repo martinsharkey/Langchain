@@ -1,0 +1,41 @@
+name: CI
+
+# Runs the offline test suite. Secrets are injected from GitHub Actions Secrets
+# (never committed) — see SECURITY.md. Live MT5 is NOT exercised in CI; tests are
+# offline/deterministic.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    env:
+      # Secrets come from repo Settings -> Secrets and variables -> Actions.
+      # Absent secrets resolve to empty strings; the offline suite does not need them.
+      MT5_ACCOUNT: ${{ secrets.MT5_ACCOUNT }}
+      MT5_PASSWORD: ${{ secrets.MT5_PASSWORD }}
+      MT5_SERVER: ${{ secrets.MT5_SERVER }}
+      USE_KILO_GATEWAY: "true"
+      TRADING_MODE: OBSERVE
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install test dependencies
+        run: |
+          python -m pip install --upgrade pip
+          # Core test deps; MetaTrader5 is Windows-only and not needed for the
+          # offline suite (imports are guarded), so it is intentionally omitted.
+          pip install pytest pandas numpy scikit-learn || true
+          pip install -r requirements.txt || true
+
+      - name: Run offline test suite
+        run: pytest tests/ -q
