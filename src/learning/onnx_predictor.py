@@ -156,6 +156,8 @@ class OnnxOutcomePredictor:
             "SELECT outcome, indicators_snapshot FROM trades "
             "WHERE outcome IN ('win','loss') AND symbol LIKE ? "
             "AND (exit_reason IS NULL OR exit_reason<>'pre_rebuild_synthetic') "
+            # Bug 4: never train on fictitious interpolated-OHLC backtest rows.
+            "AND (data_source IS NULL OR data_source<>'SIMULATED_OHLC') "
             "AND indicators_snapshot IS NOT NULL AND indicators_snapshot!=''" + ac +
             " ORDER BY id ASC",            # CHRONOLOGICAL order (id is insertion order)
             [sym_prefix + "%"] + ap).fetchall()

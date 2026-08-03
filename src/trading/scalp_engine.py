@@ -100,6 +100,10 @@ class ScalpEngine:
             get_symbol_personality=self._symbol_personality_for,
         )
         self.managed: dict[int, object] = {}   # ticket -> ManagedState
+        # Bug 2/3: when the MANAGER closes a position it must not silently discard the
+        # excursion state before _reconcile_closed can persist MFE/MAE. Stash it in a
+        # tombstone cache keyed by ticket; reconcile reads here if `managed` is empty.
+        self._closed_state_cache: dict[int, object] = {}
         self._variant_perf_cache = {}
         self._symbol_personality_cache = {}
         # proactive self-performance researcher (analyzes what's working)
@@ -1141,7 +1145,8 @@ class ScalpEngine:
             rows = conn.execute(
                 "SELECT profit_loss FROM trades WHERE symbol LIKE ? "
                 "AND outcome IN ('win','loss','breakeven') "
-                "AND (exit_reason IS NULL OR exit_reason<>'pre_rebuild_synthetic')"
+                "AND (exit_reason IS NULL OR exit_reason<>'pre_rebuild_synthetic') "
+                "AND (data_source IS NULL OR data_source<>'SIMULATED_OHLC')"
                 + ac +
                 " ORDER BY id DESC LIMIT ?",
                 tuple([base_symbol.upper() + "%"] + ap + [limit]),
@@ -1362,7 +1367,7 @@ class ScalpEngine:
                         res = adapter.close(ticket)
                         if res.ok and not res.simulated:
                             logger.info(f"Pre-close CLOSED {ticket}: {pc['close']} ({res.reason})")
-                            self.managed.pop(ticket, None)
+                            self._retire_managed(ticket)
                         elif res.simulated or adapter.mode in ("OBSERVE", "PAPER"):
                             logger.warning(
                                 f"Pre-close wanted to close {ticket} ({pc['close']}) but "
@@ -1394,7 +1399,7 @@ class ScalpEngine:
                         if res.ok and not res.simulated:
                             logger.info(f"HTF REVERSAL exit {ticket} ({pos.base_symbol}): "
                                         f"HTF momentum flipped against {pos.action} ({res.reason})")
-                            self.managed.pop(ticket, None)
+                            self._retire_managed(ticket)
                             continue
                         elif res.simulated or adapter.mode in ("OBSERVE", "PAPER"):
                             logger.warning(
@@ -1444,7 +1449,7 @@ class ScalpEngine:
                         logger.info(f"Manager CLOSED {ticket}: {intent['close']} ({res.reason})")
                         # real close confirmed — stop managing; reconcile will
                         # record the true outcome from the deal history.
-                        self.managed.pop(ticket, None)
+                        self._retire_managed(ticket)
                     elif res.simulated or self.adapters[pos.base_symbol].mode in ("OBSERVE", "PAPER"):
                         logger.warning(
                             f"Manager wanted to close {ticket} ({intent['close']}) but "
@@ -2114,6 +2119,19 @@ class ScalpEngine:
                     f"ticket={result.ticket} conf={signal.confidence:.2f} [{combo_str}]")
 
     # ── reconciliation of closed trades (REAL outcomes) ───────────────
+    def _retire_managed(self, ticket: int):
+        """Manager-close path: move the ManagedState into the tombstone cache instead
+        of discarding it, so _reconcile_closed can still persist MFE/MAE (Bug 2/3)."""
+        st = self.managed.pop(ticket, None)
+        if st is not None:
+            self._closed_state_cache[ticket] = st
+            # cap: reconcile normally drains this next cycle; guard against a leak if a
+            # close is never reconciled (e.g. ticket vanishes from history).
+            if len(self._closed_state_cache) > 256:
+                for _old in list(self._closed_state_cache.keys())[:64]:
+                    self._closed_state_cache.pop(_old, None)
+        return st
+
     def _reconcile_closed(self):
         if not self.open_positions:
             return
@@ -2137,7 +2155,9 @@ class ScalpEngine:
                 logger.info(f"Ticket {ticket} closed but no exit deal yet; will retry")
                 continue
             tp = self.open_positions.pop(ticket)
-            _mst = self.managed.pop(ticket, None)   # clear management state (capture excursion first)
+            # excursion state: prefer live managed, else the tombstone cache the
+            # manager-close path stashed it in (Bug 2/3 — never lose MFE/MAE).
+            _mst = self.managed.pop(ticket, None) or self._closed_state_cache.pop(ticket, None)
             outcome = "win" if profit > 0 else "loss" if profit < 0 else "breakeven"
             # exit-capture study: pull MFE/MAE/exit-points from the manager's tracking
             _mfe = round(_mst.peak_profit_points, 1) if _mst else None

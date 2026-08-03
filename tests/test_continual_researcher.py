@@ -19,10 +19,10 @@ class _MQL5:
 def _make_db(path, rows):
     conn = sqlite3.connect(path)
     conn.execute("""CREATE TABLE trades (id INTEGER PRIMARY KEY, symbol TEXT, outcome TEXT,
-                    profit_loss REAL, exit_reason TEXT, strategy_used TEXT)""")
+                    profit_loss REAL, exit_reason TEXT, strategy_used TEXT, data_source TEXT)""")
     for i, (sym, oc, pl, ex, st) in enumerate(rows):
-        conn.execute("INSERT INTO trades (symbol,outcome,profit_loss,exit_reason,strategy_used) "
-                     "VALUES (?,?,?,?,?)", (sym, oc, pl, ex, st))
+        conn.execute("INSERT INTO trades (symbol,outcome,profit_loss,exit_reason,strategy_used,data_source) "
+                     "VALUES (?,?,?,?,?,?)", (sym, oc, pl, ex, st, "LIVE_MICRO"))
     conn.commit(); conn.close()
 
 

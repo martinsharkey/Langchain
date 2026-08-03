@@ -242,6 +242,7 @@ class ContinualResearcher:
                 "SELECT outcome, profit_loss, exit_reason, strategy_used FROM trades "
                 "WHERE symbol LIKE ? AND outcome IN ('win','loss','breakeven') "
                 "AND (exit_reason IS NULL OR exit_reason<>'pre_rebuild_synthetic') "
+                "AND (data_source IS NULL OR data_source<>'SIMULATED_OHLC') "
                 "ORDER BY id DESC LIMIT ?", (base_symbol.upper() + "%", limit)).fetchall()
             conn.close()
         except Exception as e:

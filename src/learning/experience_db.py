@@ -190,11 +190,25 @@ class ExperienceDatabase:
             adds.append("ALTER TABLE trades ADD COLUMN mae_points REAL")   # max adverse excursion
         if "exit_points" not in cols:
             adds.append("ALTER TABLE trades ADD COLUMN exit_points REAL")  # realised points at exit
+        # Bug 4 (data provenance): segment BAR-DATA quality so the model never trains
+        # on fictitious MT5 "1-min OHLC"/default-"Every Tick" curves. Distinct from
+        # account_trade_mode (DEMO/REAL account): a DEMO account still produces real
+        # live ticks. Values: 'LIVE_MICRO' (live ticks), 'SIMULATED_REAL_TICKS'
+        # (Every Tick based on Real Ticks), 'SIMULATED_OHLC' (interpolated - EXCLUDED
+        # from training). Existing rows are all live-collected -> backfill LIVE_MICRO.
+        if "data_source" not in cols:
+            adds.append("ALTER TABLE trades ADD COLUMN data_source TEXT")
         for sql in adds:
             try:
                 cur.execute(sql)
             except Exception as e:
                 logger.debug(f"migrate skip: {e}")
+        # backfill provenance: everything recorded so far came from the live engine
+        if "data_source" not in cols:
+            try:
+                cur.execute("UPDATE trades SET data_source='LIVE_MICRO' WHERE data_source IS NULL")
+            except Exception as e:
+                logger.debug(f"data_source backfill skip: {e}")
         # index for account-scoped stats
         try:
             cur.execute("CREATE INDEX IF NOT EXISTS idx_trades_account "
@@ -301,6 +315,7 @@ class ExperienceDatabase:
         mgmt_variant: Optional[str] = None,
         timeframe: Optional[str] = None,
         mt5_ticket: Optional[int] = None,
+        data_source: str = "LIVE_MICRO",
     ):
         """
         Record a trade in the experience database.
@@ -330,8 +345,8 @@ class ExperienceDatabase:
                 strategy_combination, outcome, profit_loss, exit_price,
                 exit_reason, market_regime, indicators_snapshot,
                 rsi_value, trend, atr_value, mgmt_variant, timeframe, mt5_ticket,
-                account_login, account_server, account_trade_mode
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                account_login, account_server, account_trade_mode, data_source
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (
             timestamp,
             signal.get("symbol", "XAUUSD"),
@@ -358,6 +373,7 @@ class ExperienceDatabase:
             (self.current_account or {}).get("login"),
             (self.current_account or {}).get("server"),
             (self.current_account or {}).get("trade_mode"),
+            data_source or "LIVE_MICRO",
         ))
         
         trade_id = cursor.lastrowid

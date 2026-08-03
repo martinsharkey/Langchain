@@ -70,10 +70,44 @@ def test_insufficient_sample_holds():
         assert r["action"] == "hold"
 
 
+def test_stale_best_is_demoted_when_now_losing():
+    """A best-known captured in a lucky window must not trap the bot: if we are
+    ON the best-known config and it is now itself losing, demote it."""
+    with tempfile.TemporaryDirectory() as d:
+        cp = _cp(os.path.join(d, "cp.json"))
+        cfg = {"sl_atr": 1.0, "tp_rr": 2.0, "giveback": 0.6}
+        cp.evaluate("BTCUSD", cfg, current_expectancy=0.0947, n=20)   # lucky-window best
+        # same config, now losing live -> must demote, not hold
+        r = cp.evaluate("BTCUSD", cfg, current_expectancy=-0.090, n=40)
+        assert r["action"] == "demoted_stale_best", r
+        assert cp.best_expectancy("BTCUSD") is None
+        # a fresh config can now become the new baseline
+        r2 = cp.evaluate("BTCUSD", {"sl_atr": 2.0, "tp_rr": 0.8}, current_expectancy=0.05, n=40)
+        assert r2["action"] == "checkpointed", r2
+
+
+def test_no_revert_to_a_losing_best():
+    """Never force a revert TO a best-known that is itself unprofitable."""
+    with tempfile.TemporaryDirectory() as d:
+        cp = _cp(os.path.join(d, "cp.json"))
+        best = {"sl_atr": 1.0, "tp_rr": 2.0}
+        # seed a (barely) positive best, then it decays via the stale guard path is
+        # avoided here: directly make best <=0 by checkpointing a tiny-positive then
+        # evaluating a different worse config against a now-losing best.
+        cp.evaluate("GER40", best, current_expectancy=0.001, n=20)
+        # force best expectancy to a losing value to simulate a decayed checkpoint
+        cp._sym("GER40")["best"]["expectancy"] = -0.05
+        r = cp.evaluate("GER40", {"sl_atr": 0.8, "tp_rr": 1.0}, current_expectancy=-0.20, n=20)
+        assert r["action"] == "hold", r
+        assert "not reverting" in r["reason"] or "losing" in r["reason"]
+
+
 if __name__ == "__main__":
     test_first_config_becomes_baseline_and_best()
     test_improvement_updates_best()
     test_degradation_reverts_and_learns()
     test_within_noise_band_holds()
     test_insufficient_sample_holds()
+    test_stale_best_is_demoted_when_now_losing()
+    test_no_revert_to_a_losing_best()
     print("config checkpointer tests passed")

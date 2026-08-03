@@ -563,19 +563,16 @@ def rsi_divergence_momentum(indicators: dict, params: dict) -> Signal:
 
 def macd_osma_power_confluence(indicators: dict, params: dict) -> Signal:
     """
-    High-conviction confluence: MACD line vs zero + OsMA same direction +
-    Bulls/Bears Power alignment.
+    RETIRED (1b): no longer registered as a live strategy. Kept ONLY as a
+    reference for the DELIBERATE Bulls/Bears zero-line math (see memory
+    `bulls_bears_power_logic`). The live confluence is OsMA_Confluence
+    (src/strategies/osma_confluence.py -> confluence_signal.py).
 
     ⚠️ Bulls/Bears zero-line logic is DELIBERATE and CORRECT — DO NOT flip the
-    operators (LLMs tend to "fix" these back to the legacy bug). See the header
-    comment on bulls_power/bears_power in indicators.py.
+    operators (LLMs tend to "fix" these back to the legacy bug).
 
     LONG when:  MACD line > 0  AND  OsMA > 0  AND  Bears Power >= 0.0
-                (in a real uptrend the candle low sits above the EMA, so bears
-                 power is POSITIVE/neutral — that CONFIRMS the long, not blocks it)
     SHORT when: MACD line < 0  AND  OsMA < 0  AND  Bulls Power <= 0.0
-                (in a real downtrend the candle high sits below the EMA, so bulls
-                 power is NEGATIVE/neutral — that CONFIRMS the short)
     """
     close = indicators.get("close")
     macd_line = indicators.get("macd_line")
@@ -770,13 +767,21 @@ class StrategyRegistry:
             suitable_regimes=["trending"],
             signal_fn=rsi_divergence_momentum, min_confidence=0.45, weight=1,
         ))
-        self.register(StrategyDefinition(
-            name="MACD_OsMA_Power_Confluence",
-            description="High-conviction MACD-zero + OsMA + Bulls/Bears Power alignment (correct zero-line math)",
-            indicators_used=["macd_line", "osma", "bulls_power", "bears_power", "close"],
-            suitable_regimes=["trending", "volatile"],
-            signal_fn=macd_osma_power_confluence, min_confidence=0.6, weight=3,
-        ))
+        # NOTE (1b): MACD_OsMA_Power_Confluence was RETIRED. It was a third,
+        # lighter-weight confluence (MACD/OsMA/Bulls/Bears only, no EMA/ATR/RSI).
+        # The single source of truth is now OsMA_Confluence (src/strategies/
+        # osma_confluence.py -> confluence_signal.py).
+        #
+        # (1c) Register OsMA_Confluence HERE too, not only at engine start, so that
+        # ANY registry (optimizer, edge-discovery, backtester, tests) can resolve the
+        # focused pocket and walkforward_focused actually simulates the tuned params.
+        # Without this, focused_rules() -> OsMA_Confluence would be unresolvable in a
+        # bare registry and the optimizer would silently validate nothing.
+        try:
+            from src.strategies.osma_confluence import register as _register_osma
+            _register_osma(self)
+        except Exception as _e:  # pragma: no cover - defensive
+            logger.warning(f"OsMA_Confluence default registration skipped: {_e}")
     
     def register(self, strategy: StrategyDefinition):
         """Register a new strategy."""

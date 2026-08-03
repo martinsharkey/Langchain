@@ -321,6 +321,8 @@ class PatternVectorStore:
             "trade_outcome": str(metadata.get("trade_outcome", "none")),
             "profit_loss": float(metadata.get("profit_loss", 0.0)),
             "market_regime": str(metadata.get("market_regime", "unknown")),
+            # Bug 4: provenance so simulated-OHLC patterns can be excluded from RAG.
+            "data_source": str(metadata.get("data_source", "LIVE_MICRO")),
         }
         
         # Upsert the pattern
@@ -337,6 +339,7 @@ class PatternVectorStore:
         indicators: dict,
         n_results: int = 5,
         filter_outcome: Optional[str] = None,
+        exclude_simulated_ohlc: bool = True,
     ) -> list[dict]:
         """
         Find similar market patterns using vector similarity search.
@@ -358,9 +361,18 @@ class PatternVectorStore:
         vector = self._indicators_to_vector(indicators)
         
         # Build query filter if specified
-        where_filter = None
+        conds = []
         if filter_outcome:
-            where_filter = {"trade_outcome": filter_outcome}
+            conds.append({"trade_outcome": filter_outcome})
+        # Bug 4: never retrieve fictitious interpolated-OHLC patterns for live RAG.
+        if exclude_simulated_ohlc:
+            conds.append({"data_source": {"$ne": "SIMULATED_OHLC"}})
+        if not conds:
+            where_filter = None
+        elif len(conds) == 1:
+            where_filter = conds[0]
+        else:
+            where_filter = {"$and": conds}
         
         results = self.collection.query(
             query_embeddings=[vector],

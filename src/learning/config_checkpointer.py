@@ -163,16 +163,36 @@ class ConfigCheckpointer:
             self.maybe_checkpoint(symbol, current_cfg, current_expectancy, n)
             return {"action": "checkpointed", "reason": "first baseline"}
 
+        # STALENESS GUARD (fix: the best-known was trapping the bot on a lucky-window
+        # config). If we are CURRENTLY on the best-known config and it is now itself
+        # LOSING (negative recent expectancy), the stored 'best' was a favourable-
+        # period artifact — DEMOTE it so a new config can take over instead of
+        # reverting to a config that no longer works.
+        on_best = _config_fingerprint(current_cfg) == best["fingerprint"]
+        if on_best and current_expectancy <= 0 and best["expectancy"] > 0:
+            logger.warning(
+                f"[STALE-BEST] {symbol}: best-known (exp {best['expectancy']:.4f}) is now "
+                f"LOSING live (exp {current_expectancy:.4f}) — demoting the stale checkpoint "
+                f"so a better config can take over (was a favourable-window artifact).")
+            s["best"] = None
+            self._persist()
+            return {"action": "demoted_stale_best",
+                    "reason": "best-known no longer profitable live; cleared"}
+
         # current improved on best -> new checkpoint
         if current_expectancy > best["expectancy"]:
             self.maybe_checkpoint(symbol, current_cfg, current_expectancy, n)
             return {"action": "checkpointed", "reason": "new best expectancy"}
 
-        # current materially worse than best -> revert + learn
+        # current materially worse than best -> revert + learn — BUT never revert to
+        # a best-known that is itself losing (negative): that just re-traps us.
         if current_expectancy < best["expectancy"] - self.revert_margin:
-            # don't "revert" to the same config we're already on
             if _config_fingerprint(current_cfg) == best["fingerprint"]:
                 return {"action": "hold", "reason": "already on best config"}
+            if best["expectancy"] <= 0:
+                # the 'best' is itself unprofitable — don't force a revert to it;
+                # let the current exploration continue / a new best emerge.
+                return {"action": "hold", "reason": "best-known is itself losing; not reverting"}
             self._record_failure(symbol, current_cfg, current_expectancy, best["expectancy"])
             logger.warning(
                 f"[REVERT] {symbol}: current config exp={current_expectancy:.4f} is worse than "

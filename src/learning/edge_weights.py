@@ -60,7 +60,7 @@ EDGE_WEIGHTS_BY_SYMBOL = {
         "BB_Bounce": 1.8,
         "CCI_Breakout": 1.7,
         "RSI_MeanReversion": 1.4,
-        "MACD_OsMA_Power_Confluence": 1.3,
+        "OsMA_Confluence": 1.3,
         "ADX_TrendStrength": 1.2,
         "EMA_TrendFollow": 1.1,
         "RSI_Momentum": 0.7,
@@ -75,7 +75,7 @@ EDGE_WEIGHTS_BY_SYMBOL = {
     "GER40": {
         "BB_SqueezeBreakout": 1.6,
         "CCI_Breakout": 1.4,
-        "MACD_OsMA_Power_Confluence": 1.3,
+        "OsMA_Confluence": 1.3,
         "MACD_Cross": 1.2,
         "MACD_Momentum": 1.2,
         "Volume_Breakout": 0.5,
@@ -114,7 +114,7 @@ REGIME_EDGE = {
         "CCI_Breakout":               {"volatile": 1.2, "trending": 1.2, "ranging": 1.0, "quiet": 0.9},
         "RSI_MeanReversion":          {"trending": 1.2, "volatile": 1.0, "ranging": 0.9, "quiet": 0.9},
         "ADX_TrendStrength":          {"trending": 1.3, "volatile": 0.7, "ranging": 0.7, "quiet": 0.8},
-        "MACD_OsMA_Power_Confluence": {"trending": 1.3, "ranging": 0.8, "volatile": 0.7, "quiet": 0.8},
+        "OsMA_Confluence":            {"trending": 1.3, "ranging": 0.8, "volatile": 0.7, "quiet": 0.8},
     },
 }
 
@@ -155,16 +155,20 @@ def regime_edge_weight(symbol: str, strategy: str, regime: str) -> float:
 # NOT validated — its focused rules stay but the researcher auto-pause governs
 # it (quarantines if it bleeds live).
 FOCUSED_EDGE = {
+    # XAUUSD now trades ONLY the proven 7-indicator confluence (OsMA_Confluence),
+    # the single source of truth in confluence_signal.py. The old grab-bag
+    # (Volume_Breakout/BB_Bounce/CCI_Breakout) is retired: it did not consume the
+    # tuned osma_/ema_/atr_ params, so the optimizer could not validate it (1a/1c).
+    # Re-run edge-discovery/walk-forward before trusting this pocket live.
     "XAUUSD": [
-        ("Volume_Breakout", {"volatile", "trending"}),
-        ("BB_Bounce", {"ranging"}),
-        ("CCI_Breakout", {"volatile", "trending"}),
+        ("OsMA_Confluence", {"trending", "volatile", "ranging", "quiet"}),
     ],
-    # GER40: unvalidated on M15 (walk-forward inconsistent); kept but auto-pause-governed
+    # GER40: unvalidated on M15 (walk-forward inconsistent). Consolidated onto the
+    # SAME confluence implementation as XAUUSD (1b) — the third, lighter-weight
+    # MACD_OsMA_Power_Confluence is deleted so there is ONE confluence everywhere.
+    # Still auto-pause-governed (quarantines if it bleeds live).
     "GER40": [
-        ("BB_SqueezeBreakout", {"volatile", "trending"}),
-        ("CCI_Breakout", {"trending", "volatile"}),
-        ("MACD_OsMA_Power_Confluence", {"trending"}),
+        ("OsMA_Confluence", {"trending", "volatile"}),
     ],
 }
 

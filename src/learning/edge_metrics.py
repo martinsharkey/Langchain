@@ -57,7 +57,8 @@ class EdgeCalculator:
         conn = sqlite3.connect(self.experience_db.db_path)
         conn.row_factory = sqlite3.Row
         where = "WHERE outcome IN ('win','loss','breakeven') " \
-                "AND (exit_reason IS NULL OR exit_reason<>'pre_rebuild_synthetic')"
+                "AND (exit_reason IS NULL OR exit_reason<>'pre_rebuild_synthetic') " \
+                "AND (data_source IS NULL OR data_source<>'SIMULATED_OHLC')"
         params = []
         if symbol:
             where += " AND symbol LIKE ?"
