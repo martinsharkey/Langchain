@@ -137,6 +137,30 @@ def evaluate_confluence_bar(ind: dict, cfg=None) -> dict:
         return {"action": "hold", "trigger_kind": trigger_kind, "confluence": 0, "reason": "MACD did not lead"}
     if not atr > atr_prev:
         return {"action": "hold", "trigger_kind": trigger_kind, "confluence": 0, "reason": "ATR not expanding"}
+    # OsMA ACCELERATION (GoldShark: 100% of winners had OsMA accelerating in the
+    # trade direction — the cross must have momentum behind it, not be stalling).
+    if (direction == "buy" and not osma_now > osma_prev) or \
+       (direction == "sell" and not osma_now < osma_prev):
+        return {"action": "hold", "trigger_kind": trigger_kind, "confluence": 0,
+                "reason": "OsMA not accelerating"}
+    # LEARNED per-symbol STRENGTH gate (the core of what the model learns): the OsMA
+    # and dominant-power (Bulls for long / Bears for short) must clear the strength
+    # level that has proven to give reliable entries for THIS symbol. Thresholds are
+    # scale-free (ATR-normalized) and supplied by the entry-strength learner; when
+    # absent (cold start) the gate is permissive (>0), i.e. behaves as before.
+    bulls_v = float(ind.get("bulls_power") or 0); bears_v = float(ind.get("bears_power") or 0)
+    osma_min = c.get("osma_strength_min", 0.0) * atr        # ATR-scaled -> per symbol
+    power_min = c.get("power_strength_min", 0.0) * atr
+    if direction == "buy":
+        if abs(osma_now) < osma_min or bulls_v < power_min:
+            return {"action": "hold", "trigger_kind": trigger_kind, "confluence": 0,
+                    "reason": f"below learned strength (osma {osma_now:.3f}<{osma_min:.3f} "
+                              f"or bulls {bulls_v:.3f}<{power_min:.3f})"}
+    else:
+        if abs(osma_now) < osma_min or bears_v > -power_min:
+            return {"action": "hold", "trigger_kind": trigger_kind, "confluence": 0,
+                    "reason": f"below learned strength (osma {abs(osma_now):.3f}<{osma_min:.3f} "
+                              f"or bears {bears_v:.3f}>-{power_min:.3f})"}
     checks = _soft_checks(direction, close, float(ind.get("ema_fast") or close),
                           float(ind.get("ema_prev") or ind.get("ema_fast") or close),
                           atr, float(ind.get("bulls_power") or 0), float(ind.get("bears_power") or 0),

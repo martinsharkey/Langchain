@@ -354,6 +354,19 @@ class ScalpEngine:
             self.reversal_analyzer = None
             self._reversal_signatures = {}
 
+        # Entry-strength learner: learns the per-symbol OsMA/Bulls/Bears STRENGTH
+        # levels that give reliable entries (scale-free, ATR-normalized), seeded from
+        # GoldShark real-tick trades and refined from live wins. Feeds the confluence
+        # gate via _tuned_params (osma_strength_min / power_strength_min).
+        try:
+            from src.learning.entry_strength import EntryStrengthLearner
+            self.entry_strength_learner = EntryStrengthLearner(self.experience_db)
+            self._entry_strength = {}   # symbol prefix -> {osma_strength_min, power_strength_min}
+        except Exception as e:
+            logger.warning(f"entry-strength learner unavailable: {e}")
+            self.entry_strength_learner = None
+            self._entry_strength = {}
+
         # HTF context — multi-timeframe alignment for ENTRY + trade MANAGEMENT.
         # Every symbol (incl. gold) now "sees" M5/M15/M30/H1 to survive wicks when
         # HTF still aligns, and to cut when HTF momentum genuinely reverses.
@@ -409,6 +422,13 @@ class ScalpEngine:
         # seeded GoldShark lifecycle records) so the gated signal-driven exit/hold is
         # active from cycle 1, not only after the background researcher loop first runs.
         self._load_seeded_signatures()
+        # Learn per-symbol entry-strength floors from seeded + prior data so the
+        # confluence gate uses proven strength levels from cycle 1.
+        if self.entry_strength_learner is not None:
+            try:
+                self._entry_strength = self.entry_strength_learner.learn_all(list(self.adapters.keys()))
+            except Exception as e:
+                logger.debug(f"entry-strength startup learn skip: {e}")
         return True
 
     def _load_seeded_signatures(self):
@@ -1736,13 +1756,25 @@ class ScalpEngine:
         return health
 
     def _tuned_params(self, resolved_symbol: str) -> dict:
-        """Optimizer-tuned indicator params for this symbol (or {} = defaults)."""
-        if self.param_optimizer is None:
-            return {}
+        """Optimizer-tuned indicator params for this symbol (or {} = defaults),
+        merged with the LEARNED per-symbol entry-strength thresholds (osma/power
+        minimums) so the confluence gate uses what the model learned is reliable."""
+        params = {}
+        if self.param_optimizer is not None:
+            try:
+                params = dict(self.param_optimizer.current_params(resolved_symbol) or {})
+            except Exception:
+                params = {}
+        # learned entry-strength floors (ATR-normalized) for this symbol
         try:
-            return self.param_optimizer.current_params(resolved_symbol)
+            for key, sv in (getattr(self, "_entry_strength", {}) or {}).items():
+                if resolved_symbol.upper().startswith(key.upper()):
+                    params["osma_strength_min"] = sv.get("osma_strength_min", 0.0)
+                    params["power_strength_min"] = sv.get("power_strength_min", 0.0)
+                    break
         except Exception:
-            return {}
+            pass
+        return params
 
     def _maybe_run_adaptive(self):
         """Run the adaptive intelligence loop in a background thread (non-blocking)."""
@@ -1906,6 +1938,16 @@ class ScalpEngine:
                                         pass
                         except Exception as e:
                             logger.debug(f"reversal signature skip {_b}: {e}")
+
+                # Refresh the learned per-symbol entry-strength floors from the growing
+                # live sample so the confluence gate keeps tightening toward the
+                # strength levels that actually produce reliable entries.
+                if self.entry_strength_learner is not None:
+                    try:
+                        self._entry_strength = self.entry_strength_learner.learn_all(
+                            list(self.adapters.keys()))
+                    except Exception as e:
+                        logger.debug(f"entry-strength refresh skip: {e}")
             except Exception as e:
                 logger.warning(f"adaptive loop error: {e}")
             finally:
@@ -1980,14 +2022,15 @@ class ScalpEngine:
         # Fall back to the weighted ensemble when there's no focused rule OR the
         # current regime doesn't match a pocket (so the symbol still trades and we
         # keep accumulating a learning sample instead of going silent).
+        # ENTRY = OsMA_Confluence ONLY (the proven GoldShark signal). No ensemble
+        # fall-back: the broad grab-bag (BB_Bounce, Stochastic/RSI reversals,
+        # EMA_TrendFollow, MACD_Momentum, CCI) was firing most entries and is exactly
+        # the drift we are removing. If the confluence says hold, we do NOT trade.
         signal = None
-        if config.FOCUSED_MODE:
-            fs = self.registry.get_focused_signal(indicators)
-            if fs is not None and fs.action != "hold":
-                signal = fs
-        if signal is None:
-            signal = self.registry.get_ensemble_signal(indicators, min_agreement=2)
-        if signal.action == "hold":
+        fs = self.registry.get_focused_signal(indicators)
+        if fs is not None and fs.action != "hold":
+            signal = fs
+        if signal is None or signal.action == "hold":
             return
 
         # ── HYBRID whale/order-flow layer (#26/#29/#43) for BTC ──

@@ -155,21 +155,15 @@ def regime_edge_weight(symbol: str, strategy: str, regime: str) -> float:
 # NOT validated — its focused rules stay but the researcher auto-pause governs
 # it (quarantines if it bleeds live).
 FOCUSED_EDGE = {
-    # XAUUSD now trades ONLY the proven 7-indicator confluence (OsMA_Confluence),
-    # the single source of truth in confluence_signal.py. The old grab-bag
-    # (Volume_Breakout/BB_Bounce/CCI_Breakout) is retired: it did not consume the
-    # tuned osma_/ema_/atr_ params, so the optimizer could not validate it (1a/1c).
-    # Re-run edge-discovery/walk-forward before trusting this pocket live.
-    "XAUUSD": [
-        ("OsMA_Confluence", {"trending", "volatile", "ranging", "quiet"}),
-    ],
-    # GER40: unvalidated on M15 (walk-forward inconsistent). Consolidated onto the
-    # SAME confluence implementation as XAUUSD (1b) — the third, lighter-weight
-    # MACD_OsMA_Power_Confluence is deleted so there is ONE confluence everywhere.
-    # Still auto-pause-governed (quarantines if it bleeds live).
-    "GER40": [
-        ("OsMA_Confluence", {"trending", "volatile"}),
-    ],
+    # SOLE ENTRY = OsMA_Confluence (the proven GoldShark signal) for EVERY symbol,
+    # across ALL regimes. There is no ensemble fallback anymore — the OsMA cross +
+    # OsMA acceleration + Bulls/Bears power + EMA-slope confluence is the only way
+    # in. All regimes allowed because GoldShark does not regime-gate the entry; the
+    # signal's own hard gates + learned per-symbol strength thresholds do the
+    # filtering. Bollinger/Stochastic/RSI/CCI/EMA-follow are NOT entries.
+    "XAUUSD": [("OsMA_Confluence", {"trending", "volatile", "ranging", "quiet", "bullish", "bearish", "neutral"})],
+    "BTCUSD": [("OsMA_Confluence", {"trending", "volatile", "ranging", "quiet", "bullish", "bearish", "neutral"})],
+    "GER40":  [("OsMA_Confluence", {"trending", "volatile", "ranging", "quiet", "bullish", "bearish", "neutral"})],
 }
 
 
