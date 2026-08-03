@@ -678,9 +678,28 @@ class ScalpEngine:
                     break
                 if max_cycles and self.cycle >= max_cycles:
                     break
-                time.sleep(config.SCALP_CYCLE_SECONDS)
+                # FAST MANAGEMENT SUB-TICKS (#53 fix): the full entry/learning cycle
+                # runs every SCALP_CYCLE_SECONDS, but OPEN POSITIONS are managed much
+                # more often so a peak->reversal between full cycles is caught. This
+                # is the structural fix for the intra-cycle exit leak: the ratchet /
+                # reversal / trail now get a look every SCALP_MANAGE_SECONDS.
+                self._fast_manage_until(time.time() + config.SCALP_CYCLE_SECONDS)
         finally:
             self.running = False
+
+    def _fast_manage_until(self, deadline: float):
+        """Between full cycles, run manage-open-positions + reconcile on a fast tick
+        so intra-cycle peaks are protected (does NOT evaluate new entries or learning)."""
+        every = max(1, config.SCALP_MANAGE_SECONDS)
+        while self.running and time.time() < deadline:
+            time.sleep(min(every, max(0.0, deadline - time.time())))
+            if not (self.open_positions):
+                continue
+            try:
+                self._reconcile_closed()
+                self._manage_open_positions()
+            except Exception as e:
+                logger.debug(f"fast-manage tick error: {e}")
 
     def _apply_control(self):
         """
@@ -1516,7 +1535,23 @@ class ScalpEngine:
                     logger.debug(f"exhaustion exit skip {ticket}: {e}")
             if intent:
                 if "modify_sl" in intent:
-                    adapter.modify_sl(ticket, intent["modify_sl"])
+                    _mres = adapter.modify_sl(ticket, intent["modify_sl"])
+                    if not _mres.ok:
+                        logger.warning(f"SL modify REJECTED {ticket} -> {intent['modify_sl']}: "
+                                       f"{_mres.reason} (retcode={getattr(_mres,'retcode',None)})")
+                        # If this was a PROFIT-PROTECTING ratchet stop we could not place,
+                        # protect the gain by closing outright rather than leaving it exposed.
+                        if st.peak_profit_points >= max(self.trade_manager.retain_arm_points(st),
+                                                        st.atr_points or 0):
+                            _cres = adapter.close(ticket)
+                            if _cres.ok and not _cres.simulated:
+                                logger.info(f"Ratchet fallback CLOSE {ticket}: SL unplaceable, "
+                                            f"protecting {st.peak_profit_points:.0f}pt peak")
+                                self._retire_managed(ticket)
+                                continue
+                    elif not _mres.simulated:
+                        logger.info(f"SL moved {ticket} -> {intent['modify_sl']} "
+                                    f"({intent.get('_tag','trail/ratchet')})")
                 elif "close" in intent:
                     res = adapter.close(ticket)
                     if res.ok and not res.simulated:

@@ -147,6 +147,9 @@ SCALP_CONFIDENCE_MIN = float(os.getenv("SCALP_CONFIDENCE_MIN", "0.45"))  # lower
 SCALP_TARGET_TRADES = int(os.getenv("SCALP_TARGET_TRADES", "100"))       # learning goal
 SCALP_MAX_OPEN_PER_SYMBOL = int(os.getenv("SCALP_MAX_OPEN_PER_SYMBOL", "1"))
 SCALP_CYCLE_SECONDS = int(os.getenv("SCALP_CYCLE_SECONDS", "15"))         # loop cadence
+# #53 exit-leak fix: manage OPEN POSITIONS this often (fast sub-tick between full
+# cycles) so intra-cycle peaks are protected by the ratchet/trail/reversal.
+SCALP_MANAGE_SECONDS = int(os.getenv("SCALP_MANAGE_SECONDS", "2"))
 
 # ─── Multi-Timeframe Alignment ──────────────────────────────────────
 # Before a fast (1m) entry, require that higher timeframes don't clearly oppose
