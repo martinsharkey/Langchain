@@ -1378,6 +1378,10 @@ class ScalpEngine:
                 continue
             price = tick.bid if pos.action == "buy" else tick.ask
             spread_pts = ((tick.ask - tick.bid) / adapter.spec.point) if adapter.spec.point else 0
+            # intra-cycle peak fix: the 15s loop is blind to spikes BETWEEN polls, so
+            # MFE/ratchet would understate the true peak. Pull the real favourable
+            # extreme (tick high/low since last check) so peak tracking sees it.
+            extreme_price = self._favourable_extreme_since(pos, adapter, st) or price
 
             # ── session pre-close handling (15–30 min before close) ──
             if self.sessions.in_preclose_window(pos.base_symbol, lo=15, hi=30):
@@ -1448,7 +1452,8 @@ class ScalpEngine:
 
             intent = self.trade_manager.evaluate(st, price, adapter.spec.point, spread_pts,
                                                  indicators=self._live_indicators(pos.base_symbol, adapter),
-                                                 reversal_signature=self._reversal_signatures.get(pos.base_symbol))
+                                                 reversal_signature=self._reversal_signatures.get(pos.base_symbol),
+                                                 extreme_price=extreme_price)
             # ── #29 proven GoldShark exits, layered over the giveback/trail logic ──
             if intent is None:
                 # 1) WEAK counter-trend trade -> Playbook-A POC target (no trail)
@@ -2276,6 +2281,32 @@ class ScalpEngine:
             self.trades_closed += 1
             logger.info(f"CLOSED {tp.symbol} ticket={ticket} -> {outcome} "
                         f"P&L={profit:.2f} ({exit_reason}) [{self.trades_closed} closed]")
+
+    def _favourable_extreme_since(self, pos, adapter, st):
+        """Return the most FAVOURABLE price seen since the last cycle (the intra-cycle
+        peak the 15s poll would otherwise miss). Buys -> highest bid; sells -> lowest
+        ask, from MT5 ticks since the last check. None if unavailable (caller falls
+        back to the poll price). Uses volume-free COPY_TICKS_ALL; cheap and bounded."""
+        try:
+            import MetaTrader5 as mt5, time as _t
+            last = getattr(st, "_last_tick_ms", None)
+            now_ms = int(_t.time() * 1000)
+            # first check: look back one cycle; thereafter since the last check
+            frm = last if last else now_ms - int(config.SCALP_CYCLE_SECONDS * 1000)
+            ticks = mt5.copy_ticks_range(pos.symbol, frm / 1000.0, now_ms / 1000.0, mt5.COPY_TICKS_ALL)
+            st._last_tick_ms = now_ms
+            if ticks is None or len(ticks) == 0:
+                return None
+            if pos.action == "buy":
+                # favourable = highest bid we could have exited into
+                vals = [float(t["bid"]) for t in ticks if t["bid"] > 0]
+                return max(vals) if vals else None
+            else:
+                vals = [float(t["ask"]) for t in ticks if t["ask"] > 0]
+                return min(vals) if vals else None
+        except Exception as e:
+            logger.debug(f"favourable_extreme skip {pos.ticket}: {e}")
+            return None
 
     def _fetch_deal_result(self, ticket: int, tp: TrackedPosition):
         """

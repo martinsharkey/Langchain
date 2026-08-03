@@ -161,6 +161,23 @@ def test_reversal_tell_is_scale_free_across_symbols():
     assert tell_g == tell_b == "rolling_over", (tell_g, tell_b)
 
 
+def test_intra_cycle_extreme_updates_peak_not_missed():
+    """The 15s poll may show a modest price while a spike happened between polls.
+    peak_profit_points must reflect the intra-cycle EXTREME, not just the poll price."""
+    tm = TradeManager()
+    st = _state(action="buy", entry=2000.0, atr_points=300.0)
+    point = 0.01
+    # poll price only +50 pts, but a spike to +600 pts happened between polls
+    tm.evaluate(st, price=2000.0 + 50 * point, point=point, spread_points=5,
+                extreme_price=2000.0 + 600 * point)
+    assert st.peak_profit_points >= 600, st.peak_profit_points
+    # and the retention ratchet now protects that true peak: a later poll at +200
+    # (< 50% of 600) must trigger the ratchet exit
+    r = tm.evaluate(st, price=2000.0 + 200 * point, point=point, spread_points=5,
+                    extreme_price=2000.0 + 200 * point)
+    assert r and "retention" in str(r.get("close", "")), r
+
+
 if __name__ == "__main__":
     test_retention_ratchet_cuts_after_giving_back_floor()
     test_retention_ratchet_does_not_arm_below_threshold()
@@ -170,4 +187,5 @@ if __name__ == "__main__":
     test_signal_hold_when_momentum_still_supported()
     test_signal_ignored_when_signature_unproven()
     test_reversal_tell_is_scale_free_across_symbols()
+    test_intra_cycle_extreme_updates_peak_not_missed()
     print("reversal + ratchet tests passed")

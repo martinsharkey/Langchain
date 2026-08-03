@@ -75,6 +75,7 @@ class ManagedState:
     peak_indicators: dict = field(default_factory=dict)
     last_indicators: dict = field(default_factory=dict)
     signal_hold: bool = False        # reversal tell says the move still has legs (ride)
+    _last_tick_ms: float = 0.0       # last intra-cycle tick scan (for peak-between-polls)
 
 
 class TradeManager:
@@ -262,7 +263,8 @@ class TradeManager:
     # ── the per-cycle decision ──
     def evaluate(self, st: ManagedState, price: float, point: float,
                  spread_points: float, indicators: Optional[dict] = None,
-                 reversal_signature: Optional[dict] = None) -> Optional[dict]:
+                 reversal_signature: Optional[dict] = None,
+                 extreme_price: Optional[float] = None) -> Optional[dict]:
         """
         Return an intent dict or None. Called each cycle with the live price.
         Distances are in price units; point converts to/from points.
@@ -272,6 +274,10 @@ class TradeManager:
         `reversal_signature` (optional): a PROVEN per-symbol signature dict from the
         research loop. When present, enables a signal-driven exit/hold (gated - the
         engine only passes it once the signature has enough samples).
+        `extreme_price` (optional): the most FAVOURABLE price seen since the last
+        cycle (intra-cycle tick high/low). Fixes the 15s-poll blindness: MFE/peak are
+        updated from this true extreme, while EXIT decisions still use the current
+        `price` (we can only realistically exit at the live price, not a past spike).
         """
         st.point = point or st.point
         _sig_fields = ("macd_line", "macd_histogram", "osma", "bulls_power",
@@ -284,6 +290,20 @@ class TradeManager:
         else:
             profit_points = (st.entry - price) / point if point else 0
             st.best_price = min(st.best_price, price)
+
+        # intra-cycle peak: the true favourable excursion may have happened BETWEEN
+        # polls. Compute peak profit from the tick extreme so MFE + the retention
+        # ratchet are not blind to spikes the 15s loop skipped over.
+        peak_profit_now = profit_points
+        if extreme_price is not None and point:
+            ext_pts = ((extreme_price - st.entry) if st.action == "buy"
+                       else (st.entry - extreme_price)) / point
+            if ext_pts > peak_profit_now:
+                peak_profit_now = ext_pts
+            if st.action == "buy":
+                st.best_price = max(st.best_price, extreme_price)
+            else:
+                st.best_price = min(st.best_price, extreme_price) if st.best_price else extreme_price
 
         v = st.variant
 
@@ -300,12 +320,14 @@ class TradeManager:
         # into profit and is now handing a large fraction of it back, it is a
         # winner rolling into a loser — cut it. The giveback fraction and the
         # minimum peak to arm it are per-symbol, learned/tunable via config.
-        if profit_points > st.peak_profit_points:
-            st.peak_profit_points = profit_points
-            # capture the indicator snapshot AT the new peak (reversal signature)
+        if peak_profit_now > st.peak_profit_points:
+            st.peak_profit_points = peak_profit_now
+            # capture the indicator snapshot AT the new peak (reversal signature).
+            # Note: indicators are the current-bar values; the intra-cycle price
+            # extreme may lead them slightly, which is acceptable for the tell.
             if indicators:
                 st.peak_indicators = {k: indicators.get(k) for k in _sig_fields}
-        st.peak_profit_points = max(st.peak_profit_points, profit_points)
+        st.peak_profit_points = max(st.peak_profit_points, peak_profit_now)
         st.worst_profit_points = min(st.worst_profit_points, profit_points)  # MAE tracking
 
         # ── PROFIT-RETENTION RATCHET (retain what we've earned) ──────────────
