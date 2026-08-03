@@ -186,35 +186,56 @@ class ReversalSignatureAnalyzer:
         return {"analyzed": len(rows), "with_rollover": len(reversals),
                 "signature": self._aggregate(reversals), "reversals": reversals}
 
-    def signature_from_captured(self, symbol_prefix="XAUUSD", limit=200, min_mfe_points=100.0) -> dict:
+    def signature_from_captured(self, symbol_prefix="XAUUSD", limit=200,
+                                min_mfe_points: Optional[float] = None) -> dict:
         """Aggregate the reversal signature from LIVE-CAPTURED snapshots
         (peak_indicators / exit_indicators columns) — no bar reconstruction needed.
         This is the loop-facing method: it works on data the engine already stored.
 
-        Returns per-indicator median deltas entry->peak and peak->exit, plus how
-        often each indicator moved 'back toward neutral' at exit (the reversal tell),
-        and the capture ratio. Empty until enough live trades have closed.
+        SCALE-AWARE / PER-SYMBOL: gold's OsMA/MACD live on a totally different numeric
+        scale than BTCUSD's, so we NEVER compare raw indicator units across symbols.
+        Everything here is measured within THIS symbol and expressed scale-free:
+          * momentum magnitudes (osma, macd_line, macd_histogram, bulls/bears) are
+            normalized by the trade's own ATR at peak -> `_atr` variants;
+          * the reversal 'tell' is a RATIO (exit magnitude / peak magnitude), so it is
+            unit-free and directly comparable across symbols and learnable per symbol;
+          * `min_mfe_points` auto-scales to the symbol's median MFE when not given.
+
+        Returns, per indicator: how reliably it shrinks toward neutral at exit
+        (`shrank_toward_neutral_pct`), the symbol's OWN median retained fraction
+        (`median_retained_frac` = |exit|/|peak|), and the ATR-normalized peak
+        magnitude the symbol typically reaches (`median_peak_over_atr`). Empty until
+        enough live trades close.
         """
         import sqlite3, json
         conn = sqlite3.connect(self.db.db_path)
         conn.row_factory = sqlite3.Row
         rows = [dict(r) for r in conn.execute(
-            "SELECT id, action, mfe_points, exit_points, indicators_snapshot, "
+            "SELECT id, action, mfe_points, exit_points, atr_value, indicators_snapshot, "
             "peak_indicators, exit_indicators FROM trades "
             "WHERE symbol LIKE ? AND outcome IN ('win','loss','breakeven') "
             "AND (data_source IS NULL OR data_source<>'SIMULATED_OHLC') "
-            "AND peak_indicators IS NOT NULL AND mfe_points >= ? "
+            "AND peak_indicators IS NOT NULL "
             "ORDER BY id DESC LIMIT ?",
-            (symbol_prefix + "%", min_mfe_points, limit)).fetchall()]
+            (symbol_prefix + "%", limit)).fetchall()]
         conn.close()
 
-        entry_peak = {f: [] for f in _FIELDS}
-        peak_exit = {f: [] for f in _FIELDS}
+        # auto-scale the MFE filter to THIS symbol (median of what it actually reaches)
+        mfes = [r["mfe_points"] for r in rows if (r["mfe_points"] or 0) > 0]
+        if min_mfe_points is None:
+            min_mfe_points = (statistics.median(mfes) * 0.5) if mfes else 0.0
+
+        # momentum fields we normalize by ATR; RSI is already 0-100 (scale-free-ish)
+        _MOM = ("osma", "macd_line", "macd_histogram", "bulls_power", "bears_power")
+
+        retained_frac = {f: [] for f in _FIELDS}     # |exit|/|peak| — the scale-free tell
+        peak_over_atr = {f: [] for f in _MOM}         # peak magnitude / ATR — per-symbol scale
         rollover_tell = {f: 0 for f in _FIELDS}
         n = 0
         for r in rows:
+            if (r["mfe_points"] or 0) < min_mfe_points:
+                continue
             try:
-                entry = json.loads(r["indicators_snapshot"]) if r["indicators_snapshot"] else {}
                 peak = json.loads(r["peak_indicators"]) if r["peak_indicators"] else {}
                 ex = json.loads(r["exit_indicators"]) if r["exit_indicators"] else {}
             except Exception:
@@ -222,30 +243,39 @@ class ReversalSignatureAnalyzer:
             if not peak:
                 continue
             n += 1
+            atr = float(r["atr_value"] or 0) or (peak.get("atr") or 0) or 0
             for f in _FIELDS:
-                if entry.get(f) is not None and peak.get(f) is not None:
-                    entry_peak[f].append(peak[f] - entry[f])
-                if peak.get(f) is not None and ex.get(f) is not None:
-                    peak_exit[f].append(ex[f] - peak[f])
-                    if abs(ex[f]) < abs(peak[f]):
-                        rollover_tell[f] += 1
+                pv, xv = peak.get(f), ex.get(f)
+                if pv is not None and xv is not None:
+                    pk, lv = abs(float(pv)), abs(float(xv))
+                    if pk > 1e-9:
+                        retained_frac[f].append(lv / pk)     # scale-free
+                        if lv < pk:
+                            rollover_tell[f] += 1
+                if f in _MOM and pv is not None and atr > 0:
+                    peak_over_atr[f].append(abs(float(pv)) / atr)
 
         def med(xs):
             return round(statistics.median(xs), 4) if xs else None
 
         sig = {}
         for f in _FIELDS:
-            k = len(peak_exit[f])
+            k = len(retained_frac[f])
             sig[f] = {
-                "entry_to_peak_median": med(entry_peak[f]),
-                "peak_to_exit_median": med(peak_exit[f]),
+                # the symbol's OWN average reversal depth (scale-free)
+                "median_retained_frac": med(retained_frac[f]),
                 "shrank_toward_neutral_pct": round(rollover_tell[f] / k * 100, 0) if k else None,
+                # per-symbol scale of the momentum peak (how big is 'big' for this symbol)
+                "median_peak_over_atr": med(peak_over_atr.get(f, [])) if f in _MOM else None,
                 "n": k,
             }
         caps = [ (r["exit_points"] / r["mfe_points"])
                  for r in rows if (r["mfe_points"] or 0) > 5 and r["exit_points"] is not None ]
         sig["_meta"] = {
+            "symbol": symbol_prefix,
             "n_trades": n,
+            "min_mfe_points_used": round(min_mfe_points, 1),
+            "median_mfe_points": round(statistics.median(mfes), 1) if mfes else None,
             "median_capture_ratio": round(statistics.median(caps), 3) if caps else None,
             "left_on_table_pct": round((1 - statistics.median(caps)) * 100, 0) if caps else None,
         }

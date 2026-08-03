@@ -187,23 +187,19 @@ class TradeManager:
 
     def _reversal_tell(self, st, live: dict, signature: dict) -> str:
         """Classify the live momentum state vs the MFE peak snapshot, guided by the
-        PROVEN per-symbol reversal signature.
+        PROVEN, PER-SYMBOL reversal signature.
 
-        Returns:
-          'rolling_over'    — momentum has shrunk meaningfully toward neutral from
-                              the peak (the signature's exit tell) -> consider exit.
-          'still_supported' — momentum is still near its peak magnitude in our
-                              favour -> hold/ride.
-          'neutral'         — no confident call.
+        Scale-free by construction: it compares the RATIO (live magnitude / peak
+        magnitude) for each momentum indicator against the thresholds the bot has
+        LEARNED for THIS symbol (`median_retained_frac`). Gold and BTCUSD have wildly
+        different raw OsMA/MACD scales, so we never use absolute values — only each
+        symbol's own learned reversal depth.
 
-        Uses OsMA + MACD histogram magnitude (the confluence's momentum core). The
-        signature must show that shrink-toward-neutral is a RELIABLE tell (>=60% of
-        past trades) before we trust it, so this can't act on noise.
+        Returns 'rolling_over' | 'still_supported' | 'neutral'.
         """
         peak = st.peak_indicators or {}
         if not peak or not live:
             return "neutral"
-        # only trust indicators whose signature says they reliably shrink at exit
         reliable = []
         for f in ("osma", "macd_histogram"):
             s = signature.get(f) or {}
@@ -218,9 +214,15 @@ class TradeManager:
             if pk <= 1e-9:
                 continue
             ratio = lv / pk
-            if ratio <= 0.5:      # lost >=50% of peak momentum magnitude -> rolling over
+            # per-symbol learned reversal depth: the symbol's median retained fraction
+            # at exit. 'rolling over' = we've dropped BELOW that learned retention
+            # (momentum has unwound more than this symbol typically does before exit).
+            learned_ret = (signature.get(f) or {}).get("median_retained_frac")
+            roll_thr = learned_ret if learned_ret is not None else 0.5
+            hold_thr = min(0.95, max(roll_thr + 0.25, 0.85))
+            if ratio <= roll_thr:
                 shrunk += 1
-            elif ratio >= 0.85:   # still near peak momentum -> supported
+            elif ratio >= hold_thr:
                 held += 1
         if shrunk >= 1 and shrunk >= held:
             return "rolling_over"

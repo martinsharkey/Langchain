@@ -1805,18 +1805,20 @@ class ScalpEngine:
                                 logger.info(f"[REVERSAL] {_b}: capture "
                                             f"{meta.get('median_capture_ratio')} "
                                             f"({meta.get('left_on_table_pct')}% left); "
-                                            f"osma peak->exit {sig.get('osma',{}).get('peak_to_exit_median')}, "
-                                            f"macd_hist shrink {sig.get('macd_histogram',{}).get('shrank_toward_neutral_pct')}%")
+                                            f"osma retain {sig.get('osma',{}).get('median_retained_frac')} "
+                                            f"(shrinks {sig.get('osma',{}).get('shrank_toward_neutral_pct')}%), "
+                                            f"peak/ATR {sig.get('osma',{}).get('median_peak_over_atr')}")
                                 if self.knowledge_store is not None:
                                     try:
                                         self.knowledge_store.remember(
                                             key=f"reversal_signature_{_b.upper()}", kind="finding",
                                             topic="exit_signature",
-                                            text=(f"{_b} reversal signature (n={meta.get('n_trades')}): "
-                                                  f"capture {meta.get('median_capture_ratio')}, "
-                                                  f"osma peak->exit median {sig.get('osma',{}).get('peak_to_exit_median')}, "
-                                                  f"macd_hist shrank-toward-neutral {sig.get('macd_histogram',{}).get('shrank_toward_neutral_pct')}% "
-                                                  f"of trades, rsi peak->exit {sig.get('rsi',{}).get('peak_to_exit_median')}."))
+                                            text=(f"{_b} per-symbol reversal signature (n={meta.get('n_trades')}, "
+                                                  f"scale-free): capture {meta.get('median_capture_ratio')}, "
+                                                  f"osma median retained-at-exit {sig.get('osma',{}).get('median_retained_frac')} "
+                                                  f"(shrinks toward neutral {sig.get('osma',{}).get('shrank_toward_neutral_pct')}% of trades), "
+                                                  f"osma peak magnitude ~{sig.get('osma',{}).get('median_peak_over_atr')}xATR, "
+                                                  f"macd_hist retained {sig.get('macd_histogram',{}).get('median_retained_frac')}."))
                                     except Exception:
                                         pass
                         except Exception as e:
