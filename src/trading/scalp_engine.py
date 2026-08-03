@@ -2223,9 +2223,16 @@ class ScalpEngine:
         tp = round(tp, spec.digits)
 
         # which strategies agreed (for learning attribution)
-        combo = [n for n, s in self.registry.run_all_strategies(indicators)
-                 if s.action == signal.action]
-        combo_str = ",".join(combo)
+        # ATTRIBUTION: the entry IS OsMA_Confluence (the sole signal). `also_agreed`
+        # is only informational context (which other indicators happened to align);
+        # it must NOT masquerade as the entry strategy in the learning data.
+        entry_strategy = (signal.metadata or {}).get("strategy", "OsMA_Confluence") \
+            if hasattr(signal, "metadata") else "OsMA_Confluence"
+        also_agreed = [n for n, s in self.registry.run_all_strategies(indicators)
+                       if s.action == signal.action]
+        combo = [entry_strategy]
+        combo_str = entry_strategy + (" (+" + ",".join(a for a in also_agreed
+                     if a != entry_strategy) + ")" if also_agreed else "")
 
         comment = f"scalp-{signal.action[:1]}-{base[:6]}"
         # Broker-side SL is mandatory — never place a naked position (esp. gold).
