@@ -75,7 +75,7 @@ class ManagedState:
     peak_indicators: dict = field(default_factory=dict)
     last_indicators: dict = field(default_factory=dict)
     signal_hold: bool = False        # reversal tell says the move still has legs (ride)
-    _last_tick_ms: float = 0.0       # last intra-cycle tick scan (for peak-between-polls)
+    _last_tick_srv: float = 0.0      # last intra-cycle tick scan in SERVER time (peak-between-polls)
 
 
 class TradeManager:

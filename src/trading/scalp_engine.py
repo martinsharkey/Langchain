@@ -2362,25 +2362,41 @@ class ScalpEngine:
 
     def _favourable_extreme_since(self, pos, adapter, st):
         """Return the most FAVOURABLE price seen since the last cycle (the intra-cycle
-        peak the 15s poll would otherwise miss). Buys -> highest bid; sells -> lowest
-        ask, from MT5 ticks since the last check. None if unavailable (caller falls
-        back to the poll price). Uses volume-free COPY_TICKS_ALL; cheap and bounded."""
+        peak the poll would otherwise miss). Buys -> highest bid; sells -> lowest ask.
+
+        HARDENED (#53): copy_ticks_range takes SERVER time, but a naive local-epoch
+        window pulled the WRONG ticks and produced phantom peaks (e.g. MFE 1795pts on
+        a trade whose MAE was only -9 — physically impossible). We now (a) time the
+        window in SERVER seconds via the symbol's own last tick, and (b) REJECT any
+        extreme that is more than a sane bound (a few ATR) beyond the current price,
+        so bad/whipsaw ticks cannot inflate MFE. Returns None -> caller uses poll price.
+        """
         try:
-            import MetaTrader5 as mt5, time as _t
-            last = getattr(st, "_last_tick_ms", None)
-            now_ms = int(_t.time() * 1000)
-            # first check: look back one cycle; thereafter since the last check
-            frm = last if last else now_ms - int(config.SCALP_CYCLE_SECONDS * 1000)
-            ticks = mt5.copy_ticks_range(pos.symbol, frm / 1000.0, now_ms / 1000.0, mt5.COPY_TICKS_ALL)
-            st._last_tick_ms = now_ms
+            import MetaTrader5 as mt5
+            tick = adapter.live_tick()
+            if tick is None or not adapter.spec or not adapter.spec.point:
+                return None
+            point = adapter.spec.point
+            cur = tick.bid if pos.action == "buy" else tick.ask
+            # server-timed window from the live tick (avoids local/server offset bug)
+            now_srv = float(tick.time)
+            last = getattr(st, "_last_tick_srv", None)
+            frm = last if last else now_srv - config.SCALP_CYCLE_SECONDS
+            st._last_tick_srv = now_srv
+            ticks = mt5.copy_ticks_range(pos.symbol, frm, now_srv + 1, mt5.COPY_TICKS_ALL)
             if ticks is None or len(ticks) == 0:
                 return None
+            # sane bound: a real favourable tick can't be more than a few ATR beyond
+            # the CURRENT price; anything past that is a feed artifact / bad tick.
+            atr_pts = st.atr_points or 0
+            max_move = (atr_pts * 3.0) * point if atr_pts else None
             if pos.action == "buy":
-                # favourable = highest bid we could have exited into
-                vals = [float(t["bid"]) for t in ticks if t["bid"] > 0]
+                vals = [float(t["bid"]) for t in ticks if t["bid"] > 0
+                        and (max_move is None or (t["bid"] - cur) <= max_move)]
                 return max(vals) if vals else None
             else:
-                vals = [float(t["ask"]) for t in ticks if t["ask"] > 0]
+                vals = [float(t["ask"]) for t in ticks if t["ask"] > 0
+                        and (max_move is None or (cur - t["ask"]) <= max_move)]
                 return min(vals) if vals else None
         except Exception as e:
             logger.debug(f"favourable_extreme skip {pos.ticket}: {e}")
