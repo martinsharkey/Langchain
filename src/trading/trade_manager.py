@@ -67,6 +67,14 @@ class ManagedState:
     peak_osma_abs: float = 0.0       # best |OsMA| seen
     weak_trade: bool = False         # counter-trend "Weak" trade (Playbook A: POC target, no trail)
     poc_target: float = 0.0          # Point-of-Control / balance-area target for weak trades
+    # Reversal-signature capture (exit research): the indicator snapshot AT the MFE
+    # peak, plus the live indicators dict, so we can compare entry vs peak vs the
+    # roll-over WITHOUT reconstructing bars. Populated by evaluate() when a new peak
+    # is set and each cycle; persisted on close by the engine.
+    entry_indicators: dict = field(default_factory=dict)
+    peak_indicators: dict = field(default_factory=dict)
+    last_indicators: dict = field(default_factory=dict)
+    signal_hold: bool = False        # reversal tell says the move still has legs (ride)
 
 
 class TradeManager:
@@ -144,6 +152,82 @@ class TradeManager:
         # default: ~1.5x the typical move on the entry timeframe (was 0.5x)
         return (st.atr_points or 60) * mult
 
+    def retain_floor_frac(self, st) -> float:
+        """
+        The PROFIT-RETENTION RATCHET floor: the minimum fraction of the peak profit
+        a trade must keep once the ratchet arms. Distinct from (and tighter than)
+        giveback_fraction — this is a hard "don't hand the move back" guard, tuned
+        from the observed leak (gold peaked £5+ then round-tripped). Higher = keep
+        more. Learned per symbol; sensible default otherwise.
+        """
+        p = self._personality(st)
+        if "retain_floor_frac" in p:
+            return min(max(float(p["retain_floor_frac"]), 0.3), 0.9)
+        try:
+            from src import config
+            return config.SCALP_RETAIN_FLOOR_FRAC
+        except Exception:
+            return 0.5
+
+    def retain_arm_points(self, st) -> float:
+        """
+        Peak profit (points) before the retention ratchet activates. Armed EARLIER
+        than the giveback guard (which waits 1.5*ATR) so we start protecting profit
+        as soon as a trade has a real buffer, not only after it is already huge.
+        """
+        p = self._personality(st)
+        if "retain_arm_points" in p:
+            return float(p["retain_arm_points"])
+        try:
+            from src import config
+            mult = config.SCALP_RETAIN_ARM_ATR
+        except Exception:
+            mult = 0.8
+        return (st.atr_points or 60) * mult
+
+    def _reversal_tell(self, st, live: dict, signature: dict) -> str:
+        """Classify the live momentum state vs the MFE peak snapshot, guided by the
+        PROVEN per-symbol reversal signature.
+
+        Returns:
+          'rolling_over'    — momentum has shrunk meaningfully toward neutral from
+                              the peak (the signature's exit tell) -> consider exit.
+          'still_supported' — momentum is still near its peak magnitude in our
+                              favour -> hold/ride.
+          'neutral'         — no confident call.
+
+        Uses OsMA + MACD histogram magnitude (the confluence's momentum core). The
+        signature must show that shrink-toward-neutral is a RELIABLE tell (>=60% of
+        past trades) before we trust it, so this can't act on noise.
+        """
+        peak = st.peak_indicators or {}
+        if not peak or not live:
+            return "neutral"
+        # only trust indicators whose signature says they reliably shrink at exit
+        reliable = []
+        for f in ("osma", "macd_histogram"):
+            s = signature.get(f) or {}
+            pct = s.get("shrank_toward_neutral_pct")
+            if pct is not None and pct >= 60 and peak.get(f) is not None and live.get(f) is not None:
+                reliable.append(f)
+        if not reliable:
+            return "neutral"
+        shrunk = held = 0
+        for f in reliable:
+            pk = abs(peak[f]); lv = abs(live[f])
+            if pk <= 1e-9:
+                continue
+            ratio = lv / pk
+            if ratio <= 0.5:      # lost >=50% of peak momentum magnitude -> rolling over
+                shrunk += 1
+            elif ratio >= 0.85:   # still near peak momentum -> supported
+                held += 1
+        if shrunk >= 1 and shrunk >= held:
+            return "rolling_over"
+        if held >= 1 and held > shrunk:
+            return "still_supported"
+        return "neutral"
+
     # ── variant assignment (learning biases this over time) ──
     def assign_variant(self, symbol: str) -> str:
         weights = None
@@ -175,12 +259,23 @@ class TradeManager:
 
     # ── the per-cycle decision ──
     def evaluate(self, st: ManagedState, price: float, point: float,
-                 spread_points: float) -> Optional[dict]:
+                 spread_points: float, indicators: Optional[dict] = None,
+                 reversal_signature: Optional[dict] = None) -> Optional[dict]:
         """
         Return an intent dict or None. Called each cycle with the live price.
         Distances are in price units; point converts to/from points.
+
+        `indicators` (optional): the live indicator snapshot, used to capture the
+        reversal signature at the MFE peak (entry vs peak vs rollover research).
+        `reversal_signature` (optional): a PROVEN per-symbol signature dict from the
+        research loop. When present, enables a signal-driven exit/hold (gated - the
+        engine only passes it once the signature has enough samples).
         """
         st.point = point or st.point
+        _sig_fields = ("macd_line", "macd_histogram", "osma", "bulls_power",
+                       "bears_power", "rsi", "atr")
+        if indicators:
+            st.last_indicators = {k: indicators.get(k) for k in _sig_fields}
         if st.action == "buy":
             profit_points = (price - st.entry) / point if point else 0
             st.best_price = max(st.best_price, price)
@@ -203,11 +298,63 @@ class TradeManager:
         # into profit and is now handing a large fraction of it back, it is a
         # winner rolling into a loser — cut it. The giveback fraction and the
         # minimum peak to arm it are per-symbol, learned/tunable via config.
+        if profit_points > st.peak_profit_points:
+            st.peak_profit_points = profit_points
+            # capture the indicator snapshot AT the new peak (reversal signature)
+            if indicators:
+                st.peak_indicators = {k: indicators.get(k) for k in _sig_fields}
         st.peak_profit_points = max(st.peak_profit_points, profit_points)
         st.worst_profit_points = min(st.worst_profit_points, profit_points)  # MAE tracking
+
+        # ── PROFIT-RETENTION RATCHET (retain what we've earned) ──────────────
+        # The observed leak: gold trades reached large peaks (e.g. 700+ pts / £5)
+        # then round-tripped almost entirely because the giveback guard below only
+        # arms at 1.5*ATR and tolerates 60-90% giveback. This ratchet fires FIRST
+        # and is absolute: once a trade has banked a meaningful peak, it must not
+        # surrender more than `retain_floor_frac` of that peak. It only ever tightens
+        # (a ratchet), it never loosens, so winners still run — they just can't give
+        # the whole move back. Tunable per symbol via config; ATR-scaled arm so it
+        # is symbol-agnostic (gold's big ATR and FX's small ATR both work). It also
+        # requires a real absolute buffer (>= 1*ATR of peak) so tiny winners that
+        # never built a meaningful cushion are left for the trail/giveback, not
+        # scratched by the ratchet.
+        ratchet_arm = max(self.retain_arm_points(st), (st.atr_points or 0), spread_points + 20)
+        if st.peak_profit_points >= ratchet_arm and profit_points > 0:
+            retain_frac = self.retain_floor_frac(st)          # e.g. 0.5 -> keep >=50% of peak
+            floor_points = st.peak_profit_points * retain_frac
+            if profit_points <= floor_points:
+                self._log(st, "retention_ratchet_exit", price)
+                return {"close": (f"profit retention: banked {st.peak_profit_points:.0f}pts peak, "
+                                  f"protecting {retain_frac:.0%} floor ({floor_points:.0f}pts), "
+                                  f"now {profit_points:.0f}pts")}
+
+        # ── SIGNAL-DRIVEN EXIT / HOLD (gated: only when a proven signature exists) ──
+        # Our confluence indicators are strong for ENTRY; the reversal-signature
+        # research measures whether they also mark the EXIT (indicators turning back
+        # toward neutral at the peak). When the engine passes a proven signature AND
+        # the trade is in real profit, we use the LIVE indicators two ways:
+        #   * EXIT earlier than the blind giveback if the tell is firing (momentum
+        #     rolling over) and we have already captured a decent chunk of the peak.
+        #   * HOLD (loosen giveback) if the indicators still strongly support our
+        #     direction — this is how we ride runners instead of scratching a dip.
+        # It never overrides the retention ratchet (the floor) above.
+        st.signal_hold = False
+        if reversal_signature and indicators and profit_points > 0 \
+                and st.peak_profit_points >= max(self.giveback_arm_points(st) * 0.6, spread_points + 20):
+            tell = self._reversal_tell(st, indicators, reversal_signature)
+            if tell == "rolling_over" and profit_points >= 0.5 * st.peak_profit_points:
+                self._log(st, "signal_reversal_exit", price)
+                return {"close": (f"reversal signal: momentum turning at "
+                                  f"{profit_points:.0f}/{st.peak_profit_points:.0f}pts peak")}
+            elif tell == "still_supported":
+                st.signal_hold = True
+
         arm_peak = max(self.giveback_arm_points(st), spread_points + 15)
         if st.peak_profit_points >= arm_peak and profit_points > 0:
             giveback_frac = self.giveback_fraction(st)
+            # signal-supported hold: the reversal tell says the move still has legs
+            if getattr(st, "signal_hold", False):
+                giveback_frac = min(giveback_frac + 0.2, 0.9)
             # ride mode: if aligned with the higher-TF trend, tolerate more giveback
             if st.trend_aligned:
                 giveback_frac = min(giveback_frac + 0.2, 0.9)

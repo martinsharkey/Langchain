@@ -338,6 +338,22 @@ class ScalpEngine:
             logger.warning(f"pattern matcher unavailable: {e}")
             self.pattern_matcher = None
 
+        # Reversal-signature analyzer — measures whether the confluence indicators
+        # reliably turn at the MFE peak (signal-driven exit/hold research). Reads
+        # the live-captured peak/exit snapshots; stores the per-symbol signature.
+        try:
+            from src.learning.reversal_signature import ReversalSignatureAnalyzer
+            self.reversal_analyzer = ReversalSignatureAnalyzer(
+                self.experience_db,
+                point_fn=lambda s: (self.adapters[s].spec.point
+                                    if s in self.adapters and self.adapters[s].spec else
+                                    (0.01 if "XAU" in s.upper() else 0.0001)))
+            self._reversal_signatures = {}   # base_symbol -> latest signature dict
+        except Exception as e:
+            logger.warning(f"reversal analyzer unavailable: {e}")
+            self.reversal_analyzer = None
+            self._reversal_signatures = {}
+
         # HTF context — multi-timeframe alignment for ENTRY + trade MANAGEMENT.
         # Every symbol (incl. gold) now "sees" M5/M15/M30/H1 to survive wicks when
         # HTF still aligns, and to cut when HTF momentum genuinely reverses.
@@ -1327,6 +1343,14 @@ class ScalpEngine:
                     pass
                 st = self.trade_manager.register(pos, atr_points=atr_pts,
                                                  trend_aligned=trend_aligned)
+                # reversal-signature: remember the entry indicator snapshot so the
+                # manager/analyzer can compare entry -> peak -> rollover live.
+                try:
+                    st.entry_indicators = {k: pos.indicators.get(k) for k in
+                                           ("macd_line", "macd_histogram", "osma", "bulls_power",
+                                            "bears_power", "rsi", "atr")} if pos.indicators else {}
+                except Exception:
+                    st.entry_indicators = {}
                 # #29 Playbook-A: a COUNTER-TREND (not HTF-aligned) trade is "weak"
                 # -> target the nearest balance-area POC and disable trailing. Use
                 # the recent support/resistance as a POC proxy from live indicators.
@@ -1422,7 +1446,9 @@ class ScalpEngine:
                                         f"to survive wick (HTF still aligned)")
                         continue
 
-            intent = self.trade_manager.evaluate(st, price, adapter.spec.point, spread_pts)
+            intent = self.trade_manager.evaluate(st, price, adapter.spec.point, spread_pts,
+                                                 indicators=self._live_indicators(pos.base_symbol, adapter),
+                                                 reversal_signature=self._reversal_signatures.get(pos.base_symbol))
             # ── #29 proven GoldShark exits, layered over the giveback/trail logic ──
             if intent is None:
                 # 1) WEAK counter-trend trade -> Playbook-A POC target (no trail)
@@ -1765,6 +1791,36 @@ class ScalpEngine:
                                         pass
                     except Exception as e:
                         logger.debug(f"onnx train skip: {e}")
+
+                # Reversal-signature: measure whether the confluence indicators turn
+                # at the MFE peak (from live-captured snapshots). Store per symbol so
+                # the (gated) signal-driven exit can use it once it is proven.
+                if self.reversal_analyzer is not None:
+                    for _b in list(self.adapters.keys()):
+                        try:
+                            sig = self.reversal_analyzer.signature_from_captured(_b)
+                            meta = sig.get("_meta", {}) if sig else {}
+                            if meta.get("n_trades", 0) >= 20:
+                                self._reversal_signatures[_b] = sig
+                                logger.info(f"[REVERSAL] {_b}: capture "
+                                            f"{meta.get('median_capture_ratio')} "
+                                            f"({meta.get('left_on_table_pct')}% left); "
+                                            f"osma peak->exit {sig.get('osma',{}).get('peak_to_exit_median')}, "
+                                            f"macd_hist shrink {sig.get('macd_histogram',{}).get('shrank_toward_neutral_pct')}%")
+                                if self.knowledge_store is not None:
+                                    try:
+                                        self.knowledge_store.remember(
+                                            key=f"reversal_signature_{_b.upper()}", kind="finding",
+                                            topic="exit_signature",
+                                            text=(f"{_b} reversal signature (n={meta.get('n_trades')}): "
+                                                  f"capture {meta.get('median_capture_ratio')}, "
+                                                  f"osma peak->exit median {sig.get('osma',{}).get('peak_to_exit_median')}, "
+                                                  f"macd_hist shrank-toward-neutral {sig.get('macd_histogram',{}).get('shrank_toward_neutral_pct')}% "
+                                                  f"of trades, rsi peak->exit {sig.get('rsi',{}).get('peak_to_exit_median')}."))
+                                    except Exception:
+                                        pass
+                        except Exception as e:
+                            logger.debug(f"reversal signature skip {_b}: {e}")
             except Exception as e:
                 logger.warning(f"adaptive loop error: {e}")
             finally:
@@ -2164,10 +2220,13 @@ class ScalpEngine:
             _mae = round(_mst.worst_profit_points, 1) if _mst else None
             _exit_pts = None
             try:
-                if _mst and tp.spec and tp.spec.point:
-                    _exit_pts = round((exit_price - tp.entry) / tp.spec.point
+                _adp = self.adapters.get(tp.base_symbol)
+                _pt = _adp.spec.point if (_adp and _adp.spec) else None
+                if _pt:
+                    _exit_pts = round((exit_price - tp.entry_price) / _pt
                                       * (1 if tp.action == "buy" else -1), 1)
-            except Exception:
+            except Exception as e:
+                logger.debug(f"exit_points calc skip {ticket}: {e}")
                 _exit_pts = None
 
             # feed realized P&L to the risk manager (drives the daily-loss halt)
@@ -2183,6 +2242,15 @@ class ScalpEngine:
                         profit_loss=profit, exit_price=exit_price, exit_reason=exit_reason,
                         mfe_points=_mfe, mae_points=_mae, exit_points=_exit_pts,
                     )
+                    # reversal-signature: persist indicator snapshots at peak/exit
+                    try:
+                        if _mst is not None:
+                            self.experience_db.update_trade_signature(
+                                trade_id=tp.db_trade_id,
+                                peak_indicators=getattr(_mst, "peak_indicators", None) or None,
+                                exit_indicators=getattr(_mst, "last_indicators", None) or None)
+                    except Exception as e:
+                        logger.debug(f"signature persist skip: {e}")
                 except Exception as e:
                     logger.warning(f"update_trade_outcome failed: {e}")
 

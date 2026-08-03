@@ -133,6 +133,13 @@ SCALP_GIVEBACK_FRAC = float(os.getenv("SCALP_GIVEBACK_FRAC", "0.6"))
 # arms. Realised data showed arming at 0.5*ATR cut winners into scratches
 # (only 5 TP hits vs 198 early closes); 1.5*ATR lets trades reach TP.
 SCALP_GIVEBACK_ARM_ATR = float(os.getenv("SCALP_GIVEBACK_ARM_ATR", "1.5"))
+# PROFIT-RETENTION RATCHET (fixes the observed leak: gold trades hit £5+ then
+# round-tripped). Once peak profit >= SCALP_RETAIN_ARM_ATR * ATR, the trade must
+# keep at least SCALP_RETAIN_FLOOR_FRAC of that peak — an absolute, ratcheting
+# floor that fires BEFORE the looser giveback guard. Arms earlier (0.8*ATR) and
+# protects harder (keep >=50%) so winners still run but can't hand the move back.
+SCALP_RETAIN_FLOOR_FRAC = float(os.getenv("SCALP_RETAIN_FLOOR_FRAC", "0.5"))
+SCALP_RETAIN_ARM_ATR = float(os.getenv("SCALP_RETAIN_ARM_ATR", "0.8"))
 # FOCUSED mode: trade only validated high-edge (strategy x regime) pockets
 # instead of the broad ensemble vote. Backtest: PF 1.24 vs 1.04.
 FOCUSED_MODE = os.getenv("FOCUSED_MODE", "true").lower() in ("true", "1", "yes")

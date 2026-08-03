@@ -198,6 +198,13 @@ class ExperienceDatabase:
         # from training). Existing rows are all live-collected -> backfill LIVE_MICRO.
         if "data_source" not in cols:
             adds.append("ALTER TABLE trades ADD COLUMN data_source TEXT")
+        # Reversal-signature research: JSON snapshots of the confluence indicators at
+        # ENTRY vs the MFE PEAK vs the last seen bar, so we can learn whether the
+        # indicators reliably turn at the peak (signal-driven exit/hold).
+        if "peak_indicators" not in cols:
+            adds.append("ALTER TABLE trades ADD COLUMN peak_indicators TEXT")
+        if "exit_indicators" not in cols:
+            adds.append("ALTER TABLE trades ADD COLUMN exit_indicators TEXT")
         for sql in adds:
             try:
                 cur.execute(sql)
@@ -485,6 +492,23 @@ class ExperienceDatabase:
         conn.close()
         
         logger.info(f"Updated trade #{trade_id}: {outcome} (${profit_loss:.2f})")
+
+    def update_trade_signature(self, trade_id: int, peak_indicators: Optional[dict] = None,
+                               exit_indicators: Optional[dict] = None):
+        """Persist the reversal-signature snapshots (indicators at MFE peak / at exit)
+        for a closed trade. Safe no-op if both are empty."""
+        if not peak_indicators and not exit_indicators:
+            return
+        try:
+            conn = sqlite3.connect(self.db_path)
+            conn.execute(
+                "UPDATE trades SET peak_indicators = COALESCE(?, peak_indicators), "
+                "exit_indicators = COALESCE(?, exit_indicators) WHERE id = ?",
+                (json.dumps(peak_indicators) if peak_indicators else None,
+                 json.dumps(exit_indicators) if exit_indicators else None, trade_id))
+            conn.commit(); conn.close()
+        except Exception as e:
+            logger.debug(f"update_trade_signature skip #{trade_id}: {e}")
 
     def get_pending_trades(self) -> list[dict]:
         """All trades still marked pending (for DB-driven reconciliation)."""
