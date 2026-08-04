@@ -70,6 +70,7 @@ def run(minutes=30, interval=20):
     base_max = conn.execute("SELECT COALESCE(MAX(id),0) FROM trades").fetchone()[0]
     conn.close()
     seen_closed = set()
+    seen_dec = set()   # dedup entry-decision log lines
     # per-ticket running peak/trough as WE observe it (independent of the engine)
     track = {}   # ticket -> {peak_pts, trough_pts, first_seen, entry, action}
 
@@ -99,6 +100,27 @@ def run(minutes=30, interval=20):
                 emit({"event": "open_position", **p})
         elif pos:
             emit({"event": "mt5_error", "detail": pos})
+
+        # 1b) ENTRY DECISIONS from the log tail: WHY it traded (OPENED) or held
+        # ([ENTRY-HOLD]) + the learned recipes — so we see if entry is choked.
+        try:
+            import glob as _g
+            logs = _g.glob(os.path.join("logs", "trading_bot_*.log"))
+            if logs:
+                newest = max(logs, key=os.path.getmtime)
+                with open(newest, encoding="utf-8", errors="ignore") as lf:
+                    tail = lf.readlines()[-120:]
+                for ln in tail:
+                    for tag in ("OPENED ", "[ENTRY-HOLD]", "[ENTRY-QUALITY]", "over-extended",
+                                "weak dominant", "low runway", "not accelerating"):
+                        if tag in ln:
+                            key = ln.strip()[-160:]
+                            if key not in seen_dec:
+                                seen_dec.add(key)
+                                emit({"event": "entry_decision", "line": ln.strip()[-200:]})
+                            break
+        except Exception as e:
+            emit({"event": "log_tail_error", "detail": str(e)})
 
         # 2) newly closed trades from the DB (join realised outcome)
         try:
