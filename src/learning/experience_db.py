@@ -149,6 +149,26 @@ class ExperienceDatabase:
         return (f" AND {col_login}=? AND {col_server}=?",
                 [acct["login"], acct.get("server")])
 
+    def learning_window_clause(self, alias: str = ""):
+        """Return (sql_fragment, params) restricting LEARNING reads to CURRENT
+        behaviour: excludes the pre-fix regime (<= LEARNING_REGIME_BREAK) and, if set,
+        keeps only the last LEARNING_WINDOW_DAYS. This stops the poisoned pre-fix era
+        (ensemble/exact-cross/phantom-MFE) from dragging the learners' expectancy.
+        Use in checkpointer/entry-quality/edge/graduation reads — NOT in raw recording."""
+        frag, params = "", []
+        col = f"{alias}timestamp"
+        try:
+            from src import config
+            brk = getattr(config, "LEARNING_REGIME_BREAK", "") or ""
+            win = int(getattr(config, "LEARNING_WINDOW_DAYS", 0) or 0)
+        except Exception:
+            brk, win = "", 0
+        if brk:
+            frag += f" AND datetime({col}) > datetime(?)"; params.append(brk)
+        if win > 0:
+            frag += f" AND datetime({col}) > datetime('now', ?)"; params.append(f"-{win} days")
+        return frag, params
+
     def backfill_account(self, login: int, server: str, trade_mode: str = "DEMO") -> int:
         """One-shot: stamp existing NULL-account rows with a known account (#21)."""
         conn = sqlite3.connect(self.db_path)

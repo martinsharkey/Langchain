@@ -50,11 +50,12 @@ class EntryStrengthLearner:  # name kept for wiring compatibility
     def _samples(self, symbol_prefix: str):
         conn = sqlite3.connect(self.db.db_path)
         conn.row_factory = sqlite3.Row
+        lw, lp = self.db.learning_window_clause()   # exclude pre-fix era + recency
         rows = [dict(r) for r in conn.execute(
             "SELECT action, mfe_points, atr_value, indicators_snapshot FROM trades "
             "WHERE symbol LIKE ? AND outcome IN ('win','loss','breakeven') "
-            "AND indicators_snapshot IS NOT NULL ORDER BY id DESC LIMIT 1500",
-            (symbol_prefix + "%",)).fetchall()]
+            "AND indicators_snapshot IS NOT NULL" + lw + " ORDER BY id DESC LIMIT 1500",
+            tuple([symbol_prefix + "%"] + lp)).fetchall()]
         conn.close()
         out = []
         for r in rows:

@@ -216,6 +216,14 @@ def is_live_mode() -> bool:
 # and recording data. i.e. the bot keeps learning DATA but stops auto-tuning
 # itself until the tuning is proven safe.
 LEARNING_ADAPTATION_ENABLED = os.getenv("LEARNING_ADAPTATION_ENABLED", "true").lower() in ("true", "1", "yes")
+# CONTINUAL-LEARNING WINDOW: the pre-fix era (ensemble grab-bag, exact-cross-starved,
+# phantom-MFE) poisoned expectancy. The learners must learn from CURRENT behaviour.
+#  - LEARNING_REGIME_BREAK: ISO timestamp; trades AT/BEFORE it are excluded from all
+#    learning reads (a clean slate after the entry/exit fixes). Empty = no cut.
+#  - LEARNING_WINDOW_DAYS: rolling recency window; only trades within the last N days
+#    feed the learners, so learning always favours recent behaviour. 0 = no window.
+LEARNING_REGIME_BREAK = os.getenv("LEARNING_REGIME_BREAK", "2026-08-04T08:00:00")
+LEARNING_WINDOW_DAYS = int(os.getenv("LEARNING_WINDOW_DAYS", "5"))
 # Auto-revert: when a symbol's recent realised expectancy degrades vs its
 # best-known checkpoint by more than this (in expectancy units), restore the
 # checkpoint config and mark the change as a failed direction.

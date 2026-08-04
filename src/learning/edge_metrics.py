@@ -70,6 +70,12 @@ class EdgeCalculator:
             params += aps
         except Exception:
             pass
+        try:
+            lw, lp = self.experience_db.learning_window_clause()   # exclude pre-fix era + recency
+            where += lw
+            params += lp
+        except Exception:
+            pass
         rows = [dict(r) for r in conn.execute(
             f"SELECT outcome, profit_loss FROM trades {where} ORDER BY id ASC", params
         ).fetchall()]

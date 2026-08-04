@@ -34,13 +34,14 @@ class EntryFrequencyAnalyzer:
     def _samples(self, symbol_prefix: str, days: int = 7):
         conn = sqlite3.connect(self.db.db_path)
         conn.row_factory = sqlite3.Row
+        lw, lp = self.db.learning_window_clause()   # exclude pre-fix era + recency
         rows = [dict(r) for r in conn.execute(
             "SELECT date(timestamp) d, action, mfe_points, atr_value, indicators_snapshot "
             "FROM trades WHERE symbol LIKE ? AND outcome IN ('win','loss','breakeven') "
             "AND (data_source IS NULL OR data_source='LIVE_MICRO') "
             "AND date(timestamp) >= ? AND indicators_snapshot IS NOT NULL "
-            "AND datetime(timestamp) > datetime('now', ?)",
-            (symbol_prefix + "%", self.min_clean_date, f"-{days} days")).fetchall()]
+            "AND datetime(timestamp) > datetime('now', ?)" + lw,
+            tuple([symbol_prefix + "%", self.min_clean_date, f"-{days} days"] + lp)).fetchall()]
         conn.close()
         out = []
         for r in rows:
