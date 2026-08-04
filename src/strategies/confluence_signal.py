@@ -122,27 +122,51 @@ def evaluate_confluence_bar(ind: dict, cfg=None) -> dict:
         return {"action": "hold", "trigger_kind": None, "confluence": 0, "reason": "no atr/price"}
     osma_now = float(ind.get("osma") or 0); osma_prev = float(ind.get("osma_prev") or 0)
     macd = float(ind.get("macd_line") or 0); atr_prev = float(ind.get("atr_prev") or atr)
+    # exact-bar zero-cross (highest conviction)
     cu = osma_prev <= 0 < osma_now
     cd = osma_prev >= 0 > osma_now
     band = c.get("osma_anticipate_atr", 0.15) * atr
     au = (not cu) and (-band <= osma_now <= 0) and (osma_now > osma_prev)
     ad = (not cd) and (0 <= osma_now <= band) and (osma_now < osma_prev)
-    if not (cu or cd or au or ad):
-        return {"action": "hold", "trigger_kind": None, "confluence": 0, "reason": "no OsMA cross"}
-    direction = "buy" if (cu or au) else "sell"
-    trigger_kind = "cross" if (cu or cd) else "anticipated"
+    # GOLDSHARK-PARITY: don't require the EXACT cross bar. Enter while OsMA is on the
+    # correct side AND the cross is FRESH — the sign-age (bars OsMA has held this side)
+    # is <= max_momentum_age (GoldShark InpMaxMomentumAge, default 5). This is why
+    # GoldShark trades ~77/day: it takes the whole fresh move, not just the flip bar.
+    max_age = int(c.get("max_momentum_age", 5))
+    recent = ind.get("osma_recent") or []          # oldest..newest; last = forming bar
+    recent_closed = recent[:-1] if len(recent) > 1 else recent   # drop forming bar
+    def _sign_age(positive: bool) -> int:
+        # count consecutive most-recent CLOSED bars on the required side
+        age = 0
+        for v in reversed(recent_closed):
+            try: fv = float(v)
+            except (TypeError, ValueError): break
+            if (positive and fv > 0) or ((not positive) and fv < 0):
+                age += 1
+            else:
+                break
+        return age
+    fresh_up = (not (cu or au)) and osma_now > 0 and 0 < _sign_age(True) <= max_age
+    fresh_dn = (not (cd or ad)) and osma_now < 0 and 0 < _sign_age(False) <= max_age
+    if not (cu or cd or au or ad or fresh_up or fresh_dn):
+        return {"action": "hold", "trigger_kind": None, "confluence": 0, "reason": "no fresh OsMA momentum"}
+    direction = "buy" if (cu or au or fresh_up) else "sell"
+    trigger_kind = "cross" if (cu or cd) else ("anticipated" if (au or ad) else "fresh")
     if (direction == "buy" and not macd > 0) or (direction == "sell" and not macd < 0):
         return {"action": "hold", "trigger_kind": trigger_kind, "confluence": 0, "reason": "MACD not aligned"}
     if "macd_led" in ind and not ind["macd_led"]:
         return {"action": "hold", "trigger_kind": trigger_kind, "confluence": 0, "reason": "MACD did not lead"}
-    if not atr > atr_prev:
-        return {"action": "hold", "trigger_kind": trigger_kind, "confluence": 0, "reason": "ATR not expanding"}
-    # OsMA ACCELERATION (GoldShark: 100% of winners had OsMA accelerating in the
-    # trade direction — the cross must have momentum behind it, not be stalling).
-    if (direction == "buy" and not osma_now > osma_prev) or \
-       (direction == "sell" and not osma_now < osma_prev):
-        return {"action": "hold", "trigger_kind": trigger_kind, "confluence": 0,
-                "reason": "OsMA not accelerating"}
+    # ATR expansion + OsMA acceleration are conviction filters for the EXACT-cross /
+    # anticipated triggers. GoldShark's FRESH-momentum entry (cross happened 1-5 bars
+    # ago) does NOT require them — the move is already underway — so only apply them
+    # to cross/anticipated, matching GoldShark.
+    if trigger_kind in ("cross", "anticipated"):
+        if not atr > atr_prev:
+            return {"action": "hold", "trigger_kind": trigger_kind, "confluence": 0, "reason": "ATR not expanding"}
+        if (direction == "buy" and not osma_now > osma_prev) or \
+           (direction == "sell" and not osma_now < osma_prev):
+            return {"action": "hold", "trigger_kind": trigger_kind, "confluence": 0,
+                    "reason": "OsMA not accelerating"}
     # LEARNED PRICE-STRETCH gate (the ONE entry feature that actually separates
     # winners from losers in the full GoldShark telemetry: winners enter MUCH closer
     # to the EMA — PriceStretch 85% separation on BTC — losers enter over-extended).

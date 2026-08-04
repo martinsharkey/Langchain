@@ -31,7 +31,18 @@ def _base_long(**over):
 
 
 def test_no_cross_holds():
-    d = _base_long(osma=0.6, osma_prev=0.5, osma_recent=[0.4, 0.5, 0.6])  # no cross
+    # OsMA positive for several CLOSED bars = FRESH momentum long (GoldShark takes it,
+    # sign-age <= 5). This is the intended behaviour now — not a hold.
+    d = _base_long(osma=0.6, osma_prev=0.5, osma_recent=[0.4, 0.5, 0.6, 0.6])
+    s = osma_confluence_signal(d, PARAMS)
+    assert s.action == "buy", s.reason
+    assert s.metadata.get("trigger") in ("fresh", "cross", "anticipated"), s.reason
+
+
+def test_stale_momentum_holds():
+    # OsMA positive for MANY bars (sign-age > max 5) = STALE, not fresh -> hold.
+    d = _base_long(osma=0.6, osma_prev=0.6,
+                   osma_recent=[0.6, 0.6, 0.6, 0.6, 0.6, 0.6, 0.6, 0.6])
     s = osma_confluence_signal(d, PARAMS)
     assert s.action == "hold", s.reason
 

@@ -61,6 +61,7 @@ def osma_confluence_signal(indicators: dict, params: dict) -> Signal:
     # runway (FinalMultiplier proxy): |OsMA_now| vs recent average |OsMA| — how far
     # this cross extends beyond the recent baseline. GoldShark's key gold gate.
     _recent = indicators.get("osma_recent") or []
+    ind["osma_recent"] = _recent   # raw series for GoldShark sign-age (fresh-momentum)
     try:
         _mags = [abs(float(x)) for x in _recent if x is not None]
         if _mags:

@@ -2041,7 +2041,11 @@ class ScalpEngine:
                 if _t.time() - _last.get(base, 0) > 60:
                     _last[base] = _t.time(); self._hold_log_at = _last
                     _rsn = getattr(fs, "reason", None) if fs is not None else "no focused signal"
-                    logger.info(f"[ENTRY-HOLD] {base}: {_rsn}")
+                    # include the live OsMA cross inputs so we can see WHY no cross
+                    _oc = indicators.get("osma_closed"); _op = indicators.get("osma_prev")
+                    _at = indicators.get("atr")
+                    logger.info(f"[ENTRY-HOLD] {base}: {_rsn} | osma_closed={_oc} osma_prev={_op} "
+                                f"atr={_at} macd={indicators.get('macd_line')}")
             except Exception:
                 pass
             return
