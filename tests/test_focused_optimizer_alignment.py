@@ -60,3 +60,16 @@ if __name__ == "__main__":
     test_every_focused_symbol_includes_the_tuned_strategy()
     test_tuned_strategy_resolves_in_bare_registry()
     print("focused/optimizer alignment guardrail passed")
+
+def test_empty_overlay_pocket_does_not_block_entry():
+    """A failed edge-discovery sweep that wrote empty focused pockets must NOT kill
+    trading - focused_rules must fall back to the static OsMA_Confluence rule."""
+    import src.learning.edge_weights as ew
+    saved = ew._OVERLAY
+    try:
+        ew._OVERLAY = {"focused_edge": {"XAUUSD": [], "BTCUSD": [], "GER40": []}}
+        for s in ("XAUUSD-ECN", "BTCUSD", "GER40."):
+            rules = ew.focused_rules(s)
+            assert rules and rules[0][0] == "OsMA_Confluence", (s, rules)
+    finally:
+        ew._OVERLAY = saved

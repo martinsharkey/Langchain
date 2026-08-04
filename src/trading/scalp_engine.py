@@ -2033,6 +2033,17 @@ class ScalpEngine:
         if fs is not None and fs.action != "hold":
             signal = fs
         if signal is None or signal.action == "hold":
+            # THROTTLED visibility (once/min per symbol): WHY the confluence held, so we
+            # can see whether the entry gates are choking or just awaiting a valid cross.
+            try:
+                import time as _t
+                _last = getattr(self, "_hold_log_at", {})
+                if _t.time() - _last.get(base, 0) > 60:
+                    _last[base] = _t.time(); self._hold_log_at = _last
+                    _rsn = getattr(fs, "reason", None) if fs is not None else "no focused signal"
+                    logger.info(f"[ENTRY-HOLD] {base}: {_rsn}")
+            except Exception:
+                pass
             return
 
         # ── HYBRID whale/order-flow layer (#26/#29/#43) for BTC ──

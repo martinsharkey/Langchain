@@ -169,14 +169,17 @@ FOCUSED_EDGE = {
 
 def focused_rules(symbol: str):
     """Return the list of (strategy, allowed_regimes) pockets for a symbol, or None.
-    Discovered overlay (#31) wins over the static seed."""
+    Discovered overlay (#31) wins over the static seed — BUT an EMPTY overlay pocket
+    must NEVER silently kill trading. A failed edge-discovery sweep once wrote
+    XAUUSD:[]/BTCUSD:[]/GER40:[] which made get_focused_signal return None for every
+    symbol -> zero trades. We now IGNORE empty overlay pockets and fall back to the
+    static GoldShark OsMA_Confluence rule (follow GoldShark, don't let a gate block)."""
     if not symbol:
         return None
     su = symbol.upper()
     ov = _OVERLAY.get("focused_edge", {})
     for key, rules in ov.items():
-        if su.startswith(key):
-            # overlay stores [[strategy, [regimes]], ...] (JSON) -> normalise
+        if su.startswith(key) and rules:   # only honour NON-empty overlay pockets
             return [(r[0], set(r[1])) for r in rules]
     for key, rules in FOCUSED_EDGE.items():
         if su.startswith(key):
