@@ -55,31 +55,55 @@ def test_price_stretch_gate_allows_near_ema_entry():
     assert r["action"] == "buy", r
 
 
-def test_learner_derives_stretch_ceiling_that_improves_wr():
+def test_accel_gate_blocks_stale_cross():
+    """A cross with weak OsMA acceleration must hold when accel_min is set."""
+    # osma 0.55 vs prev 0.5 -> accel 0.05/atr3 = 0.017 < 0.05 min -> hold
+    r = evaluate_confluence_bar(_bar(osma=0.55, osma_prev=0.50), cfg={"accel_min": 0.05})
+    # note: 0.50->0.55 is not a fresh up-cross; use a fresh cross with tiny accel
+    r = evaluate_confluence_bar(_bar(osma=0.02, osma_prev=-0.01), cfg={"accel_min": 0.05})
+    assert r["action"] == "hold", r
+
+
+def test_dom_gate_blocks_weak_power():
+    r = evaluate_confluence_bar(_bar(bulls_power=0.3), cfg={"dom_min": 1.0})  # 0.3/3=0.1 < 1.0
+    assert r["action"] == "hold" and "dominant power" in r["reason"], r
+
+
+def test_runway_gate_blocks_low_runway():
+    # osma 0.6, recent avg 0.5 -> runway 1.2 < 2.0 -> hold
+    r = evaluate_confluence_bar(_bar(osma_recent_avg=0.5), cfg={"runway_min": 2.0})
+    assert r["action"] == "hold" and "runway" in r["reason"], r
+
+
+def test_full_recipe_allows_quality_entry():
+    r = evaluate_confluence_bar(_bar(osma=0.9, osma_prev=-0.05, bulls_power=4.0, osma_recent_avg=0.3),
+                                cfg={"accel_min": 0.05, "dom_min": 1.0, "runway_min": 2.0, "max_stretch_atr": 1.0})
+    assert r["action"] == "buy", r
+
+
+def test_learner_derives_recipe_that_lifts_entry_success():
     with tempfile.TemporaryDirectory() as d:
         db = ExperienceDatabase(db_path=os.path.join(d, "t.db"))
-        def add(is_win, stretch_atr, atr=3.0):
-            ema = 1999.0
-            close = ema + stretch_atr * atr   # controlled stretch
-            snap = {"osma": 0.6, "bulls_power": 2.0, "bears_power": 1.0, "atr": atr,
-                    "close": close, "ema_fast": ema}
+        def add(green, accel_ok, atr=3.0):
+            ema = 1999.0; close = ema + 0.2 * atr
+            osma_prev = -0.02
+            osma = osma_prev + (0.3 if accel_ok else 0.03) * atr   # accel high vs low
+            snap = {"osma": osma, "osma_prev": osma_prev, "bulls_power": 4.0, "bears_power": 1.0,
+                    "atr": atr, "close": close, "ema_fast": ema, "osma_recent": [0.1, 0.1, 0.1]}
             tid = db.record_trade(signal={"symbol": "XAUUSD", "action": "buy", "price": close,
                                           "strategy_used": "OsMA_Confluence"},
                                   indicators=snap, outcome="pending")
-            db.update_trade_outcome(trade_id=tid, outcome="win" if is_win else "loss",
-                                    profit_loss=1.0 if is_win else -1.0,
-                                    exit_price=close + (1 if is_win else -1),
-                                    mfe_points=200 if is_win else 5, mae_points=-5,
-                                    exit_points=100 if is_win else -50)
-        # winners enter NEAR ema (low stretch); losers enter over-extended (high stretch)
-        for _ in range(20): add(True, 0.2)
-        for _ in range(20): add(False, 2.5)
-        learner = EntryStrengthLearner(db, min_sample=20)
+            db.update_trade_outcome(trade_id=tid, outcome="win" if green else "loss",
+                                    profit_loss=1.0 if green else -1.0, exit_price=close,
+                                    mfe_points=(2*atr) if green else 0.0, mae_points=-5, exit_points=10)
+        # fresh-accel entries go green; stale ones don't
+        for _ in range(25): add(True, True)
+        for _ in range(25): add(False, False)
+        learner = EntryStrengthLearner(db, min_sample=30)
         r = learner.learn_symbol("XAUUSD")
-        assert r is not None and r["n"] == 40, r
-        assert r["improves"] is True, r
-        assert 0 < r["max_stretch_atr"] < 2.5, r
-        assert r["gated_win_rate"] > r["base_win_rate"], r
+        assert r is not None and r["improves"] is True, r
+        assert r["gated_success"] > r["base_success"], r
+        assert "accel_min" in r["recipe"], r
 
 
 if __name__ == "__main__":
@@ -88,5 +112,9 @@ if __name__ == "__main__":
     test_strength_magnitude_is_NOT_gated()
     test_price_stretch_gate_blocks_overextended_entry()
     test_price_stretch_gate_allows_near_ema_entry()
-    test_learner_derives_stretch_ceiling_that_improves_wr()
+    test_accel_gate_blocks_stale_cross()
+    test_dom_gate_blocks_weak_power()
+    test_runway_gate_blocks_low_runway()
+    test_full_recipe_allows_quality_entry()
+    test_learner_derives_recipe_that_lifts_entry_success()
     print("entry quality tests passed")

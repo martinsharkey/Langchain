@@ -55,6 +55,16 @@ def osma_confluence_signal(indicators: dict, params: dict) -> Signal:
     if "macd_led" in indicators:
         ind["macd_led"] = indicators["macd_led"]
 
+    # runway (FinalMultiplier proxy): |OsMA_now| vs recent average |OsMA| — how far
+    # this cross extends beyond the recent baseline. GoldShark's key gold gate.
+    _recent = indicators.get("osma_recent") or []
+    try:
+        _mags = [abs(float(x)) for x in _recent if x is not None]
+        if _mags:
+            ind["osma_recent_avg"] = sum(_mags) / len(_mags)
+    except Exception:
+        pass
+
     r = evaluate_confluence_bar(ind, p)   # single source of truth (backtest == live)
     if r["action"] == "hold":
         return Signal(action="hold", reason=f"osma_confluence: {r['reason']}",

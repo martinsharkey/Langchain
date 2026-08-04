@@ -157,6 +157,32 @@ def evaluate_confluence_bar(ind: dict, cfg=None) -> dict:
         if stretch > max_stretch:
             return {"action": "hold", "trigger_kind": trigger_kind, "confluence": 0,
                     "reason": f"over-extended: stretch {stretch:.2f}xATR > learned max {max_stretch:.2f}"}
+    # MINED ENTRY-QUALITY gates (from all EA telemetry: the recipe that lifts entry-
+    # direction success toward 95%). All ATR-normalized, learned per symbol, applied
+    # only when the harness proved they raise entry-success:
+    #   accel_min  — OsMA acceleration magnitude |osma_now-osma_prev|/ATR (freshness)
+    #   dom_min    — dominant-side power (Bulls long / Bears mag short) / ATR
+    #   runway_min — FinalMultiplier proxy: |osma_now| / recent-avg |osma| (runway)
+    accel_min = c.get("accel_min", 0.0)
+    if accel_min and atr > 0:
+        accel = abs(osma_now - osma_prev) / atr
+        if accel < accel_min:
+            return {"action": "hold", "trigger_kind": trigger_kind, "confluence": 0,
+                    "reason": f"weak OsMA accel {accel:.3f} < learned {accel_min:.3f}"}
+    dom_min = c.get("dom_min", 0.0)
+    if dom_min and atr > 0:
+        dom = (float(ind.get("bulls_power") or 0) if direction == "buy"
+               else -float(ind.get("bears_power") or 0)) / atr
+        if dom < dom_min:
+            return {"action": "hold", "trigger_kind": trigger_kind, "confluence": 0,
+                    "reason": f"weak dominant power {dom:.3f} < learned {dom_min:.3f}"}
+    runway_min = c.get("runway_min", 0.0)
+    osma_avg = float(ind.get("osma_recent_avg") or 0)   # avg |OsMA| over recent bars
+    if runway_min and osma_avg > 0:
+        runway = abs(osma_now) / osma_avg
+        if runway < runway_min:
+            return {"action": "hold", "trigger_kind": trigger_kind, "confluence": 0,
+                    "reason": f"low runway {runway:.2f} < learned {runway_min:.2f} (FinalMultiplier)"}
     checks = _soft_checks(direction, close, float(ind.get("ema_fast") or close),
                           float(ind.get("ema_prev") or ind.get("ema_fast") or close),
                           atr, float(ind.get("bulls_power") or 0), float(ind.get("bears_power") or 0),

@@ -1,90 +1,123 @@
 """
-Entry-quality learner (#entry-signal).
+Entry-quality learner (#entry-signal) — mines the per-symbol ENTRY-QUALITY recipe
+that maximises ENTRY-DIRECTION success (the ~95% edge the GoldShark / EMA_OSMA_ATR
+EAs achieved: the trade went into meaningful profit, i.e. direction was right).
 
-EVIDENCE (full GoldShark telemetry, XAUUSD n=601 / BTCUSD n=154): OsMA/Bulls/Bears
-STRENGTH magnitude does NOT separate winners from losers — raising those thresholds
-LOWERS win-rate. The ONE entry feature that DOES separate winners is PRICE STRETCH:
-winners enter much CLOSER to the EMA; losers enter over-extended (85% separation on
-BTC). So this learner derives a per-symbol `max_stretch_atr` (|close-EMA|/ATR ceiling)
-and applies it ONLY when it robustly improves win-rate out-of-sample. It does NOT gate
-on strength magnitude (that was overfitting noise).
+EVIDENCE (full EA telemetry): OsMA/Bulls/Bears STRENGTH magnitude does NOT separate
+winners. What DOES lift entry-direction success is a COMBINATION of freshness +
+not-over-extended + runway:
+  accel_min      OsMA acceleration |osma-osma_prev|/ATR (fresh momentum)
+  max_stretch_atr  |close-EMA|/ATR ceiling (not over-extended)
+  dom_min        dominant power (Bulls long / Bears short)/ATR
+  runway_min     |OsMA| / recent-avg|OsMA| (FinalMultiplier proxy)
+
+The learner greedily selects the gate set that raises entry-success on THIS symbol's
+own closed trades, applied ONLY when it beats the base rate on a meaningful sample.
+Scale-free (all ATR-normalized) so gold and BTC self-calibrate.
 """
 from __future__ import annotations
 import json
 import sqlite3
-import statistics
 from typing import Optional
 
 from src.utils.logger import get_logger
 
-logger = get_logger("entry_strength")
+logger = get_logger("entry_quality")
+
+# candidate gates: (cfg_key, field, op, value)
+_CANDIDATES = [
+    ("accel_min", "accel", ">=", 0.02), ("accel_min", "accel", ">=", 0.05), ("accel_min", "accel", ">=", 0.10),
+    ("dom_min", "dom", ">=", 0.5), ("dom_min", "dom", ">=", 1.0), ("dom_min", "dom", ">=", 1.5),
+    ("max_stretch_atr", "stretch", "<=", 2.0), ("max_stretch_atr", "stretch", "<=", 1.0), ("max_stretch_atr", "stretch", "<=", 0.7),
+    ("runway_min", "runway", ">=", 2.0), ("runway_min", "runway", ">=", 3.0),
+]
 
 
-class EntryStrengthLearner:
-    def __init__(self, experience_db, min_sample: int = 30):
+class EntryStrengthLearner:  # name kept for wiring compatibility
+    def __init__(self, experience_db, min_sample: int = 40, green_atr: float = 0.3,
+                 min_keep_frac: float = 0.15, max_gates: int = 3):
         self.db = experience_db
         self.min_sample = min_sample
+        self.green_atr = green_atr
+        self.min_keep_frac = min_keep_frac
+        self.max_gates = max_gates
 
-    def _rows(self, symbol_prefix: str):
+    def _samples(self, symbol_prefix: str):
         conn = sqlite3.connect(self.db.db_path)
         conn.row_factory = sqlite3.Row
         rows = [dict(r) for r in conn.execute(
-            "SELECT action, profit_loss, mfe_points, atr_value, indicators_snapshot "
-            "FROM trades WHERE symbol LIKE ? AND outcome IN ('win','loss','breakeven') "
-            "AND indicators_snapshot IS NOT NULL "
-            "ORDER BY id DESC LIMIT 1200", (symbol_prefix + "%",)).fetchall()]
+            "SELECT action, mfe_points, atr_value, indicators_snapshot FROM trades "
+            "WHERE symbol LIKE ? AND outcome IN ('win','loss','breakeven') "
+            "AND indicators_snapshot IS NOT NULL ORDER BY id DESC LIMIT 1500",
+            (symbol_prefix + "%",)).fetchall()]
         conn.close()
-        return rows
-
-    def learn_symbol(self, symbol_prefix: str) -> Optional[dict]:
-        """Return {max_stretch_atr, n, ...} for a symbol, or None if insufficient data.
-        max_stretch_atr = the |close-EMA|/ATR ceiling that best separates winners,
-        applied ONLY when it improves win-rate out-of-sample."""
-        rows = self._rows(symbol_prefix)
-        samples = []   # (is_win, stretch_atr)
+        out = []
         for r in rows:
             try:
-                snap = json.loads(r["indicators_snapshot"]) if r["indicators_snapshot"] else {}
+                s = json.loads(r["indicators_snapshot"]) if r["indicators_snapshot"] else {}
             except Exception:
                 continue
-            atr = float(r["atr_value"] or snap.get("atr") or 0)
-            close = float(snap.get("close") or 0)
-            ema = float(snap.get("ema_fast") or snap.get("ema") or 0)
-            if atr <= 0 or close <= 0 or ema <= 0:
+            atr = float(r["atr_value"] or s.get("atr") or 0)
+            mfe = r["mfe_points"]
+            if atr <= 0 or mfe is None:
                 continue
-            stretch = abs(close - ema) / atr
-            is_win = (r["profit_loss"] or 0) > 0
-            samples.append((is_win, stretch))
+            close = float(s.get("close") or 0); ema = float(s.get("ema_fast") or s.get("ema") or 0)
+            osma = float(s.get("osma") or 0); osma_prev = float(s.get("osma_prev") or 0)
+            recent = s.get("osma_recent") or []
+            mags = [abs(float(x)) for x in recent if x is not None]
+            runway = (abs(osma) / (sum(mags) / len(mags))) if mags else float("nan")
+            dom = (float(s.get("bulls_power") or 0) if r["action"] == "buy"
+                   else -float(s.get("bears_power") or 0)) / atr
+            out.append({
+                "green": 1 if mfe >= self.green_atr * atr else 0,
+                "accel": abs(osma - osma_prev) / atr,
+                "stretch": abs(close - ema) / atr if (close > 0 and ema > 0) else float("nan"),
+                "dom": dom, "runway": runway,
+            })
+        return out
 
-        if len(samples) < self.min_sample:
+    @staticmethod
+    def _passes(rec, gate):
+        _, field, op, val = gate
+        x = rec.get(field)
+        if x is None or x != x:   # nan/missing -> permissive
+            return True
+        return x >= val if op == ">=" else x <= val
+
+    def _rate(self, samples, gates):
+        kept = [s for s in samples if all(self._passes(s, g) for g in gates)]
+        if not kept:
+            return 0.0, 0
+        return sum(s["green"] for s in kept) / len(kept), len(kept)
+
+    def learn_symbol(self, symbol_prefix: str) -> Optional[dict]:
+        S = self._samples(symbol_prefix)
+        if len(S) < self.min_sample:
             return None
-        wins = [s for s in samples if s[0]]
-        if len(wins) < max(8, self.min_sample // 4):
-            return {"max_stretch_atr": 0.0, "n": len(samples), "wins": len(wins),
-                    "note": "cold: too few wins"}
-
-        base_wr = len(wins) / len(samples)
-        # candidate ceilings = winners' stretch percentiles (75th/90th). Pick the one
-        # that MOST improves win-rate on the kept set, and only keep it if it beats
-        # base by a real margin with enough sample (honest out-of-sample-style guard).
-        win_stretch = sorted(w[1] for w in wins)
-        best = {"max_stretch_atr": 0.0, "gated_win_rate": base_wr, "kept": len(samples)}
-        for pct in (0.75, 0.9, 0.6):
-            ceil = win_stretch[min(len(win_stretch) - 1, int(len(win_stretch) * pct))]
-            kept = [s for s in samples if s[1] <= ceil]
-            if len(kept) < max(15, self.min_sample // 2):
-                continue
-            wr = sum(1 for s in kept if s[0]) / len(kept)
-            if wr > best["gated_win_rate"]:
-                best = {"max_stretch_atr": round(ceil, 3), "gated_win_rate": round(wr, 3),
-                        "kept": len(kept)}
-        improves = best["max_stretch_atr"] > 0 and best["gated_win_rate"] > base_wr + 0.03
-        return {
-            "max_stretch_atr": best["max_stretch_atr"] if improves else 0.0,
-            "n": len(samples), "wins": len(wins),
-            "base_win_rate": round(base_wr, 3), "gated_win_rate": best["gated_win_rate"],
-            "kept": best["kept"], "improves": improves,
-        }
+        base, n = self._rate(S, [])
+        min_keep = max(20, int(n * self.min_keep_frac))
+        chosen, cur = [], base
+        while len(chosen) < self.max_gates:
+            best = None
+            for g in _CANDIDATES:
+                # don't stack two gates on the same key
+                if any(c[0] == g[0] for c in chosen):
+                    continue
+                sr, kept = self._rate(S, chosen + [g])
+                if kept >= min_keep and sr > cur + 0.005 and (best is None or sr > best[1]):
+                    best = (g, sr, kept)
+            if not best:
+                break
+            chosen.append(best[0]); cur = best[1]
+        kept = self._rate(S, chosen)[1]
+        improves = bool(chosen) and cur > base + 0.02
+        recipe = {}
+        if improves:
+            for key, _f, _op, val in chosen:
+                recipe[key] = val
+        return {"recipe": recipe, "n": n, "base_success": round(base, 3),
+                "gated_success": round(cur, 3), "kept": kept, "improves": improves,
+                "gates": [f"{g[1]}{g[2]}{g[3]}" for g in chosen]}
 
     def learn_all(self, symbol_prefixes) -> dict:
         out = {}
@@ -93,9 +126,9 @@ class EntryStrengthLearner:
                 r = self.learn_symbol(s)
                 if r:
                     out[s] = r
-                    logger.info(f"[ENTRY-QUALITY] {s}: max_stretch_atr={r['max_stretch_atr']} "
-                                f"(n={r['n']}, WR {r.get('base_win_rate')}->{r.get('gated_win_rate')}, "
-                                f"improves={r.get('improves')})")
+                    logger.info(f"[ENTRY-QUALITY] {s}: {r['gates'] or '(base best)'} -> "
+                                f"entry-success {r['base_success']*100:.0f}%->{r['gated_success']*100:.0f}% "
+                                f"(kept {r['kept']}/{r['n']}, improves={r['improves']})")
             except Exception as e:
                 logger.debug(f"entry-quality learn skip {s}: {e}")
         return out

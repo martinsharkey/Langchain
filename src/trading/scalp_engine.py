@@ -1765,14 +1765,14 @@ class ScalpEngine:
                 params = dict(self.param_optimizer.current_params(resolved_symbol) or {})
             except Exception:
                 params = {}
-        # learned per-symbol PRICE-STRETCH ceiling (the one feature that separates
-        # winners; strength magnitude does NOT, so we do not gate on it).
+        # learned per-symbol ENTRY-QUALITY recipe (the mined gates that lift entry-
+        # direction success toward the EA's ~95%): accel_min / max_stretch_atr /
+        # dom_min / runway_min. Applied only where the learner proved they help.
         try:
             for key, sv in (getattr(self, "_entry_strength", {}) or {}).items():
                 if resolved_symbol.upper().startswith(key.upper()):
-                    ms = sv.get("max_stretch_atr", 0.0)
-                    if ms and ms > 0:
-                        params["max_stretch_atr"] = ms
+                    for gk, gv in (sv.get("recipe") or {}).items():
+                        params[gk] = gv
                     break
         except Exception:
             pass
