@@ -37,10 +37,13 @@ def osma_confluence_signal(indicators: dict, params: dict) -> Signal:
     if close is None:
         return Signal(action="hold", reason="osma_confluence: no price", confidence=0.0)
 
-    # build the single-bar snapshot the shared evaluator expects
+    # build the single-bar snapshot the shared evaluator expects.
+    # GOLDSHARK PARITY: detect the cross on the last CLOSED bar (osma_closed) vs the
+    # bar before it (osma_prev), NOT the live forming bar — the forming bar rarely
+    # produces a clean zero-cross, which was starving live entries.
     ind = {
         "close": close,
-        "osma": indicators.get("osma", 0.0),
+        "osma": indicators.get("osma_closed", indicators.get("osma", 0.0)),
         "osma_prev": indicators.get("osma_prev", 0.0),
         "macd_line": indicators.get("macd_line", 0.0),
         "ema_fast": indicators.get("ema_fast", close),

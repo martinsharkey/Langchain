@@ -446,10 +446,18 @@ def compute_full_indicators(data: list[dict], params: Optional[dict] = None) -> 
         # detection needs the prior closed bar; fresh-momentum/runway needs a few
         # bars; ATR expansion needs atr[-2]. Provided here so signal_fn (which only
         # gets the single-bar dict) can compute the cross without re-reading rates.
-        "osma_prev": _nth_last(osma_s, 2, 0.0),
+        #
+        # GOLDSHARK PARITY (entry-cross fix): MT5 copy_rates_from_pos includes the
+        # currently-FORMING bar at the end, whose OsMA jitters and rarely produces a
+        # clean zero-cross vs the last closed bar — which is why live entries almost
+        # never fired ('no OsMA cross'). GoldShark detects the cross on CLOSED bars
+        # (osma[1] vs osma[2]). So the confluence cross fields use the last two CLOSED
+        # bars: osma_closed = osma[-2], osma_prev = osma[-3].
+        "osma_closed": _nth_last(osma_s, 2, 0.0),
+        "osma_prev": _nth_last(osma_s, 3, 0.0),
         "osma_recent": _tail_list(osma_s, 6),
-        "ema_prev": _nth_last(ema_fast_s, 2, ema_fast_v),
-        "atr_prev": _nth_last(atr_s, 2, atr_v),
+        "ema_prev": _nth_last(ema_fast_s, 3, ema_fast_v),
+        "atr_prev": _nth_last(atr_s, 3, atr_v),
         "support_levels": support, "resistance_levels": resistance,
         "trend": trend,
         "price_change_5": pct_change(5), "price_change_10": pct_change(10),

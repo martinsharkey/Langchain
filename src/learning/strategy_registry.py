@@ -1016,6 +1016,7 @@ class StrategyRegistry:
             return None
         regime = self._detect_market_regime(indicators)
         close = indicators.get("close")
+        last_reason = None
         for name, allowed_regimes in rules:
             if regime not in allowed_regimes:
                 continue
@@ -1029,8 +1030,11 @@ class StrategyRegistry:
             if sig.action in ("buy", "sell"):
                 sig.reason = f"FOCUSED {name}@{regime}: {sig.reason}"
                 return sig
+            last_reason = getattr(sig, "reason", None)   # capture the real hold reason
+        # reached only when the pocket strategy returned hold — surface its ACTUAL
+        # reason (e.g. 'no OsMA cross') not a misleading 'no pocket' message.
         return Signal(action="hold", confidence=0.0, price=close,
-                      reason=f"No focused pocket in {regime}")
+                      reason=(last_reason or f"no focused pocket in {regime}"))
 
     def get_ensemble_signal(
         self,
