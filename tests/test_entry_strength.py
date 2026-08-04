@@ -99,11 +99,58 @@ def test_learner_derives_recipe_that_lifts_entry_success():
         # fresh-accel entries go green; stale ones don't
         for _ in range(25): add(True, True)
         for _ in range(25): add(False, False)
-        learner = EntryStrengthLearner(db, min_sample=30)
+        learner = EntryStrengthLearner(db, min_sample=30, min_trades_per_day=1.0)
         r = learner.learn_symbol("XAUUSD")
         assert r is not None and r["improves"] is True, r
         assert r["gated_success"] > r["base_success"], r
-        assert "accel_min" in r["recipe"], r
+        # learner found SOME separating gate (via frequency analyzer or greedy path)
+        assert r["recipe"], r
+
+
+def test_frequency_analyzer_recommends_without_choking():
+    """The frequency analyzer must recommend a strength level that lifts success but
+    keeps >= min_trades_per_day (never chokes to zero)."""
+    from src.learning.entry_frequency import EntryFrequencyAnalyzer
+    import datetime as _dt
+    with tempfile.TemporaryDirectory() as d:
+        db = ExperienceDatabase(db_path=os.path.join(d, "t.db"))
+        today = _dt.date.today().isoformat()
+        def add(green, dom, atr=3.0):
+            snap = {"osma": 0.6, "osma_prev": -0.1, "bulls_power": dom * atr, "bears_power": 1.0,
+                    "atr": atr, "close": 2000.4, "ema_fast": 2000.0, "osma_recent": [0.2, 0.2]}
+            tid = db.record_trade(signal={"symbol": "BTCUSD", "action": "buy", "price": 2000,
+                                          "strategy_used": "OsMA_Confluence"},
+                                  indicators=snap, outcome="pending")
+            db.update_trade_outcome(trade_id=tid, outcome="win" if green else "loss",
+                                    profit_loss=1.0 if green else -1.0, exit_price=2001,
+                                    mfe_points=(2*atr) if green else 0.0, mae_points=-5, exit_points=10)
+        # high-dom entries win; low-dom entries lose. plenty of volume (no choke risk).
+        for _ in range(30): add(True, 1.5)
+        for _ in range(30): add(False, 0.2)
+        fa = EntryFrequencyAnalyzer(db, min_clean_date="2000-01-01")
+        a = fa.analyze("BTCUSD", days=1, min_trades_per_day=3.0)
+        assert a["recommended"] is not None, a
+        assert a["recommended"]["success"] > a["base_success"], a
+        assert a["recommended"]["per_day"] >= 3.0, a   # did not choke
+
+
+def test_frequency_analyzer_wont_choke_when_all_levels_too_thin():
+    """If every tightening drops below the floor, recommend nothing (keep base)."""
+    from src.learning.entry_frequency import EntryFrequencyAnalyzer
+    with tempfile.TemporaryDirectory() as d:
+        db = ExperienceDatabase(db_path=os.path.join(d, "t.db"))
+        def add(dom):
+            snap = {"osma": 0.6, "osma_prev": -0.1, "bulls_power": dom * 3.0, "bears_power": 1.0,
+                    "atr": 3.0, "close": 2000.4, "ema_fast": 2000.0, "osma_recent": [0.2]}
+            tid = db.record_trade(signal={"symbol": "XAUUSD", "action": "buy", "price": 2000,
+                                          "strategy_used": "OsMA_Confluence"},
+                                  indicators=snap, outcome="pending")
+            db.update_trade_outcome(trade_id=tid, outcome="loss", profit_loss=-1.0,
+                                    exit_price=1999, mfe_points=0.0, mae_points=-5, exit_points=-10)
+        for _ in range(25): add(0.1)   # only 25 trades total, tightening -> < floor
+        fa = EntryFrequencyAnalyzer(db, min_clean_date="2000-01-01")
+        a = fa.analyze("XAUUSD", days=1, min_trades_per_day=100.0)  # impossible floor
+        assert a["recommended"] is None, a   # correctly refuses to choke
 
 
 if __name__ == "__main__":
@@ -117,4 +164,6 @@ if __name__ == "__main__":
     test_runway_gate_blocks_low_runway()
     test_full_recipe_allows_quality_entry()
     test_learner_derives_recipe_that_lifts_entry_success()
+    test_frequency_analyzer_recommends_without_choking()
+    test_frequency_analyzer_wont_choke_when_all_levels_too_thin()
     print("entry quality tests passed")

@@ -35,12 +35,17 @@ _CANDIDATES = [
 
 class EntryStrengthLearner:  # name kept for wiring compatibility
     def __init__(self, experience_db, min_sample: int = 40, green_atr: float = 0.3,
-                 min_keep_frac: float = 0.15, max_gates: int = 3):
+                 min_keep_frac: float = 0.15, max_gates: int = 3,
+                 min_trades_per_day: float = 4.0):
         self.db = experience_db
         self.min_sample = min_sample
         self.green_atr = green_atr
         self.min_keep_frac = min_keep_frac
         self.max_gates = max_gates
+        # NEVER choke: the tuned strength recipe must still leave at least this many
+        # entries/day for the symbol, else we keep it looser. This is the balance
+        # between entry SUCCESS and stopping trading altogether.
+        self.min_trades_per_day = min_trades_per_day
 
     def _samples(self, symbol_prefix: str):
         conn = sqlite3.connect(self.db.db_path)
@@ -91,6 +96,40 @@ class EntryStrengthLearner:  # name kept for wiring compatibility
         return sum(s["green"] for s in kept) / len(kept), len(kept)
 
     def learn_symbol(self, symbol_prefix: str) -> Optional[dict]:
+        """Learn the per-symbol strength recipe that MAXIMISES entry-direction success
+        WITHOUT choking trading below min_trades_per_day. Uses the frequency-vs-quality
+        analyzer (which sweeps osma/dom/runway and enforces the trades/day floor) as the
+        primary source; falls back to the greedy gate search on older/other data."""
+        # Primary: frequency-aware, no-choke recommendation from clean live data.
+        try:
+            from src.learning.entry_frequency import EntryFrequencyAnalyzer
+            fa = EntryFrequencyAnalyzer(self.db, green_atr=self.green_atr)
+            a = fa.analyze(symbol_prefix, days=7, min_trades_per_day=self.min_trades_per_day)
+            rec = a.get("recommended")
+            if rec and a.get("n", 0) >= 20:
+                recipe = {}
+                if rec["osma_min"] > 0:
+                    recipe["osma_strength_min"] = rec["osma_min"]   # legacy key still honored? no-op if unused
+                # map to the confluence gate keys
+                recipe = {}
+                if rec["dom_min"] > 0:
+                    recipe["dom_min"] = rec["dom_min"]
+                if rec["runway_min"] > 0:
+                    recipe["runway_min"] = rec["runway_min"]
+                # osma strength alone doesn't gate (proven not to separate); we only
+                # carry dom/runway (+ stretch from the greedy pass below if it helps)
+                improves = rec["success"] > a["base_success"] + 0.02
+                return {"recipe": recipe if improves else {},
+                        "n": a["n"], "base_success": a["base_success"],
+                        "gated_success": rec["success"], "kept": rec["n"],
+                        "per_day": rec["per_day"], "improves": improves,
+                        "gates": [f"dom>={rec['dom_min']}" if rec["dom_min"] else "",
+                                  f"runway>={rec['runway_min']}" if rec["runway_min"] else ""],
+                        "source": "frequency_analyzer"}
+        except Exception as e:
+            logger.debug(f"frequency analyzer fallback for {symbol_prefix}: {e}")
+
+        # Fallback: greedy gate search over the symbol's own trades.
         S = self._samples(symbol_prefix)
         if len(S) < self.min_sample:
             return None
@@ -126,9 +165,11 @@ class EntryStrengthLearner:  # name kept for wiring compatibility
                 r = self.learn_symbol(s)
                 if r:
                     out[s] = r
-                    logger.info(f"[ENTRY-QUALITY] {s}: {r['gates'] or '(base best)'} -> "
+                    pd = r.get("per_day")
+                    pd_str = f", {pd}/day" if pd is not None else ""
+                    logger.info(f"[ENTRY-QUALITY] {s}: {[g for g in r['gates'] if g] or '(base best)'} -> "
                                 f"entry-success {r['base_success']*100:.0f}%->{r['gated_success']*100:.0f}% "
-                                f"(kept {r['kept']}/{r['n']}, improves={r['improves']})")
+                                f"(kept {r['kept']}/{r['n']}{pd_str}, improves={r['improves']})")
             except Exception as e:
                 logger.debug(f"entry-quality learn skip {s}: {e}")
         return out
