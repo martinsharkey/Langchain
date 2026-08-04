@@ -2293,6 +2293,16 @@ class ScalpEngine:
                         f"{signal.price} (same-level guard)")
             return
 
+        # ── NO-OPPOSITE-DIRECTION guard (user rule) ──
+        # Never open a trade opposite an already-open position on the SAME symbol —
+        # holding buy+sell on one symbol just fights itself (self-inflicted whipsaw).
+        _opp = "sell" if signal.action == "buy" else "buy"
+        if any(p.base_symbol == base and p.action == _opp
+               for p in self.open_positions.values()):
+            logger.info(f"{base}: skip {signal.action} — already hold an opposite ({_opp}) "
+                        f"position (no-opposite-direction guard)")
+            return
+
         # ── Phase 3: master risk gate ──
         risk = self.risk.check_entry(spread_points=spread_pts)
         if not risk.allowed:

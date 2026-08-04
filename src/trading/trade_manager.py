@@ -186,6 +186,31 @@ class TradeManager:
             mult = 0.8
         return (st.atr_points or 60) * mult
 
+    def _wick_points(self, st) -> float:
+        """The symbol's typical adverse WICK size in points — the breathing room a
+        trailing stop needs so normal noise doesn't wick it out. Learned per symbol
+        (personality 'wick_points'); else derived from ATR (~0.35xATR default)."""
+        p = self._personality(st)
+        if "wick_points" in p:
+            return max(float(p["wick_points"]), 1.0)
+        return max((st.atr_points or 60) * 0.35, 5.0)
+
+    def _be_trigger_points(self, st, spread_points, wick) -> float:
+        """Profit (pts) needed before moving to break-even: must clear the symbol's
+        wick noise + spread so we don't BE-out on a normal retrace. Learnable."""
+        p = self._personality(st)
+        if "be_trigger_pts" in p:
+            return max(float(p["be_trigger_pts"]), spread_points + 5)
+        return max(spread_points + wick * 1.2, spread_points + 20)
+
+    def _trail_points(self, st, spread_points, wick) -> float:
+        """RESPONSIVE trail distance (pts): wick-sized breathing room, NOT raw ATR
+        (which gave too much back). Default ~1.3x wick — follows closely yet survives
+        normal wicks; learnable per symbol via 'trail_wick_mult'."""
+        p = self._personality(st)
+        mult = float(p.get("trail_wick_mult", 1.3))
+        return max(wick * mult, spread_points + 12)
+
     def _reversal_tell(self, st, live: dict, signature: dict) -> str:
         """Classify the live momentum state vs the MFE peak snapshot, guided by the
         PROVEN, PER-SYMBOL reversal signature.
@@ -419,20 +444,21 @@ class TradeManager:
             return None  # rely on broker TP/SL only
 
         if v in ("BE_PLUS_TRAIL", "HYBRID_LLM"):
-            # Both share the fast, deterministic protection (BE+ then trail).
-            # HYBRID_LLM ADDITIONALLY gets a throttled LLM review, applied by the
-            # engine (see llm_review_due) — that is what makes it a distinct arm.
-            # 1) move to BE+ only after a real profit buffer (avoid premature BE)
-            buffer_pts = max(1.5 * spread_points + 30, st.atr_points * 0.5 if st.atr_points else 30)
-            if not st.moved_to_be and profit_points >= buffer_pts:
-                be_plus = st.entry + (spread_points + 10) * point * (1 if st.action == "buy" else -1)
+            # WICK-AWARE BE + RESPONSIVE TRAIL (user design): raw ATR trailing gave too
+            # much back. Instead: (1) move to BE+ once profit clears the symbol's WICK
+            # noise (so we don't get wicked out prematurely), then (2) trail at a
+            # distance sized to the wick (breathing room) but TIGHTER + more responsive
+            # than raw ATR, following best_price so it retains more of the move.
+            wick = self._wick_points(st)                      # symbol's typical adverse wick (pts)
+            be_trigger = self._be_trigger_points(st, spread_points, wick)
+            if not st.moved_to_be and profit_points >= be_trigger:
+                be_plus = st.entry + (spread_points + max(5, wick * 0.25)) * point * (1 if st.action == "buy" else -1)
                 st.moved_to_be = True
                 st.trail_active = True
                 self._log(st, "move_to_be_plus", be_plus)
                 return {"modify_sl": round(be_plus, 6)}
-            # 2) once trailing, follow at a "less destructive" distance
             if st.trail_active:
-                trail_dist = max((st.atr_points or 60) * 0.6, spread_points + 20) * point
+                trail_dist = self._trail_points(st, spread_points, wick) * point
                 new_sl = (st.best_price - trail_dist) if st.action == "buy" else (st.best_price + trail_dist)
                 if self._sl_improves(st, new_sl):
                     st.sl = new_sl
@@ -441,9 +467,9 @@ class TradeManager:
             return None
 
         if v == "TRAIL_ONLY":
-            # trail from the start once any profit exists
-            if profit_points > (spread_points + 10):
-                trail_dist = max((st.atr_points or 60) * 0.8, spread_points + 25) * point
+            wick = self._wick_points(st)
+            if profit_points > (spread_points + max(10, wick * 0.5)):
+                trail_dist = self._trail_points(st, spread_points, wick) * point
                 new_sl = (st.best_price - trail_dist) if st.action == "buy" else (st.best_price + trail_dist)
                 if self._sl_improves(st, new_sl):
                     st.sl = new_sl
