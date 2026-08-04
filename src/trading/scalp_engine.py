@@ -1765,12 +1765,14 @@ class ScalpEngine:
                 params = dict(self.param_optimizer.current_params(resolved_symbol) or {})
             except Exception:
                 params = {}
-        # learned entry-strength floors (ATR-normalized) for this symbol
+        # learned per-symbol PRICE-STRETCH ceiling (the one feature that separates
+        # winners; strength magnitude does NOT, so we do not gate on it).
         try:
             for key, sv in (getattr(self, "_entry_strength", {}) or {}).items():
                 if resolved_symbol.upper().startswith(key.upper()):
-                    params["osma_strength_min"] = sv.get("osma_strength_min", 0.0)
-                    params["power_strength_min"] = sv.get("power_strength_min", 0.0)
+                    ms = sv.get("max_stretch_atr", 0.0)
+                    if ms and ms > 0:
+                        params["max_stretch_atr"] = ms
                     break
         except Exception:
             pass

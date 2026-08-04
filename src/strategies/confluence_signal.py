@@ -143,24 +143,20 @@ def evaluate_confluence_bar(ind: dict, cfg=None) -> dict:
        (direction == "sell" and not osma_now < osma_prev):
         return {"action": "hold", "trigger_kind": trigger_kind, "confluence": 0,
                 "reason": "OsMA not accelerating"}
-    # LEARNED per-symbol STRENGTH gate (the core of what the model learns): the OsMA
-    # and dominant-power (Bulls for long / Bears for short) must clear the strength
-    # level that has proven to give reliable entries for THIS symbol. Thresholds are
-    # scale-free (ATR-normalized) and supplied by the entry-strength learner; when
-    # absent (cold start) the gate is permissive (>0), i.e. behaves as before.
-    bulls_v = float(ind.get("bulls_power") or 0); bears_v = float(ind.get("bears_power") or 0)
-    osma_min = c.get("osma_strength_min", 0.0) * atr        # ATR-scaled -> per symbol
-    power_min = c.get("power_strength_min", 0.0) * atr
-    if direction == "buy":
-        if abs(osma_now) < osma_min or bulls_v < power_min:
+    # LEARNED PRICE-STRETCH gate (the ONE entry feature that actually separates
+    # winners from losers in the full GoldShark telemetry: winners enter MUCH closer
+    # to the EMA — PriceStretch 85% separation on BTC — losers enter over-extended).
+    # NOTE: OsMA/Bulls/Bears STRENGTH magnitude does NOT separate winners (verified:
+    # raising those thresholds lowers win-rate), so we deliberately do NOT gate on
+    # strength. `max_stretch_atr` is learned per symbol (|close-ema|/ATR ceiling);
+    # absent/0 -> no extra gate (soft-check stretch still applies).
+    ema_fast = float(ind.get("ema_fast") or close)
+    max_stretch = c.get("max_stretch_atr", 0.0)
+    if max_stretch and atr > 0:
+        stretch = abs(close - ema_fast) / atr
+        if stretch > max_stretch:
             return {"action": "hold", "trigger_kind": trigger_kind, "confluence": 0,
-                    "reason": f"below learned strength (osma {osma_now:.3f}<{osma_min:.3f} "
-                              f"or bulls {bulls_v:.3f}<{power_min:.3f})"}
-    else:
-        if abs(osma_now) < osma_min or bears_v > -power_min:
-            return {"action": "hold", "trigger_kind": trigger_kind, "confluence": 0,
-                    "reason": f"below learned strength (osma {abs(osma_now):.3f}<{osma_min:.3f} "
-                              f"or bears {bears_v:.3f}>-{power_min:.3f})"}
+                    "reason": f"over-extended: stretch {stretch:.2f}xATR > learned max {max_stretch:.2f}"}
     checks = _soft_checks(direction, close, float(ind.get("ema_fast") or close),
                           float(ind.get("ema_prev") or ind.get("ema_fast") or close),
                           atr, float(ind.get("bulls_power") or 0), float(ind.get("bears_power") or 0),
