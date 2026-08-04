@@ -996,14 +996,16 @@ class StrategyRegistry:
         
         return results
     
-    def get_focused_signal(self, indicators: dict):
+    def get_focused_signal(self, indicators: dict, params: dict = None):
         """
         FOCUSED high-edge entry: only fire when a validated (strategy x regime)
-        pocket triggers for this symbol. Backtest-proven to beat the broad
-        ensemble (PF 1.24 vs 1.04 on XAUUSD M15). Returns a Signal or None.
+        pocket triggers for this symbol. Returns a Signal or None.
 
-        Falls back to None (caller can then use the ensemble) when the symbol has
-        no focused rules defined.
+        `params` (the engine's per-symbol TUNED params incl. LEARNED STRENGTH FLOORS
+        osma_min_long/dom_min/runway_min/etc.) is passed straight through to the
+        strategy signal_fn. WITHOUT this, the confluence evaluator receives {} and the
+        strength gates stay OFF live even when the optimizer/learner found floors — the
+        last missing link in the strength wiring.
         """
         from src.strategies.base import Signal
         symbol = indicators.get("symbol", "")
@@ -1024,7 +1026,12 @@ class StrategyRegistry:
             if sd is None or getattr(sd, "status", "active") in ("disabled", "testing"):
                 continue
             try:
-                sig = sd.signal_fn(indicators, sd.params)
+                # merge the engine's tuned/learned params OVER the strategy defaults so
+                # strength floors (and tuned periods) actually reach the confluence.
+                call_params = dict(sd.params or {})
+                if params:
+                    call_params.update(params)
+                sig = sd.signal_fn(indicators, call_params)
             except Exception:
                 continue
             if sig.action in ("buy", "sell"):

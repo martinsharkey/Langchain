@@ -2055,7 +2055,7 @@ class ScalpEngine:
         # EMA_TrendFollow, MACD_Momentum, CCI) was firing most entries and is exactly
         # the drift we are removing. If the confluence says hold, we do NOT trade.
         signal = None
-        fs = self.registry.get_focused_signal(indicators)
+        fs = self.registry.get_focused_signal(indicators, tuned)   # pass tuned strength floors
         if fs is not None and fs.action != "hold":
             signal = fs
         if signal is None or signal.action == "hold":
