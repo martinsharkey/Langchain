@@ -114,3 +114,14 @@ if __name__ == "__main__":
     test_bearish_cross_sells()
     test_weak_confluence_holds()
     print("osma confluence tests passed")
+
+
+def test_anticipated_cross_fires_when_enabled():
+    """allow_anticipated must actually produce an entry (was a silent no-op: the
+    MACD/OsMA-sign gate always rejected anticipated because osma_now is still <=0)."""
+    # anticipated-UP: osma below zero, rising toward it (not yet crossed)
+    d = _base_long(osma=-0.05, osma_prev=-0.30)  # in band, rising, not crossed
+    p = dict(PARAMS); p["allow_anticipated"] = True
+    s = osma_confluence_signal(d, p)
+    assert s.action == "buy", f"anticipated cross was dead-gated: {s.reason}"
+    assert s.metadata.get("trigger") == "anticipated", s.reason

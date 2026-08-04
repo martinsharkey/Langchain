@@ -137,7 +137,9 @@ class TradePostMortem:
 
     # ── per-trade reflection ──
     def reflect_trade(self, trade: dict, window_min: int = None) -> Optional[TradeReflection]:
-        import MetaTrader5 as mt5
+        # (no top-level MT5 import: the excursion math needs none, and timeframe codes
+        # come from _tf_const which already falls back to plain ints. This keeps
+        # reflect_trade + its tests runnable on any box, not only Windows+MT5. #I3)
         sym = trade["symbol"]; action = trade["action"]
         prof = self._profile(sym)
         window_min = window_min or prof["window_min"]

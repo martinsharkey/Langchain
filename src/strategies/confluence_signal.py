@@ -162,7 +162,14 @@ def evaluate_confluence_bar(ind: dict, cfg=None) -> dict:
     # moves where MACD hadn't yet crossed zero (e.g. BTC osma +15 but macd -5). Use the
     # main-vs-signal check when the signal is available; else fall back to OsMA sign.
     macd_sig = ind.get("macd_signal")
-    if macd_sig is not None:
+    is_anticipated = trigger_kind == "anticipated"
+    if is_anticipated:
+        # ANTICIPATED cross hasn't happened yet (osma_now is still on the OLD side by
+        # definition), so a strict sign/main-vs-signal gate would ALWAYS reject it,
+        # making allow_anticipated a silent no-op. Use a DIRECTION-only check: OsMA
+        # must be MOVING the right way (toward/through zero) for the intended side.
+        macd_aligned = (osma_now > osma_prev) if direction == "buy" else (osma_now < osma_prev)
+    elif macd_sig is not None:
         macd_aligned = (macd > float(macd_sig)) if direction == "buy" else (macd < float(macd_sig))
     else:
         macd_aligned = (osma_now > 0) if direction == "buy" else (osma_now < 0)
