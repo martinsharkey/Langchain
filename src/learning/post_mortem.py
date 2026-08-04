@@ -215,10 +215,19 @@ class TradePostMortem:
         conn = sqlite3.connect(self.experience_db.db_path); conn.row_factory = sqlite3.Row
         q = ("SELECT id, timestamp, symbol, action, entry_price, outcome, profit_loss, "
              "mgmt_variant, strategy_used FROM trades WHERE outcome IN ('win','loss','breakeven') ")
+        params = []
         if only_losers:
             q += "AND outcome='loss' "
-        q += "ORDER BY id DESC LIMIT ?"
-        rows = [dict(r) for r in conn.execute(q, (limit,)).fetchall()]
+        # learning window: current behaviour only (regime-break + recency + OsMA-only +
+        # exclude SIMULATED_OHLC) so post-mortem diagnoses the live confluence, not the
+        # retired ensemble era.
+        try:
+            lw, lp = self.experience_db.learning_window_clause()
+            q += lw; params += lp
+        except Exception:
+            pass
+        q += " ORDER BY id DESC LIMIT ?"; params.append(limit)
+        rows = [dict(r) for r in conn.execute(q, tuple(params)).fetchall()]
         conn.close()
         return rows
 

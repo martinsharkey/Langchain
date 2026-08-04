@@ -22,7 +22,8 @@ class _DB:
 def _make_db(path, symbol="BTCUSD", n=200):
     conn = sqlite3.connect(path)
     conn.execute("""CREATE TABLE trades (id INTEGER PRIMARY KEY AUTOINCREMENT, symbol TEXT,
-                    outcome TEXT, exit_reason TEXT, indicators_snapshot TEXT, data_source TEXT)""")
+                    outcome TEXT, exit_reason TEXT, indicators_snapshot TEXT, data_source TEXT,
+                    strategy_used TEXT, timestamp TEXT)""")
     random.seed(1)
     for i in range(n):
         win = i % 2 == 0
@@ -34,8 +35,9 @@ def _make_db(path, symbol="BTCUSD", n=200):
                 "osma_prev": -atr * 0.1, "ema_fast": 1000, "ema_prev": 999, "atr": atr,
                 "bulls_power": (atr * 1.2 if win else -atr * 0.4), "bears_power": atr * 0.05,
                 "rsi": (58 if win else 42), "close": 1000}
-        conn.execute("INSERT INTO trades (symbol, outcome, exit_reason, indicators_snapshot, data_source) VALUES (?,?,?,?,?)",
-                     (symbol, "win" if win else "loss", "tp" if win else "sl", json.dumps(snap), "LIVE_MICRO"))
+        conn.execute("INSERT INTO trades (symbol, outcome, exit_reason, indicators_snapshot, data_source, strategy_used, timestamp) VALUES (?,?,?,?,?,?,?)",
+                     (symbol, "win" if win else "loss", "tp" if win else "sl", json.dumps(snap), "LIVE_MICRO",
+                      "OsMA_Confluence", "2099-01-01T00:00:00"))
     conn.commit(); conn.close()
 
 

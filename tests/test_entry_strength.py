@@ -167,3 +167,49 @@ if __name__ == "__main__":
     test_frequency_analyzer_recommends_without_choking()
     test_frequency_analyzer_wont_choke_when_all_levels_too_thin()
     print("entry quality tests passed")
+
+
+def test_signed_strength_floors_enforced_when_set():
+    """Signed per-side strength floors (ATR-normalized) must gate when != 0, and be
+    OFF at 0 (sign-only). This is the core buyer/seller-vigour signal."""
+    from src.strategies.confluence_signal import evaluate_confluence_bar
+    # fresh long, osma just above 0. atr=3. bulls=2.0 -> bulls/atr=0.67
+    base = {"close": 2000.0, "osma": 0.6, "osma_prev": -0.1, "macd_line": 0.5,
+            "ema_fast": 1999.5, "ema_prev": 1999.0, "atr": 3.0, "atr_prev": 2.9,
+            "bulls_power": 2.0, "bears_power": 1.0, "rsi": 55.0, "med_atr": 3.0}
+    # floor OFF (0) -> enters
+    assert evaluate_confluence_bar(dict(base), {}).get("action") == "buy"
+    # bulls_min_long 1.0 (ATR units) -> needs bulls >= 1.0*3 = 3.0; bulls=2.0 -> HOLD
+    r = evaluate_confluence_bar(dict(base), {"bulls_min_long": 1.0})
+    assert r["action"] == "hold" and "strength" in r["reason"], r
+    # bulls_min_long 0.5 -> needs bulls >= 1.5; bulls=2.0 -> passes -> buy
+    assert evaluate_confluence_bar(dict(base), {"bulls_min_long": 0.5}).get("action") == "buy"
+
+
+def test_strength_floor_scales_per_symbol_by_atr():
+    """The SAME ATR-normalized floor must translate to different raw levels per symbol
+    (gold small ATR, BTC big ATR) — proving one PARAM_SPACE range fits all symbols."""
+    from src.strategies.confluence_signal import evaluate_confluence_bar
+    gold = {"close": 2000.0, "osma": 0.6, "osma_prev": -0.1, "macd_line": 0.5,
+            "ema_fast": 1999.5, "ema_prev": 1999.0, "atr": 3.0, "atr_prev": 2.9,
+            "bulls_power": 2.0, "bears_power": 1.0, "rsi": 55.0, "med_atr": 3.0}
+    btc = dict(gold); btc.update({"atr": 100.0, "atr_prev": 99.0, "bulls_power": 60.0,
+                                  "osma": 15.0, "osma_prev": -1.0, "macd_line": 10.0})
+    # floor 0.5 ATR: gold needs bulls>=1.5 (has 2.0 -> buy), BTC needs bulls>=50 (has 60 -> buy)
+    assert evaluate_confluence_bar(dict(gold), {"bulls_min_long": 0.5}).get("action") == "buy"
+    assert evaluate_confluence_bar(dict(btc), {"bulls_min_long": 0.5}).get("action") == "buy"
+    # floor 0.8 ATR: gold needs bulls>=2.4 (has 2.0 -> HOLD), BTC needs bulls>=80 (has 60 -> HOLD)
+    assert evaluate_confluence_bar(dict(gold), {"bulls_min_long": 0.8}).get("action") == "hold"
+    assert evaluate_confluence_bar(dict(btc), {"bulls_min_long": 0.8}).get("action") == "hold"
+
+
+def test_strength_params_in_param_space_wide_and_signed():
+    """All 8 signed floors must be in PARAM_SPACE with WIDE ranges (reach +-3+)."""
+    from src.learning.param_optimizer import PARAM_SPACE
+    for k in ("osma_min_long","osma_max_short","macd_min_long","macd_max_short",
+              "bulls_min_long","bears_min_long","bears_max_short","bulls_max_short"):
+        assert k in PARAM_SPACE, f"missing {k}"
+    # long floors reach >=3, short floors reach <=-3 (ATR units -> raw far beyond +-3)
+    assert PARAM_SPACE["osma_min_long"][1] >= 3.0
+    assert PARAM_SPACE["osma_max_short"][0] <= -3.0
+    assert PARAM_SPACE["bulls_min_long"][1] >= 3.0

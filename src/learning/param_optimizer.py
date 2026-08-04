@@ -50,6 +50,21 @@ PARAM_SPACE = {
     "min_ema_slope": (0.0, 0.5, 0.02, float),
     "price_stretch_mult": (1.0, 4.0, 0.5, float),
     "min_confluence": (1, 5, 1, int),
+    # ── SIGNED PER-SIDE STRENGTH FLOORS (ATR-normalized so one wide range fits gold
+    # ~0.5 and BTC ~15+; the confluence scales by ATR). These are THE core signal —
+    # how vigorous buyer/seller activity is. Long floors are minimums (>=), short
+    # floors maximums (<=, negative). Default/step includes 0 = gate OFF. Ranges are
+    # WIDE and signed (reach well beyond +-3 in ATR units). The optimizer + walk-forward
+    # DISCOVER the best per-symbol floors — no hardcoded folklore.
+    "osma_min_long":   (0.0, 3.0, 0.1, float),
+    "osma_max_short":  (-3.0, 0.0, 0.1, float),
+    "macd_min_long":   (0.0, 3.0, 0.1, float),
+    "macd_max_short":  (-3.0, 0.0, 0.1, float),
+    "bulls_min_long":  (0.0, 5.0, 0.1, float),
+    "bears_min_long":  (0.0, 5.0, 0.1, float),   # bears pulled positive in strong uptrend
+    "bears_max_short": (-5.0, 0.0, 0.1, float),
+    "bulls_max_short": (-5.0, 0.0, 0.1, float),
+    "atr_min_rel":     (0.0, 1.5, 0.1, float),   # relative ATR floor (vs median ATR)
     "sl_atr":      (0.5, 3.0, 0.5, float),
     "tp_rr":       (0.5, 3.0, 0.5, float),
 }
@@ -59,6 +74,11 @@ DEFAULTS = {
     "ema_period": 14, "atr_period": 14, "power_period": 13, "rsi_period": 14,
     "atr_min": 0.0, "atr_max": 0.0, "min_ema_slope": 0.02,
     "price_stretch_mult": 2.0, "min_confluence": 4,
+    # signed strength floors default 0 = gate OFF (sign-only) -> current behaviour
+    "osma_min_long": 0.0, "osma_max_short": 0.0,
+    "macd_min_long": 0.0, "macd_max_short": 0.0,
+    "bulls_min_long": 0.0, "bears_min_long": 0.0,
+    "bears_max_short": 0.0, "bulls_max_short": 0.0, "atr_min_rel": 0.0,
     "sl_atr": 2.0, "tp_rr": 1.0,
 }
 

@@ -224,6 +224,10 @@ LEARNING_ADAPTATION_ENABLED = os.getenv("LEARNING_ADAPTATION_ENABLED", "true").l
 #    feed the learners, so learning always favours recent behaviour. 0 = no window.
 LEARNING_REGIME_BREAK = os.getenv("LEARNING_REGIME_BREAK", "2026-08-04T08:00:00")
 LEARNING_WINDOW_DAYS = int(os.getenv("LEARNING_WINDOW_DAYS", "5"))
+# Restrict learning to the sole entry strategy (OsMA_Confluence) after cutover so the
+# retired ensemble era never trains the bot. NULL strategy rows inside the window are
+# kept (pre-attribution). Set false to learn across all strategies.
+LEARNING_OSMA_ONLY = os.getenv("LEARNING_OSMA_ONLY", "true").lower() in ("true", "1", "yes")
 # Auto-revert: when a symbol's recent realised expectancy degrades vs its
 # best-known checkpoint by more than this (in expectancy units), restore the
 # checkpoint config and mark the change as a failed direction.

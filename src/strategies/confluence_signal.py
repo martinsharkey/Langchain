@@ -219,6 +219,36 @@ def evaluate_confluence_bar(ind: dict, cfg=None) -> dict:
         if runway < runway_min:
             return {"action": "hold", "trigger_kind": trigger_kind, "confluence": 0,
                     "reason": f"low runway {runway:.2f} < learned {runway_min:.2f} (FinalMultiplier)"}
+    # ── SIGNED PER-SIDE STRENGTH FLOORS (the core signal: how VIGOROUS buyer/seller
+    # activity is). Floors are ATR-NORMALIZED (scale-free) so ONE wide PARAM_SPACE range
+    # works for gold (~0.5) and BTC (~15+): the stored floor is in ATR units and scaled
+    # by this bar's ATR here. The optimizer + walk-forward DISCOVER them. Default 0 =
+    # gate OFF (sign-only). Long floors are MINIMUMS (>=), short floors MAXIMUMS (<=).
+    # Bulls>0 AND Bears>0 (long) / Bears<0 AND Bulls<0 (short) stays enforced in soft checks.
+    bulls_v = float(ind.get("bulls_power") or 0); bears_v = float(ind.get("bears_power") or 0)
+    macd_v = macd
+    _a = atr if atr > 0 else 1.0
+    def _floor(key): return float(c.get(key, 0.0) or 0.0) * _a   # ATR-scaled per symbol
+    if direction == "buy":
+        gates = [
+            ("osma", osma_now, _floor("osma_min_long"), ">="),
+            ("macd", macd_v, _floor("macd_min_long"), ">="),
+            ("bulls", bulls_v, _floor("bulls_min_long"), ">="),
+            ("bears", bears_v, _floor("bears_min_long"), ">="),
+        ]
+    else:
+        gates = [
+            ("osma", osma_now, _floor("osma_max_short"), "<="),
+            ("macd", macd_v, _floor("macd_max_short"), "<="),
+            ("bears", bears_v, _floor("bears_max_short"), "<="),
+            ("bulls", bulls_v, _floor("bulls_max_short"), "<="),
+        ]
+    for nm, val, floor, op in gates:
+        if floor == 0.0:
+            continue   # gate off
+        if (op == ">=" and val < floor) or (op == "<=" and val > floor):
+            return {"action": "hold", "trigger_kind": trigger_kind, "confluence": 0,
+                    "reason": f"{nm} strength {val:.3f} fails {op}{floor:.3f} floor"}
     checks = _soft_checks(direction, close, float(ind.get("ema_fast") or close),
                           float(ind.get("ema_prev") or ind.get("ema_fast") or close),
                           atr, float(ind.get("bulls_power") or 0), float(ind.get("bears_power") or 0),

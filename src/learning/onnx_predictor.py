@@ -152,15 +152,29 @@ class OnnxOutcomePredictor:
             ac, ap = self.db._account_clause()
         except Exception:
             ac, ap = "", []
+        # OsMA-only + regime-break so the model trains on the sole live strategy, NOT
+        # the retired ensemble era. (No recency WINDOW here: ONNX needs chronological
+        # history for the holdout; the regime-break already removes the poisoned era.)
+        _osma_break = ""
+        _obp = []
+        try:
+            from src import config
+            brk = getattr(config, "LEARNING_REGIME_BREAK", "") or ""
+            if brk:
+                _osma_break += " AND datetime(timestamp) > datetime(?)"; _obp.append(brk)
+            if getattr(config, "LEARNING_OSMA_ONLY", True):
+                _osma_break += " AND (strategy_used='OsMA_Confluence' OR strategy_used IS NULL)"
+        except Exception:
+            pass
         rows = conn.execute(
             "SELECT outcome, indicators_snapshot FROM trades "
             "WHERE outcome IN ('win','loss') AND symbol LIKE ? "
             "AND (exit_reason IS NULL OR exit_reason<>'pre_rebuild_synthetic') "
             # Bug 4: never train on fictitious interpolated-OHLC backtest rows.
             "AND (data_source IS NULL OR data_source<>'SIMULATED_OHLC') "
-            "AND indicators_snapshot IS NOT NULL AND indicators_snapshot!=''" + ac +
+            "AND indicators_snapshot IS NOT NULL AND indicators_snapshot!=''" + ac + _osma_break +
             " ORDER BY id ASC",            # CHRONOLOGICAL order (id is insertion order)
-            [sym_prefix + "%"] + ap).fetchall()
+            [sym_prefix + "%"] + ap + _obp).fetchall()
         conn.close()
         X, y = [], []
         for r in rows:

@@ -198,3 +198,32 @@ any config the checkpointer has recorded as a failed direction.
 - `src/strategies/osma_confluence.py` — live thin adapter + confidence
 - `src/strategies/indicators.py` — indicator formulas + the Bulls/Bears guard comment
 - `src/learning/param_optimizer.py` — PARAM_SPACE (what we tune)
+
+## Signed strength floors (the core vigour signal) — optimisable
+
+Beyond indicator PERIODS, the confluence gates on the signed STRENGTH of the entry
+indicators — how vigorous buyer/seller activity is. These are the single most
+important discriminator and are LEARNED per symbol (never hardcoded), ATR-normalized
+so one wide range fits gold (~0.5) and BTC (~15+):
+
+| Param (PARAM_SPACE) | Applies | Rule |
+|---|---|---|
+| `osma_min_long` / `osma_max_short` | OsMA | long: osma >= floor*ATR; short: osma <= floor*ATR |
+| `macd_min_long` / `macd_max_short` | MACD line | same, per side |
+| `bulls_min_long` / `bulls_max_short` | Bulls Power | long floor (>=), short ceiling (<=) |
+| `bears_min_long` / `bears_max_short` | Bears Power | long floor (bears pulled +ve), short (<=, strong -ve) |
+| `atr_min_rel` | ATR | activity floor vs median ATR |
+
+- **Default 0 = gate OFF** (sign-only) so behaviour is preserved until a floor is proven.
+- Ranges are WIDE and signed (reach well beyond ±3 in ATR units); the optimizer +
+  walk-forward DISCOVER the best per-symbol floors. Gold and BTC do not share a raw range.
+- Confidence rises when OsMA + MACD + Bulls + Bears are all same-side AND further past
+  their floors.
+
+## MACD rule (correction)
+
+MACD confirmation is **main vs SIGNAL line** (`macdMain > macdSignal` for long),
+exactly GoldShark's `IsM1MACDAligned` — NOT MACD vs the zero line. Since
+`macd_line - signal == OsMA`, this is equivalent to the OsMA sign (already set by the
+trigger). The old macd-vs-zero gate was an over-restriction that blocked OsMA-aligned
+entries into big moves; it has been removed.

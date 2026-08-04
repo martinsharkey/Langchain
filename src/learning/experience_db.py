@@ -149,24 +149,37 @@ class ExperienceDatabase:
         return (f" AND {col_login}=? AND {col_server}=?",
                 [acct["login"], acct.get("server")])
 
-    def learning_window_clause(self, alias: str = ""):
+    def learning_window_clause(self, alias: str = "", osma_only: bool = True,
+                               exclude_sim_ohlc: bool = True):
         """Return (sql_fragment, params) restricting LEARNING reads to CURRENT
-        behaviour: excludes the pre-fix regime (<= LEARNING_REGIME_BREAK) and, if set,
-        keeps only the last LEARNING_WINDOW_DAYS. This stops the poisoned pre-fix era
-        (ensemble/exact-cross/phantom-MFE) from dragging the learners' expectancy.
-        Use in checkpointer/entry-quality/edge/graduation reads — NOT in raw recording."""
+        behaviour: excludes the pre-fix regime (<= LEARNING_REGIME_BREAK), keeps only
+        the last LEARNING_WINDOW_DAYS, and (default) restricts to OsMA_Confluence trades
+        and excludes SIMULATED_OHLC. This stops the poisoned pre-fix ensemble era from
+        dragging the learners. Use in checkpointer/entry-quality/edge/graduation/
+        post-mortem reads — NOT in raw recording.
+
+        osma_only: only strategy_used='OsMA_Confluence' (+ NULL for legacy rows tagged
+          before attribution existed) once past the cutover. Set False to include all.
+        """
         frag, params = "", []
         col = f"{alias}timestamp"
         try:
             from src import config
             brk = getattr(config, "LEARNING_REGIME_BREAK", "") or ""
             win = int(getattr(config, "LEARNING_WINDOW_DAYS", 0) or 0)
+            osma_flag = getattr(config, "LEARNING_OSMA_ONLY", True) and osma_only
         except Exception:
-            brk, win = "", 0
+            brk, win, osma_flag = "", 0, osma_only
         if brk:
             frag += f" AND datetime({col}) > datetime(?)"; params.append(brk)
         if win > 0:
             frag += f" AND datetime({col}) > datetime('now', ?)"; params.append(f"-{win} days")
+        if exclude_sim_ohlc:
+            frag += f" AND ({alias}data_source IS NULL OR {alias}data_source<>'SIMULATED_OHLC')"
+        if osma_flag:
+            # only the sole entry strategy (NULL kept for pre-attribution rows inside
+            # the window; the regime-break cut already removes the old ensemble era).
+            frag += f" AND ({alias}strategy_used='OsMA_Confluence' OR {alias}strategy_used IS NULL)"
         return frag, params
 
     def backfill_account(self, login: int, server: str, trade_mode: str = "DEMO") -> int:

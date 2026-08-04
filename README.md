@@ -53,9 +53,15 @@ Set via `TRADING_MODE` in `.env`, or as the first CLI arg to `app.py` (the singl
 
 Each cycle (default every 15s), for each configured symbol:
 
-1. **Fetch live candles** from MT5 (`XAUUSD-ECN`, `BTCUSD`, â€¦).
-2. **Compute indicators** (RSI, EMA, MACD, Bollinger, ATR, S/R).
-3. **Ensemble signal** from 7 real strategies (voting).
+1. **Fetch live candles** from MT5 (`XAUUSD-ECN`, `BTCUSD`, ...).
+2. **Compute indicators** (OsMA, MACD, Bulls/Bears Power, EMA, ATR, RSI).
+3. **Entry = OsMA_Confluence ONLY** (the single proven GoldShark rule). Trigger:
+   OsMA zero-cross / anticipated / fresh momentum (sign-age within max age) on the
+   CLOSED bar; MACD aligned (main-vs-signal); Bulls>0 AND Bears>0 for long / mirror
+   for short; EMA side + not over-stretched; ATR active; RSI not exhausted. Signed
+   per-side STRENGTH floors (osma/macd/bulls/bears, ATR-normalized) are learned per
+   symbol by the optimizer + walk-forward — the core "how vigorous is buyer/seller
+   activity" signal. There is NO ensemble fallback: if confluence holds, no trade.
 4. **Adaptive SL/TP** sized to each symbol's spread & minimum stop distance
    (fixed points for gold; percentage-based for high-priced BTC).
 5. **Place a real order** via the `BrokerAdapter` (0.01 lots in LIVE_MICRO).
