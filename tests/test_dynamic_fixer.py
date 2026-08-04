@@ -18,12 +18,20 @@ class _PM:
                 "findings": ["43/72 losers stopped then recovered — SL too tight"]}
 
 
+class _PMExt:
+    """post-mortem that diagnoses ENTERING LATE -> entry_extension_filter directive."""
+    def analyze(self, symbol=None, limit=40):
+        return {"directives": {"entry_extension_filter": True},
+                "findings": ["22/40 entries were into already-extended moves"]}
+
+
 class _Engine:
-    def __init__(self, exp=-0.19, n=95):
+    def __init__(self, exp=-0.19, n=95, pm=None):
         self.adapters = {"BTCUSD": _Adapter()}
-        self.post_mortem = _PM()
+        self.post_mortem = pm or _PM()
         self._exit_override = {}
         self._giveback_override = {}
+        self._stretch_override = {}
         self.param_optimizer = None
         self.edge_discovery = None
         self.researcher = None
@@ -31,6 +39,17 @@ class _Engine:
         self._exp = (exp, n)
     def _recent_expectancy(self, base): return self._exp
     def _tuned_params(self, resolved): return {"sl_atr": 1.0, "tp_rr": 2.0}
+
+
+def test_entering_late_applies_live_stretch_ceiling():
+    """entry_extension_filter (entering into extended moves) must apply a LIVE
+    max_stretch_atr ceiling, not just stay a directive (blocker #2)."""
+    e = _Engine(exp=-0.19, n=95, pm=_PMExt())
+    fx = DynamicFixer(e)
+    r = fx.fix_symbol("BTCUSD")
+    assert r["action"] == "exit_fix", r
+    assert "BTCUSD" in e._stretch_override, r
+    assert e._stretch_override["BTCUSD"] <= 2.0 and e._stretch_override["BTCUSD"] >= 0.7
 
 
 def test_losing_symbol_gets_exit_fix_applied_live():
@@ -71,4 +90,5 @@ if __name__ == "__main__":
     test_profitable_symbol_not_touched()
     test_small_sample_not_touched()
     test_escalates_when_exit_fix_already_tried()
+    test_entering_late_applies_live_stretch_ceiling()
     print("dynamic fixer tests passed")

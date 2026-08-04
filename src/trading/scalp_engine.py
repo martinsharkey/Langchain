@@ -196,6 +196,10 @@ class ScalpEngine:
         # bypassing the backtest gate so a diagnosed "SL too tight" fix reaches
         # live trades immediately (checkpointer verifies + reverts if worse).
         self._exit_override: dict = {}
+        # #36b live per-symbol ENTRY extension override (max_stretch_atr) set by the
+        # DynamicFixer when the post-mortem diagnoses ENTERING LATE / into extended
+        # moves — a diagnosed entry fix must reach live, not stay a directive.
+        self._stretch_override: dict = {}
 
         # mql5 knowledge RAG (#22) + edge discovery (#31) + continual researcher (#32).
         # All optional/non-fatal; they make the learning loop continually improve.
@@ -1729,6 +1733,7 @@ class ScalpEngine:
                 if hasattr(self, attr):
                     setattr(self, attr, {} if "cache" in attr else None)
             self._giveback_override = {}
+            self._stretch_override = {}
         logger.info(f"[ACCOUNT] connected {trade_mode} login={login} server={server}")
 
     def _learning_health(self) -> dict:
@@ -1791,6 +1796,15 @@ class ScalpEngine:
                 if resolved_symbol.upper().startswith(key.upper()):
                     for gk, gv in (sv.get("recipe") or {}).items():
                         params[gk] = gv
+                    break
+        except Exception:
+            pass
+        # #36b DynamicFixer live ENTRY-extension override -> tighten max_stretch_atr so
+        # a diagnosed "entering late / into extended moves" fix actually gates entries.
+        try:
+            for k, v in (getattr(self, "_stretch_override", {}) or {}).items():
+                if resolved_symbol.upper().startswith(k):
+                    params["max_stretch_atr"] = v
                     break
         except Exception:
             pass

@@ -64,7 +64,8 @@ class DynamicFixer:
         detail = {}
 
         # 1) EXIT FIX — the dominant, evidence-backed leak (applied LIVE, gate-free)
-        if last != "exit_fix" and (directives.get("sl_atr") or directives.get("giveback")):
+        if last != "exit_fix" and (directives.get("sl_atr") or directives.get("giveback")
+                                   or directives.get("entry_extension_filter")):
             ov = (self.e._exit_override.setdefault(base.upper(), {}))
             cur_sl = ov.get("sl_atr", self.e._tuned_params(resolved).get("sl_atr", 1.0))
             if directives.get("sl_atr"):
@@ -72,8 +73,15 @@ class DynamicFixer:
             if directives.get("giveback"):
                 cur_gb = self.e._giveback_override.get(base.upper(), 0.6)
                 self.e._giveback_override[base.upper()] = round(min(cur_gb + float(directives["giveback"]), 0.9), 2)
+            # ENTERING LATE / into extended moves -> apply a live max_stretch_atr ceiling
+            # (tighten toward the EMA) so the diagnosed ENTRY fix reaches live, not just
+            # a directive. Start at 1.5xATR and ratchet tighter each time it recurs.
+            if directives.get("entry_extension_filter"):
+                cur_st = self.e._stretch_override.get(base.upper(), 2.0)
+                self.e._stretch_override[base.upper()] = round(max(cur_st - 0.3, 0.7), 2)
             step = "exit_fix"
-            detail = {"sl_atr": ov.get("sl_atr"), "giveback": self.e._giveback_override.get(base.upper())}
+            detail = {"sl_atr": ov.get("sl_atr"), "giveback": self.e._giveback_override.get(base.upper()),
+                      "max_stretch_atr": self.e._stretch_override.get(base.upper())}
 
         # 2) PARAM RETUNE — hand the leak to the optimizer (mql5-grounded, #25)
         elif last != "param_retune" and self.e.param_optimizer is not None:
@@ -84,12 +92,16 @@ class DynamicFixer:
             except Exception as ex:
                 detail = {"error": str(ex)[:80]}
 
-        # 3) STRATEGY SWITCH — re-run edge discovery so a better focused strategy wins
-        elif last != "strategy_switch" and self.e.edge_discovery is not None:
+        # 3) STRENGTH/PERIOD RETUNE — entries themselves are weak. FOCUSED is locked to
+        # OsMA_Confluence, so we do NOT sweep for a different strategy (that would be a
+        # non-OsMA entry). Instead run a deeper OsMA param/strength search so the
+        # optimizer discovers better osma/macd/bulls/bears strength FLOORS + periods.
+        elif last != "strength_retune" and self.e.param_optimizer is not None:
             try:
-                self.e.edge_discovery.sweep_all([base], persist=True)
-                step = "strategy_switch"
-                detail = {"swept": True}
+                r = self.e.param_optimizer.optimize(resolved, iterations=20, directives=directives)
+                step = "strength_retune"
+                detail = {"improved": r.get("improved"), "score": r.get("score"),
+                          "note": "OsMA strength/period only (no strategy switch)"}
             except Exception as ex:
                 detail = {"error": str(ex)[:80]}
 
