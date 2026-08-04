@@ -1074,6 +1074,23 @@ class ScalpEngine:
         ov = getattr(self, "_giveback_override", {}).get(base_symbol.upper())
         if ov is not None:
             base_p["giveback_frac"] = ov
+        # DATA-PROVEN exit config (from the collected GoldShark gold telemetry, 421
+        # trades): gold's edge is ENTIRELY exit-capture-gated (86% entries go green;
+        # at >=50% MFE capture gold nets +8950pts vs GoldShark's own 2%-capture
+        # -9220pts). Simulation showed a TIGHT trail massively outperforms — raw ATR
+        # trailing gives too much back. Seed a tight, responsive wick-trail per symbol
+        # (the learner/optimizer can still refine via tuned params). Only sets keys the
+        # learned personality hasn't already provided.
+        _exit_seed = {
+            "XAUUSD": {"wick_points": 15.0, "be_trigger_pts": 20.0, "trail_wick_mult": 1.0},
+            "GER40":  {"wick_points": 40.0, "be_trigger_pts": 50.0, "trail_wick_mult": 1.0},
+            "BTCUSD": {"wick_points": 400.0, "be_trigger_pts": 600.0, "trail_wick_mult": 1.2},
+        }
+        for _k, _cfg in _exit_seed.items():
+            if base_symbol.upper().startswith(_k):
+                for _kk, _vv in _cfg.items():
+                    base_p.setdefault(_kk, _vv)
+                break
         return base_p
 
     def _directional_winrate(self, base_symbol: str) -> dict:
