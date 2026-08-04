@@ -1950,6 +1950,31 @@ class ScalpEngine:
                             list(self.adapters.keys()))
                     except Exception as e:
                         logger.debug(f"entry-strength refresh skip: {e}")
+
+                # BIG-CANDLE alignment: did our OsMA config align with today's largest
+                # moves? If we miss the big candles, indicators are mis-configured for
+                # catching winners. Uses the engine's MT5 session (no 2nd connection).
+                try:
+                    from src.learning.big_candle import BigCandleAnalyzer
+                    from src.mt5.data import get_rates as _gr
+                    bca = BigCandleAnalyzer(
+                        get_rates_fn=_gr,
+                        point_fn=lambda s: (self.adapters_by_resolved[s].spec.point
+                                            if hasattr(self, "adapters_by_resolved") and s in self.adapters_by_resolved
+                                            else (0.01 if "XAU" in s.upper() else 1.0 if "BTC" in s.upper() else 0.1)))
+                    syms = [(b, self.adapters[b].resolved_symbol) for b in self.adapters]
+                    res = bca.report(syms)
+                    if self.knowledge_store is not None:
+                        for b, a in res.items():
+                            if a.get("aligned_pct") is not None:
+                                self.knowledge_store.remember(
+                                    key=f"big_candle_alignment_{b.upper()}", kind="finding",
+                                    topic="entry_alignment",
+                                    text=(f"{b}: OsMA aligned with {a.get('aligned_of_top')}/{a.get('top_n')} "
+                                          f"biggest M1 candles ({a.get('aligned_pct')}%). If low, indicators "
+                                          f"miss the big moves."))
+                except Exception as e:
+                    logger.debug(f"big-candle analysis skip: {e}")
             except Exception as e:
                 logger.warning(f"adaptive loop error: {e}")
             finally:
