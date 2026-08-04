@@ -31,20 +31,27 @@ def _base_long(**over):
 
 
 def test_no_cross_holds():
-    # OsMA positive for several CLOSED bars = FRESH momentum long (GoldShark takes it,
-    # sign-age <= 5). This is the intended behaviour now — not a hold.
+    # PURE EVENT-DRIVEN (GoldShark directive): OsMA already positive for several bars
+    # is NOT a fresh cross event -> HOLD. Only the exact closed-bar zero-cross fires.
     d = _base_long(osma=0.6, osma_prev=0.5, osma_recent=[0.4, 0.5, 0.6, 0.6])
     s = osma_confluence_signal(d, PARAMS)
-    assert s.action == "buy", s.reason
-    assert s.metadata.get("trigger") in ("fresh", "cross", "anticipated"), s.reason
+    assert s.action == "hold", s.reason
 
 
 def test_stale_momentum_holds():
-    # OsMA positive for MANY bars (sign-age > max 5) = STALE, not fresh -> hold.
+    # OsMA positive for many bars (no cross this bar) -> hold (event engine, not state).
     d = _base_long(osma=0.6, osma_prev=0.6,
                    osma_recent=[0.6, 0.6, 0.6, 0.6, 0.6, 0.6, 0.6, 0.6])
     s = osma_confluence_signal(d, PARAMS)
     assert s.action == "hold", s.reason
+
+
+def test_fresh_momentum_off_by_default_but_optin():
+    # fresh-momentum is OFF by default; opt-in via config re-enables it (research only).
+    d = _base_long(osma=0.6, osma_prev=0.5, osma_recent=[0.4, 0.5, 0.6, 0.6])
+    assert osma_confluence_signal(d, PARAMS).action == "hold"
+    p = dict(PARAMS); p["allow_fresh_momentum"] = True
+    assert osma_confluence_signal(d, p).action == "buy"
 
 
 def test_full_confluence_long_buys_high_conf():

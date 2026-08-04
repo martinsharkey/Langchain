@@ -122,34 +122,36 @@ def evaluate_confluence_bar(ind: dict, cfg=None) -> dict:
         return {"action": "hold", "trigger_kind": None, "confluence": 0, "reason": "no atr/price"}
     osma_now = float(ind.get("osma") or 0); osma_prev = float(ind.get("osma_prev") or 0)
     macd = float(ind.get("macd_line") or 0); atr_prev = float(ind.get("atr_prev") or atr)
-    # exact-bar zero-cross (highest conviction)
-    cu = osma_prev <= 0 < osma_now
-    cd = osma_prev >= 0 > osma_now
-    band = c.get("osma_anticipate_atr", 0.15) * atr
-    au = (not cu) and (-band <= osma_now <= 0) and (osma_now > osma_prev)
-    ad = (not cd) and (0 <= osma_now <= band) and (osma_now < osma_prev)
-    # GOLDSHARK-PARITY: don't require the EXACT cross bar. Enter while OsMA is on the
-    # correct side AND the cross is FRESH — the sign-age (bars OsMA has held this side)
-    # is <= max_momentum_age (GoldShark InpMaxMomentumAge, default 5). This is why
-    # GoldShark trades ~77/day: it takes the whole fresh move, not just the flip bar.
-    max_age = int(c.get("max_momentum_age", 5))
-    recent = ind.get("osma_recent") or []          # oldest..newest; last = forming bar
-    recent_closed = recent[:-1] if len(recent) > 1 else recent   # drop forming bar
-    def _sign_age(positive: bool) -> int:
-        # count consecutive most-recent CLOSED bars on the required side
-        age = 0
-        for v in reversed(recent_closed):
-            try: fv = float(v)
-            except (TypeError, ValueError): break
-            if (positive and fv > 0) or ((not positive) and fv < 0):
-                age += 1
-            else:
-                break
-        return age
-    fresh_up = (not (cu or au)) and osma_now > 0 and 0 < _sign_age(True) <= max_age
-    fresh_dn = (not (cd or ad)) and osma_now < 0 and 0 < _sign_age(False) <= max_age
+    # PURE EVENT-DRIVEN TRIGGER (GoldShark Master directive): the entry MUST be the
+    # exact closed-bar OsMA zero-cross — a strict 1-candle polarity shift across 0.0.
+    # NO 'anticipated' (probability, not event -> whipsaw) and NO 'fresh momentum /
+    # sign-age' (state, not event -> entering late / chasing). These are OFF by default
+    # and only re-enabled via explicit config flags for research.
+    cu = osma_prev <= 0 < osma_now      # confirmed cross UP through zero
+    cd = osma_prev >= 0 > osma_now      # confirmed cross DOWN through zero
+    au = ad = fresh_up = fresh_dn = False
+    if c.get("allow_anticipated", False):
+        band = c.get("osma_anticipate_atr", 0.15) * atr
+        au = (not cu) and (-band <= osma_now <= 0) and (osma_now > osma_prev)
+        ad = (not cd) and (0 <= osma_now <= band) and (osma_now < osma_prev)
+    if c.get("allow_fresh_momentum", False):
+        max_age = int(c.get("max_momentum_age", 5))
+        recent = ind.get("osma_recent") or []
+        recent_closed = recent[:-1] if len(recent) > 1 else recent
+        def _sign_age(positive: bool) -> int:
+            age = 0
+            for v in reversed(recent_closed):
+                try: fv = float(v)
+                except (TypeError, ValueError): break
+                if (positive and fv > 0) or ((not positive) and fv < 0):
+                    age += 1
+                else:
+                    break
+            return age
+        fresh_up = (not (cu or au)) and osma_now > 0 and 0 < _sign_age(True) <= max_age
+        fresh_dn = (not (cd or ad)) and osma_now < 0 and 0 < _sign_age(False) <= max_age
     if not (cu or cd or au or ad or fresh_up or fresh_dn):
-        return {"action": "hold", "trigger_kind": None, "confluence": 0, "reason": "no fresh OsMA momentum"}
+        return {"action": "hold", "trigger_kind": None, "confluence": 0, "reason": "no OsMA zero-cross"}
     direction = "buy" if (cu or au or fresh_up) else "sell"
     trigger_kind = "cross" if (cu or cd) else ("anticipated" if (au or ad) else "fresh")
     # MACD confirmation — GOLDSHARK PARITY: GoldShark's IsM1MACDAligned checks
