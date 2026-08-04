@@ -26,6 +26,27 @@ def test_record_signal_and_stats():
         shutil.rmtree(d, ignore_errors=True)
 
 
+def test_live_websocket_payload_nested_amount_parsed():
+    """The LIVE payload nests amount under whale_transfer.amount_usd and has no
+    top-level action/direction; record_signal must parse it (was storing 0/buy)."""
+    import sqlite3, os
+    d = tempfile.mkdtemp()
+    try:
+        s = _store(d)
+        live = {"signal_id": "sig_live_1", "signal_type": "exchange_deposit",
+                "stage": "sell_window_open", "signal_status": "monitoring",
+                "whale_transfer": {"exchange": "binance", "amount_usd": 2_710_756.3}}
+        s.record_signal(live, source="websocket")
+        conn = sqlite3.connect(os.path.join(d, "w.db"))
+        r = conn.execute("SELECT exchange, direction, amount_usd FROM whale_events").fetchone()
+        conn.close()
+        assert r[0] == "binance", r
+        assert r[1] == "sell", r          # deposit -> sell pressure
+        assert abs(r[2] - 2_710_756.3) < 1, r   # amount parsed, not 0
+    finally:
+        shutil.rmtree(d, ignore_errors=True)
+
+
 def _mock_rates(net_move):
     """400 M1 bars; the window right after 'now-20min' moves by net_move."""
     base = 63000.0
@@ -82,6 +103,7 @@ def test_seed_from_study():
 
 if __name__ == "__main__":
     test_record_signal_and_stats()
+    test_live_websocket_payload_nested_amount_parsed()
     test_resolve_and_model()
     test_seed_from_study()
     print("whale outcome store tests passed")

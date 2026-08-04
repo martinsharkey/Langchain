@@ -63,9 +63,25 @@ class WhaleOutcomeStore:
         sid = signal.get("signal_id")
         if not sid:
             return
-        amount = float(signal.get("amount_usd") or signal.get("usd") or 0)
-        direction = "sell" if str(signal.get("action", signal.get("event_type", "")))\
-            .lower().startswith(("s", "dep")) else "buy"
+        # LIVE PAYLOAD SHAPE: amount lives under whale_transfer.amount_usd (top-level
+        # amount_usd/usd are absent). Fall back through all known nestings so both the
+        # live WebSocket payload and the Danny-history/seed shapes parse correctly.
+        wt = signal.get("whale_transfer") or {}
+        amount = float(signal.get("amount_usd") or signal.get("usd")
+                       or wt.get("amount_usd") or 0)
+        exchange = signal.get("exchange") or wt.get("exchange") or ""
+        # DIRECTION: a deposit TO an exchange = incoming sell pressure -> 'sell'.
+        # Prefer an explicit direction/action if present; else derive from signal_type
+        # / stage (deposit/sell_window => sell; withdrawal => buy).
+        explicit = str(signal.get("action") or signal.get("event_type")
+                       or wt.get("direction") or signal.get("signal_type") or "").lower()
+        stage = str(signal.get("stage", signal.get("signal_status", ""))).lower()
+        if explicit.startswith(("b", "with")) or "withdraw" in explicit:
+            direction = "buy"
+        elif explicit.startswith(("s", "dep")) or "deposit" in explicit or "sell" in stage or "deposit" in stage:
+            direction = "sell"
+        else:
+            direction = "sell"   # exchange-inflow default (whale depositing = sell risk)
         ts = signal.get("timestamp")
         try:
             ts = int(ts) if ts else int(datetime.now(timezone.utc).timestamp() * 1e6)
@@ -74,7 +90,7 @@ class WhaleOutcomeStore:
         try:
             conn = sqlite3.connect(self.path)
             conn.execute("INSERT OR IGNORE INTO whale_events VALUES (?,?,?,?,?,?,?,?)",
-                         (sid, ts, signal.get("exchange", ""), direction, amount,
+                         (sid, ts, exchange, direction, amount,
                           signal.get("stage", signal.get("signal_status", "")), source,
                           datetime.now(timezone.utc).isoformat()))
             conn.commit(); conn.close()
