@@ -3,6 +3,9 @@
 > Auto-generated digest of what the self-learning loop changed and why.
 > Most-recent-first. Reporting only — never gates a live decision (#45.1).
 
+- **2026-08-04 11:28** [ONNX] `GER40` model retrained (kept=True) -- why: per-symbol chronological holdout -- metric: AUC 0.693 over n=103
+- **2026-08-04 11:21** [EXIT-LOCK] `BTCUSD` exit set sl_atr 1.82 tp_rr 0.9 -- why: robust -- metric: recent expectancy -0.1213 (n=30)
+- **2026-08-04 11:17** [EXIT-LOCK] `BTCUSD` exit set sl_atr 1.65 tp_rr 0.8 -- why: excursion -- metric: recent expectancy -0.1213 (n=30)
 - **2026-08-04 11:09** [EXIT-LOCK] `BTCUSD` exit set sl_atr 1.82 tp_rr 0.9 -- why: robust -- metric: recent expectancy -0.1213 (n=30)
 - **2026-08-04 11:05** [EXIT-LOCK] `BTCUSD` exit set sl_atr 1.65 tp_rr 0.79 -- why: excursion -- metric: recent expectancy -0.1213 (n=30)
 - **2026-08-04 10:22** [EXIT-LOCK] `BTCUSD` exit set sl_atr 1.82 tp_rr 0.9 -- why: robust -- metric: recent expectancy -0.1213 (n=30)

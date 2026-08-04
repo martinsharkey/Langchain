@@ -152,8 +152,20 @@ def evaluate_confluence_bar(ind: dict, cfg=None) -> dict:
         return {"action": "hold", "trigger_kind": None, "confluence": 0, "reason": "no fresh OsMA momentum"}
     direction = "buy" if (cu or au or fresh_up) else "sell"
     trigger_kind = "cross" if (cu or cd) else ("anticipated" if (au or ad) else "fresh")
-    if (direction == "buy" and not macd > 0) or (direction == "sell" and not macd < 0):
-        return {"action": "hold", "trigger_kind": trigger_kind, "confluence": 0, "reason": "MACD not aligned"}
+    # MACD confirmation — GOLDSHARK PARITY: GoldShark's IsM1MACDAligned checks
+    # macdMain > macdSignal (main vs SIGNAL line), NOT macd vs the ZERO line. macd_main
+    # minus signal IS the OsMA, so this is effectively "OsMA on the right side" — which
+    # the trigger already guarantees. Our old `macd_line > 0` (vs zero) gate was an
+    # over-restriction GoldShark does NOT have: it blocked OsMA-aligned entries into big
+    # moves where MACD hadn't yet crossed zero (e.g. BTC osma +15 but macd -5). Use the
+    # main-vs-signal check when the signal is available; else fall back to OsMA sign.
+    macd_sig = ind.get("macd_signal")
+    if macd_sig is not None:
+        macd_aligned = (macd > float(macd_sig)) if direction == "buy" else (macd < float(macd_sig))
+    else:
+        macd_aligned = (osma_now > 0) if direction == "buy" else (osma_now < 0)
+    if not macd_aligned:
+        return {"action": "hold", "trigger_kind": trigger_kind, "confluence": 0, "reason": "MACD not aligned (vs signal)"}
     if "macd_led" in ind and not ind["macd_led"]:
         return {"action": "hold", "trigger_kind": trigger_kind, "confluence": 0, "reason": "MACD did not lead"}
     # ATR expansion + OsMA acceleration are conviction filters for the EXACT-cross /
@@ -266,8 +278,10 @@ def find_confluence_triggers(m1, m5, m15, cfg=None):
         if not led:
             continue
         macd = float(macd1[i]); atr_prev = float(atr1[i - 1] or atr)
-        # HARD gates: MACD aligned + ATR expanding
-        if (direction == "buy" and not macd > 0) or (direction == "sell" and not macd < 0):
+        osma_i = float(osma1[i] or 0)
+        # HARD gates: MACD aligned (GoldShark parity = main vs SIGNAL line = OsMA sign,
+        # NOT vs zero) + ATR expanding. macd_line - signal == OsMA, so use OsMA sign.
+        if (direction == "buy" and not osma_i > 0) or (direction == "sell" and not osma_i < 0):
             continue
         if not atr > atr_prev:
             continue

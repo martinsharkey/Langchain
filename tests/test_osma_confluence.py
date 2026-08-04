@@ -55,9 +55,17 @@ def test_full_confluence_long_buys_high_conf():
 
 
 def test_macd_not_aligned_holds():
-    # bullish OsMA cross but MACD negative -> hard gate -> hold
-    s = osma_confluence_signal(_base_long(macd_line=-0.5), PARAMS)
+    # GoldShark parity: MACD gate is main vs SIGNAL line (macd_line-signal == OsMA sign),
+    # NOT vs zero. A bullish setup where MACD main is BELOW its signal -> hold.
+    s = osma_confluence_signal(_base_long(macd_line=-0.5, macd_signal=0.2), PARAMS)
     assert s.action == "hold", s.reason
+
+
+def test_macd_below_zero_but_above_signal_still_enters():
+    # The key fix: MACD can be NEGATIVE (below zero) yet ABOVE its signal -> GoldShark
+    # enters (our old macd-vs-zero gate wrongly blocked this, missing big moves).
+    s = osma_confluence_signal(_base_long(macd_line=-0.5, macd_signal=-0.9), PARAMS)
+    assert s.action == "buy", s.reason
 
 
 def test_atr_not_expanding_holds():

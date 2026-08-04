@@ -46,6 +46,7 @@ def osma_confluence_signal(indicators: dict, params: dict) -> Signal:
         "osma": indicators.get("osma_closed", indicators.get("osma", 0.0)),
         "osma_prev": indicators.get("osma_prev", 0.0),
         "macd_line": indicators.get("macd_line", 0.0),
+        "macd_signal": indicators.get("macd_signal"),
         "ema_fast": indicators.get("ema_fast", close),
         "ema_prev": indicators.get("ema_prev", indicators.get("ema_fast", close)),
         "atr": indicators.get("atr", 0.0),
