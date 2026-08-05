@@ -34,13 +34,14 @@ def test_reflection_directive_steers_and_is_kept(tmp_path, monkeypatch):
     monkeypatch.setattr(po, "TUNED_PATH", str(tmp_path / "tuned.json"))
     opt = ParameterOptimizer(_FakeRegistry(), _fake_backtest)
 
-    # baseline sl_atr = 1.0 -> pf 1.1. Post-mortem says 'SL too tight': +0.2.
+    # starting sl_atr from the (gold proven-edge) baseline. Post-mortem 'SL too tight': +0.2.
+    start_sl = opt.current_params("XAUUSD-ECN")["sl_atr"]
     directives = {"sl_atr": +0.2}
     r = opt.optimize("XAUUSD-ECN", iterations=0, directives=directives)  # only the guided candidate
 
     assert r["improved"] is True, r
     assert r["from_reflection"] is True          # the reflection directive is what improved it
-    assert opt.current_params("XAUUSD-ECN")["sl_atr"] > DEFAULTS["sl_atr"]  # SL was widened + kept
+    assert opt.current_params("XAUUSD-ECN")["sl_atr"] > start_sl  # SL was widened from its start + kept
 
 
 def test_bad_directive_rejected_by_gate(tmp_path, monkeypatch):

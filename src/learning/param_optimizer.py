@@ -82,6 +82,22 @@ DEFAULTS = {
     "sl_atr": 2.0, "tp_rr": 1.0,
 }
 
+# PROVEN-EDGE per-symbol baselines mined from real EA optimizer results. The directed
+# optimizer starts here (not from generic DEFAULTS) so it refines a config that ALREADY
+# had a demonstrated edge. GOLD: median of the top-30 robust GoldShark optimizer configs
+# (PF>=1.5, trades>=40, expPayoff>=50, DD<=35; avg PF 5.33, ~2435 trades). Strength
+# floors are ATR-normalized (GoldShark raw value / gold M1 ATR ~2.3). Long floors are
+# minimums (>=), short floors maximums (<=). See WHALE_ANALYSIS + session memory.
+SYMBOL_BASELINES = {
+    "XAUUSD": {
+        "osma_fast": 12, "osma_slow": 86, "osma_signal": 9, "ema_period": 13,
+        "atr_period": 14, "min_ema_slope": 0.05, "atr_min": 1.4, "atr_max": 4.5,
+        "osma_min_long": 0.29, "bulls_min_long": 0.48, "bears_min_long": 0.0,
+        "osma_max_short": -0.17, "bulls_max_short": 0.0, "bears_max_short": -0.72,
+        "sl_atr": 0.8, "tp_rr": 2.0, "min_confluence": 4,
+    },
+}
+
 
 def _clamp(v, lo, hi, kind):
     v = max(lo, min(hi, v))
@@ -130,7 +146,17 @@ class ParameterOptimizer:
 
     def current_params(self, symbol: str) -> dict:
         key = self._key(symbol)
-        return dict(self.tuned.get(key, {}).get("params", DEFAULTS))
+        if key in self.tuned and self.tuned[key].get("params"):
+            return dict(self.tuned[key]["params"])
+        # fall back to a PROVEN-EDGE per-symbol baseline (version-controlled) before
+        # the generic DEFAULTS, so the directed optimizer starts from a config with a
+        # demonstrated edge, not zeros. Gold = mined from the GoldShark optimizer
+        # results (top-30 robust configs, avg PF 5.33). Match by symbol prefix.
+        for pref, base in SYMBOL_BASELINES.items():
+            if key.startswith(pref):
+                merged = dict(DEFAULTS); merged.update(base)
+                return merged
+        return dict(DEFAULTS)
 
     def _key(self, symbol: str) -> str:
         return symbol.upper()

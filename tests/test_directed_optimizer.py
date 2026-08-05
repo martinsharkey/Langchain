@@ -32,3 +32,20 @@ if __name__ == "__main__":
     test_directed_search_covers_strength_floors_and_periods()
     test_directed_candidates_actually_change_the_value()
     print("directed search tests passed")
+
+
+def test_gold_proven_edge_baseline_is_the_starting_point():
+    """Gold must start from the mined GoldShark proven-edge baseline (non-zero strength
+    floors + osma_slow 86), not generic zeros — so the directed optimizer refines a
+    config that already had an edge."""
+    from src.learning.param_optimizer import ParameterOptimizer, SYMBOL_BASELINES
+    assert "XAUUSD" in SYMBOL_BASELINES
+    o = ParameterOptimizer(registry=None, backtest_fn=lambda *a, **k: None)
+    o.tuned = {}   # fresh clone, no tuned file
+    p = o.current_params("XAUUSD-ECN")
+    assert p["osma_slow"] == 86, p            # proven period
+    assert p["osma_min_long"] > 0, p          # non-zero strength floor (edge, not sign-only)
+    assert p["bulls_min_long"] > 0, p
+    assert p["osma_max_short"] < 0, p         # short floor is negative
+    # a symbol without a baseline still gets generic defaults (floors off)
+    assert o.current_params("BTCUSD")["osma_min_long"] == 0.0
