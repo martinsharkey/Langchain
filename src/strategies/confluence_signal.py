@@ -185,13 +185,12 @@ def evaluate_confluence_bar(ind: dict, cfg=None) -> dict:
         return {"action": "hold", "trigger_kind": trigger_kind, "confluence": 0, "reason": "MACD not aligned (vs signal)"}
     if "macd_led" in ind and not ind["macd_led"]:
         return {"action": "hold", "trigger_kind": trigger_kind, "confluence": 0, "reason": "MACD did not lead"}
-    # ATR expansion + OsMA acceleration are conviction filters for the EXACT-cross /
-    # anticipated triggers. GoldShark's FRESH-momentum entry (cross happened 1-5 bars
-    # ago) does NOT require them — the move is already underway — so only apply them
-    # to cross/anticipated, matching GoldShark.
+    # OsMA acceleration IS part of the GoldShark rule (osma[1] > osma[2] for long), so
+    # keep it for cross/anticipated triggers. But "ATR strictly RISING every bar" is
+    # NOT a GoldShark gate — GoldShark uses ATR IN-RANGE (MinATR<=atr<=MaxATR, handled
+    # in the soft checks). The strict-rising gate blocked ~100% of bars (ATR is a
+    # smoothed average, flat/falling half the time) and starved trading. Removed.
     if trigger_kind in ("cross", "anticipated"):
-        if not atr > atr_prev:
-            return {"action": "hold", "trigger_kind": trigger_kind, "confluence": 0, "reason": "ATR not expanding"}
         if (direction == "buy" and not osma_now > osma_prev) or \
            (direction == "sell" and not osma_now < osma_prev):
             return {"action": "hold", "trigger_kind": trigger_kind, "confluence": 0,

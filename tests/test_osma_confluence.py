@@ -76,9 +76,17 @@ def test_macd_below_zero_but_above_signal_still_enters():
     assert s.action == "buy", s.reason
 
 
-def test_atr_not_expanding_holds():
-    s = osma_confluence_signal(_base_long(atr=0.8, atr_prev=1.0), PARAMS)  # ATR shrinking
+def test_atr_below_floor_holds():
+    # GoldShark uses ATR IN-RANGE (min<=atr<=max), NOT "ATR strictly rising" (that gate
+    # starved trading and was removed). ATR below the relative floor -> hold.
+    s = osma_confluence_signal(_base_long(atr=0.1, atr_prev=0.1, med_atr=3.0), PARAMS)
     assert s.action == "hold", s.reason
+
+
+def test_atr_flat_but_in_range_can_enter():
+    # ATR flat/not-rising but within range must NOT block (the removed over-strict gate).
+    s = osma_confluence_signal(_base_long(atr=3.0, atr_prev=3.2, med_atr=3.0), PARAMS)
+    assert s.action == "buy", s.reason
 
 
 def test_bearish_cross_sells():
