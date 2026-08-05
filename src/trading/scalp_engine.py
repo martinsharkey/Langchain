@@ -326,6 +326,12 @@ class ScalpEngine:
         self.trades_opened = 0
         self.trades_closed = 0
         self.running = False
+        # ENTRY-FREQUENCY self-monitor: per-symbol tally of what BLOCKS entries vs what
+        # fires, so the bot can see whether it is starved (and by which gate) and we can
+        # balance selectivity against meaningful trading. reason -> count.
+        self._freq_block = {}     # base -> {reason: count}
+        self._freq_entered = {}   # base -> count of entries fired
+        self._freq_evals = {}     # base -> total evaluations (denominator)
 
         try:
             from src.learning.vector_store import PatternVectorStore
@@ -1736,6 +1742,24 @@ class ScalpEngine:
             self._stretch_override = {}
         logger.info(f"[ACCOUNT] connected {trade_mode} login={login} server={server}")
 
+    def _report_entry_frequency(self):
+        """Surface the entry-vs-frequency balance: per symbol, how many entries fired
+        vs the dominant BLOCKING gate. Lets us + the researcher see if the bot is
+        starved and by what — the balance between selectivity and meaningful trading."""
+        rep = {}
+        for base in set(list(self._freq_evals.keys()) + list(self._freq_entered.keys())):
+            evals = self._freq_evals.get(base, 0)
+            entered = self._freq_entered.get(base, 0)
+            blocks = self._freq_block.get(base, {})
+            top = sorted(blocks.items(), key=lambda x: -x[1])[:2]
+            fire_rate = round(entered / evals * 100, 2) if evals else 0.0
+            rep[base] = {"entered": entered, "evals": evals, "fire_rate_pct": fire_rate,
+                         "top_blocks": top}
+            logger.info(f"[FREQUENCY] {base}: {entered} entered / {evals} evals "
+                        f"({fire_rate}% fire) | top block: {top[0] if top else 'none'}")
+        self._freq_report = rep
+        return rep
+
     def _learning_health(self) -> dict:
         """
         Observability (per external review): make learning VISIBLE so stalls are
@@ -1983,6 +2007,12 @@ class ScalpEngine:
                     except Exception as e:
                         logger.debug(f"entry-strength refresh skip: {e}")
 
+                # ENTRY-FREQUENCY report: is the bot starved, and by which gate?
+                try:
+                    self._report_entry_frequency()
+                except Exception as e:
+                    logger.debug(f"frequency report skip: {e}")
+
                 # BIG-CANDLE alignment: did our OsMA config align with today's largest
                 # moves? If we miss the big candles, indicators are mis-configured for
                 # catching winners. Uses the engine's MT5 session (no 2nd connection).
@@ -2090,6 +2120,20 @@ class ScalpEngine:
         if fs is not None and fs.action != "hold":
             signal = fs
         if signal is None or signal.action == "hold":
+            # FREQUENCY self-monitor: categorize WHY we held (which gate), per symbol,
+            # so the bot surfaces whether it is starved and by which gate.
+            try:
+                _r = (getattr(fs, "reason", None) if fs is not None else "no focused signal") or "hold"
+                _cat = "other"
+                for kw in ("no OsMA zero-cross", "no fresh OsMA", "MACD not aligned", "MACD did not lead",
+                           "ATR not expanding", "not accelerating", "over-extended", "weak dominant",
+                           "low runway", "strength", "weak confluence", "no focused"):
+                    if kw.lower() in _r.lower():
+                        _cat = kw; break
+                self._freq_evals[base] = self._freq_evals.get(base, 0) + 1
+                fb = self._freq_block.setdefault(base, {}); fb[_cat] = fb.get(_cat, 0) + 1
+            except Exception:
+                pass
             # THROTTLED visibility (once/min per symbol): WHY the confluence held, so we
             # can see whether the entry gates are choking or just awaiting a valid cross.
             try:
@@ -2390,6 +2434,8 @@ class ScalpEngine:
                         if isinstance(v, (int, float, str, bool))},
         )
         self.trades_opened += 1
+        self._freq_entered[base] = self._freq_entered.get(base, 0) + 1
+        self._freq_evals[base] = self._freq_evals.get(base, 0) + 1
         logger.info(f"OPENED {signal.action.upper()} {resolved} {result.filled_volume}@{result.price} "
                     f"ticket={result.ticket} conf={signal.confidence:.2f} [{combo_str}]")
 
@@ -2603,6 +2649,7 @@ class ScalpEngine:
                 "symbol_governance": (self.governor.snapshot() if self.governor else {}),
                 "post_mortem": (getattr(self, "_postmortem_cache", {}) or {}),
                 "learning_health": self._learning_health(),
+                "entry_frequency": getattr(self, "_freq_report", {}),
                 "config_checkpoints": (self.checkpointer.snapshot() if self.checkpointer else {}),
                 "graduation": (self.graduation.snapshot() if self.graduation else {}),
                 "dynamic_fixer": (self.fixer.snapshot() if self.fixer else {}),
