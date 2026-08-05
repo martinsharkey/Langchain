@@ -35,6 +35,14 @@ DEFAULT_CFG = {
     "atr_min_rel": 0.7,
     "power_period": 13, "rsi_period": 14, "rsi_long_max": 72.0, "rsi_short_min": 28.0,
     "min_confluence": 4,   # re-baseline (#47): 4/5 soft checks lifted PF 1.56->2.98 vs 3
+    # ENTRY TRIGGER: a pure closed-bar zero-cross is only a ~3% event, which starves
+    # the bot to ~0 trades/day. GoldShark itself enters on FRESH momentum (a cross
+    # within InpMaxMomentumAge bars), not only the exact flip bar. So fresh-momentum is
+    # ON by default (age<=5) — the move must still pass every quality gate (strength
+    # floors, MACD, EMA side, ATR, confluence), and the frequency-starvation guard +
+    # optimizer keep the entry/quality balance. `allow_anticipated` stays OFF (that one
+    # enters BEFORE the cross = probability, whipsaw-prone).
+    "allow_fresh_momentum": True, "max_momentum_age": 5, "allow_anticipated": False,
 }
 
 

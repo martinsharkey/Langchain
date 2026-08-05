@@ -18,7 +18,7 @@ Format convention:
 
 ## DECISION LOG (agreed)
 
-- **2026-07-31 — Authoritative source = mTLS WebSocket, event-driven push only.**
+- **2026-07-31 ï¿½ Authoritative source = mTLS WebSocket, event-driven push only.**
   Danny's preference: the WebSocket feed. He does NOT want us polling S3 or
   dashboard.json (cost + load on his side). He will PUSH a signal only when an
   event actually happens AND it carries enough data to act on. So our bot must:
@@ -26,12 +26,11 @@ Format convention:
   - NOT poll S3 / dashboard.json in the hot path (this resolves Q11; the
     dashboard REST path in CryptoRTI_Context.mqh is de-scoped for live trading).
   - Depend on Danny embedding the confidence/tape payload IN the push (see Q7),
-    since a push only arrives when there is "enough data" — i.e. the push itself
+    since a push only arrives when there is "enough data" ï¿½ i.e. the push itself
     is the confirmation signal.
   - Keep S3 (`martin_qna.md`) for async collaboration only, not per-trade reads.
 
----
-
+---I i would like
 ## What we've already figured out from your data (so you don't re-explain)
 
 We mined `data/whale_events/btc/*.parquet` (2,997 events, 20 days) against BTCUSD
@@ -114,7 +113,7 @@ DANNY:
 
 ## NEW (add below this line)
 
-### Q7 — Embed a CONFIDENCE payload in the live signal (avoid us polling S3) [STATUS: OPEN, HIGH PRIORITY]
+### Q7 ï¿½ Embed a CONFIDENCE payload in the live signal (avoid us polling S3) [STATUS: OPEN, HIGH PRIORITY]
 QUESTION: We do NOT want to read your S3 orderbook/L2 per trade (slow + costly).
 Your live WebSocket signal already carries whale_transfer + staged lifecycle, but
 it has NO tape/orderbook metrics we can act on. Please EMBED a confidence block in
@@ -128,7 +127,7 @@ alone and never touch S3 in the hot path. What can you include, and at which sta
 DANNY:
 > (answer here)
 
-### Q8 — Is the signal->move WINDOW a repeatable pattern or random? [STATUS: OPEN, HIGH PRIORITY]
+### Q8 ï¿½ Is the signal->move WINDOW a repeatable pattern or random? [STATUS: OPEN, HIGH PRIORITY]
 QUESTION: We see detected_at -> expected_credit_time (~20 min) -> sell_window_open
 -> (selling_confirmed | expired ~1h). Is `expected_credit_time` a reliable, roughly
 constant lag (exchange confirmations), and once `selling_confirmed` fires, is the
@@ -139,7 +138,7 @@ BTC entries/exits and a wide-enough stop. Any distribution stats you have on
 DANNY:
 > (answer here)
 
-### Q9 — Which stage should we trade, and hit-rate of selling_confirmed [STATUS: OPEN]
+### Q9 ï¿½ Which stage should we trade, and hit-rate of selling_confirmed [STATUS: OPEN]
 QUESTION: Many signals EXPIRE with "no significant selling". We plan to only act
 on `selling_confirmed` (not `sell_window_open`). Of deposits that reach
 sell_window_open, what fraction reach selling_confirmed, and of those, what
@@ -147,21 +146,21 @@ fraction actually move BTC in the expected direction? This tells us the base hit
 DANNY:
 > (answer here)
 
-### Q10 — CRITICAL: 454/455 signals "expired, no selling". Is the feed right? [STATUS: OPEN, URGENT]
+### Q10 ï¿½ CRITICAL: 454/455 signals "expired, no selling". Is the feed right? [STATUS: OPEN, URGENT]
 FINDING (our data): We mined the last 8 days of data/signals/btc. Of 455 whale
-deposits >= $1M, **ZERO reached `selling_confirmed`** — 454 expired with
+deposits >= $1M, **ZERO reached `selling_confirmed`** ï¿½ 454 expired with
 "Sell window expired. No significant selling detected." The BTCUSD down-move in
 the window was tiny (median ~22 bps).
 QUESTIONS:
 - Is `selling_confirmed` actually wired/firing in the live feed, or is it rarely
   reached by design? If deposits almost never lead to confirmed selling, the raw
-  deposit signal is NOT tradeable on its own — we need the tape confirmation.
+  deposit signal is NOT tradeable on its own ï¿½ we need the tape confirmation.
 - What % of deposits SHOULD reach selling_confirmed in normal conditions?
 - Is there a bug where the sell window expires before your tape confirmation runs?
 DANNY:
 > (answer here)
 
-### Q11 — TWO CryptoRTI data paths: which is authoritative? [STATUS: ANSWERED]
+### Q11 ï¿½ TWO CryptoRTI data paths: which is authoritative? [STATUS: ANSWERED]
 FINDING: Martin's MT5 OrderFlow engine (CryptoRTI_Context.mqh) polls
 `https://cryptorti.io/api/dashboard.json` via REST and uses: overall_sentiment
 (sentiment/score 0-100/confidence 0-10/risk_level/dominant_driver),
@@ -169,7 +168,7 @@ fear_and_greed, whale_movements[] (sums BTC amount_usd), stablecoin_events[].
 BUT our Python bot uses the mTLS WebSocket signal feed (wss://3.213.39.89:8443)
 with a DIFFERENT shape (staged whale_exchange_deposit lifecycle, no VPIN/tape).
 QUESTIONS:
-- Which is the authoritative real-time source going forward — the dashboard.json
+- Which is the authoritative real-time source going forward ï¿½ the dashboard.json
   REST, or the mTLS WebSocket signals? We want ONE path for the bot.
 - Does dashboard.json contain the per-event tape/VPIN/orderflow confidence, or
   only aggregate sentiment/whale sums? (We need per-signal confidence, see Q7.)
@@ -182,9 +181,9 @@ DANNY:
 > and I'll work on embedding the confidence/tape payload in the push (Q7) so the
 > push itself is the actionable signal. Don't poll dashboard.json for live trading.
 
-### Q12 — Confirm the tape metrics we should rely on [STATUS: OPEN]
+### Q12 ï¿½ Confirm the tape metrics we should rely on [STATUS: OPEN]
 CONTEXT: Martin's OrderFlow engine computes CVD, per-bar delta, VPOC, tape speed
-from MT5 tick flags (TICK_FLAG_BUY/SELL) — NOT true exchange volume, and NO VPIN
+from MT5 tick flags (TICK_FLAG_BUY/SELL) ï¿½ NOT true exchange volume, and NO VPIN
 (despite header mentions). Real VPIN/CVD from actual Binance/Coinbase flow lives
 in YOUR data.
 QUESTION: Can you expose, per signal, a real-exchange CVD/VPIN/delta and bid-ask
