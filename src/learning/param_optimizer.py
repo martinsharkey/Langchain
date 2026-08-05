@@ -159,34 +159,50 @@ class ParameterOptimizer:
         except Exception as e:
             logger.warning(f"tuned params persist failed: {e}")
 
-    # entry-QUALITY floors that must never be left ungated (a symbol trading with these
-    # at 0/None fires weak longs straight into drops — observed: GER40/BTC MFE=0 losers).
-    # Until a symbol has its OWN proven values, fall back to the gold-proven floors
-    # (ATR-normalized, so they scale to each symbol's volatility). Applied to EVERY
-    # symbol's params in current_params.
-    _FALLBACK_FLOOR_KEYS = ("osma_min_long", "bulls_min_long", "osma_max_short",
-                            "bears_max_short", "min_ema_slope", "min_confluence", "max_momentum_age")
+    # STRUCTURE keys are symbol-AGNOSTIC and safe to share (counts / ATR-relative /
+    # switches): the indicator COMBINATION is universal. These fall back to the gold
+    # baseline for any symbol lacking its own value.
+    _SHARED_STRUCT_KEYS = ("min_confluence", "max_momentum_age", "min_ema_slope",
+                           "rsi_long_max", "rsi_short_min")
+    # MAGNITUDE floors are SYMBOL-SPECIFIC (gold's OsMA/Bulls/Bears levels are NOT
+    # BTC's or GER40's — even ATR-normalized the behaviour differs). These must be
+    # DISCOVERED per symbol by its own backtest; NEVER borrowed from gold. Until a
+    # symbol has its own, they stay 0 = sign-based structure only (no false magnitude
+    # gate). (User correction: the pass5469 .set is XAUUSD-only.)
+    _MAGNITUDE_KEYS = ("osma_min_long", "bulls_min_long", "osma_max_short",
+                       "bears_max_short", "macd_min_long", "macd_max_short",
+                       "bulls_max_short", "bears_min_long")
 
     def current_params(self, symbol: str) -> dict:
         key = self._key(symbol)
         gold = SYMBOL_BASELINES.get("XAUUSD", {})
+        is_gold = key.startswith("XAUUSD")
         if key in self.tuned and self.tuned[key].get("params"):
             p = dict(self.tuned[key]["params"])
-            # SAFETY: fill any missing/zero entry-quality floor from the gold-proven
-            # baseline so no symbol trades fully ungated (ATR-normalized -> scale-safe).
-            for fk in self._FALLBACK_FLOOR_KEYS:
+            # share only STRUCTURE from the gold baseline; magnitude floors stay
+            # per-symbol (borrowing gold's magnitudes would misfire on BTC/GER40).
+            for fk in self._SHARED_STRUCT_KEYS:
                 if (p.get(fk) in (None, 0, 0.0)) and gold.get(fk) not in (None, 0, 0.0):
                     p[fk] = gold[fk]
+            if not is_gold:
+                # ensure no BORROWED magnitude floor leaks onto a non-gold symbol
+                for mk in self._MAGNITUDE_KEYS:
+                    if p.get(mk) is None:
+                        p[mk] = 0.0
             return p
-        # no tuned entry -> proven per-symbol baseline, else DEFAULTS + gold floors.
+        # no tuned entry
         for pref, base in SYMBOL_BASELINES.items():
             if key.startswith(pref):
                 merged = dict(DEFAULTS); merged.update(base)
                 return merged
+        # non-gold, no baseline: DEFAULTS + shared STRUCTURE only (magnitudes = 0,
+        # i.e. sign/structure gating until this symbol's own floors are backtested).
         merged = dict(DEFAULTS)
-        for fk in self._FALLBACK_FLOOR_KEYS:
+        for fk in self._SHARED_STRUCT_KEYS:
             if gold.get(fk) not in (None, 0, 0.0):
                 merged[fk] = gold[fk]
+        for mk in self._MAGNITUDE_KEYS:
+            merged.setdefault(mk, 0.0)
         return merged
 
     def _key(self, symbol: str) -> str:

@@ -51,6 +51,7 @@ def test_gold_proven_edge_baseline_is_the_starting_point():
     assert p["bulls_min_long"] > 0, p
     assert p["osma_max_short"] < 0, p         # short floor is negative
     # a symbol without a baseline still gets generic defaults (floors off)
-    # BTC has no OWN baseline, but now inherits the gold-proven floors as a safety
-    # fallback (ATR-normalized -> scale-safe) so it never trades fully ungated.
-    assert o.current_params("BTCUSD")["osma_min_long"] == SYMBOL_BASELINES["XAUUSD"]["osma_min_long"]
+    # BTC magnitude floors stay per-symbol (0 until backtested) — gold's magnitudes are
+    # XAUUSD-specific and must NOT be borrowed. It DOES inherit shared STRUCTURE.
+    assert o.current_params("BTCUSD")["osma_min_long"] == 0.0
+    assert o.current_params("BTCUSD")["min_confluence"] == SYMBOL_BASELINES["XAUUSD"]["min_confluence"]
