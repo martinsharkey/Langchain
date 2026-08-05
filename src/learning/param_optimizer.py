@@ -65,6 +65,13 @@ PARAM_SPACE = {
     "bears_max_short": (-5.0, 0.0, 0.1, float),
     "bulls_max_short": (-5.0, 0.0, 0.1, float),
     "atr_min_rel":     (0.0, 1.5, 0.1, float),   # relative ATR floor (vs median ATR)
+    # RSI exhaustion gate (was hardcoded 72/28) — now tunable so the optimizer can
+    # discover the right overbought/oversold cut per symbol.
+    "rsi_long_max":    (55.0, 85.0, 1.0, float),  # long blocked when RSI >= this
+    "rsi_short_min":   (15.0, 45.0, 1.0, float),  # short blocked when RSI <= this
+    # MACD-lead window (was hardcoded 5) — how many bars back MACD must have started
+    # the fresh cycle that OsMA then confirms. Core to the entry edge.
+    "macd_lead_bars":  (1, 12, 1, int),
     "sl_atr":      (0.5, 3.0, 0.5, float),
     "tp_rr":       (0.5, 3.0, 0.5, float),
 }
@@ -79,6 +86,7 @@ DEFAULTS = {
     "macd_min_long": 0.0, "macd_max_short": 0.0,
     "bulls_min_long": 0.0, "bears_min_long": 0.0,
     "bears_max_short": 0.0, "bulls_max_short": 0.0, "atr_min_rel": 0.0,
+    "rsi_long_max": 72.0, "rsi_short_min": 28.0, "macd_lead_bars": 5,
     "sl_atr": 2.0, "tp_rr": 1.0,
 }
 
@@ -171,9 +179,9 @@ class ParameterOptimizer:
         STRENGTH = ["osma_min_long", "osma_max_short", "macd_min_long", "macd_max_short",
                     "bulls_min_long", "bears_min_long", "bears_max_short", "bulls_max_short"]
         PERIODS = ["osma_fast", "osma_slow", "osma_signal", "ema_period",
-                   "atr_period", "power_period", "rsi_period"]
+                   "atr_period", "power_period", "rsi_period", "macd_lead_bars"]
         SHAPE = ["min_confluence", "min_ema_slope", "atr_min_rel", "atr_min", "atr_max",
-                 "price_stretch_mult", "sl_atr", "tp_rr"]
+                 "price_stretch_mult", "rsi_long_max", "rsi_short_min", "sl_atr", "tp_rr"]
         for k in STRENGTH + PERIODS + SHAPE:
             if k not in PARAM_SPACE:
                 continue

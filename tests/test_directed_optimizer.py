@@ -18,6 +18,9 @@ def test_directed_search_covers_strength_floors_and_periods():
     # and the periods
     for k in ("osma_fast","osma_slow","osma_signal","ema_period","atr_period","power_period","rsi_period"):
         assert k in touched, f"directed search never explored period {k}"
+    # and the newly-added tunables (RSI gate + MACD-lead window)
+    for k in ("rsi_long_max","rsi_short_min","macd_lead_bars"):
+        assert k in touched, f"directed search never explored {k}"
 
 
 def test_directed_candidates_actually_change_the_value():
