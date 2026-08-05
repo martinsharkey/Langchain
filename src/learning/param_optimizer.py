@@ -340,6 +340,9 @@ class ParameterOptimizer:
         # 2) DIRECTED coordinate search — purposeful, not random. Steps each strength
         # floor / period / exit param up & down; greedily adopts what clears the gate so
         # the search descends coordinate-by-coordinate from the improving base.
+        # ATTRIBUTION: because we move ONE coordinate at a time, we know WHICH lever
+        # (and by how much expectancy/PF) drove each accepted improvement.
+        attribution = []   # [{param, from, to, score_gain}]
         budget = max(iterations, 0)
         for _pname, cand in self._directed_candidates(best_params):
             if budget <= 0:
@@ -353,27 +356,58 @@ class ParameterOptimizer:
             # robust objective: maximise the WORST-window PF (min across windows),
             # tie-break on total R. Only keep if it clears the incumbent.
             if res["score"] > best_score + 0.01:
+                attribution.append({"param": _pname, "from": best_params.get(_pname),
+                                    "to": cand.get(_pname),
+                                    "score_gain": round(res["score"] - best_score, 3)})
                 best_score = res["score"]; best_params = cand; best_res = res
                 improved = True
 
         if improved:
+            # rank the levers that actually gave the edge (biggest score gains)
+            attribution.sort(key=lambda a: -a["score_gain"])
             self.tuned[key] = {
                 "params": best_params,
                 "score": round(best_score, 3),
                 "pfs": best_res.get("pfs"),
                 "wrs": best_res.get("wrs"),
                 "n": best_res.get("n_total"),
+                "attribution": attribution[:5],   # which param changes drove the edge
                 "updated_at": __import__("datetime").datetime.now(__import__("datetime").timezone.utc).isoformat(),
             }
             self._persist()
+            edge = attribution[0] if attribution else None
             logger.info(f"[OPTIMIZER] {symbol}: IMPROVED -> min-PF {best_score:.2f} "
-                        f"params={best_params} (tried {tried}, from_reflection={directive_worked})")
+                        f"(edge lever: {edge['param'] if edge else 'guided'} "
+                        f"{edge['from'] if edge else ''}->{edge['to'] if edge else ''}) "
+                        f"tried {tried}, from_reflection={directive_worked}")
+            # MINE THE SUCCESS into the RAG: which adjustment worked, so it is
+            # semantically recallable for future decisions (symmetric with the
+            # failed-direction memory the checkpointer already records).
+            self._remember_success(symbol, best_params, best_score, attribution, directive_worked)
             return {"symbol": symbol, "improved": True, "score": best_score,
                     "params": best_params, "pfs": best_res.get("pfs"), "tried": tried,
-                    "from_reflection": directive_worked}
+                    "from_reflection": directive_worked, "attribution": attribution[:5]}
 
         logger.info(f"[OPTIMIZER] {symbol}: no improvement over min-PF {best_score:.2f} (tried {tried})")
         return {"symbol": symbol, "improved": False, "score": best_score, "tried": tried}
+
+    def _remember_success(self, symbol, params, score, attribution, from_reflection):
+        """Store a live-validated WINNING adjustment in the KnowledgeStore RAG so the
+        bot can recall 'this indicator change gave an edge' when deciding future tunes.
+        Symmetric with the checkpointer's failed-direction memory."""
+        ks = getattr(self, "knowledge_store", None)
+        if ks is None:
+            return
+        try:
+            levers = ", ".join(f"{a['param']} {a['from']}->{a['to']} (+{a['score_gain']}PF)"
+                               for a in attribution[:3]) or ("reflection-guided" if from_reflection else "config")
+            ks.remember(
+                key=f"winning_tune_{symbol.upper()}", kind="finding", topic="param_tuning",
+                text=(f"On {symbol.upper()} a config change PASSED walk-forward to min-PF "
+                      f"{score:.2f}. The lever(s) that gave the edge: {levers}. Prefer "
+                      f"exploring near this direction for {symbol.upper()}."))
+        except Exception:
+            pass
 
     def status(self) -> dict:
         return dict(self.tuned)

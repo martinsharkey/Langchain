@@ -171,6 +171,10 @@ class ScalpEngine:
         try:
             from src.learning.knowledge_store import KnowledgeStore
             self.knowledge_store = KnowledgeStore()
+            # give the optimizer a RAG handle so it can (a) mine winning tunes into the
+            # store and (b) recall past successes/failures to bias the directed search.
+            if self.param_optimizer is not None:
+                self.param_optimizer.knowledge_store = self.knowledge_store
             # sync durable PROJECT knowledge (the same insights saved to Kilo memory)
             # into the BOT's store so the running bot learns from them too (#13).
             try:
@@ -332,6 +336,7 @@ class ScalpEngine:
         self._freq_block = {}     # base -> {reason: count}
         self._freq_entered = {}   # base -> count of entries fired
         self._freq_evals = {}     # base -> total evaluations (denominator)
+        self._last_firing_config = {}  # base -> config snapshot that was producing trades
 
         try:
             from src.learning.vector_store import PatternVectorStore
@@ -1296,6 +1301,17 @@ class ScalpEngine:
             return
         for base in self.adapters:
             try:
+                # ── FREQUENCY-STARVATION guard (frequency IN the loop) ──
+                # If a config change collapsed fire_rate to ~0 over a meaningful number
+                # of evaluations, no trades will close, so the expectancy-based revert
+                # below can NEVER fire (n stays < min_sample). Detect the starvation
+                # directly and revert to the last config that was actually firing, OR
+                # relax the most-recently-tightened lever — so a change that prevents
+                # trading is self-corrected instead of silently freezing the symbol.
+                if self._frequency_starved(base):
+                    if self._revert_to_last_firing(base):
+                        continue
+
                 exp, n = self._recent_expectancy(base)
                 if n < self.checkpointer.min_sample:
                     continue
@@ -1305,6 +1321,51 @@ class ScalpEngine:
                     self._apply_reverted_config(base, decision.get("best_config") or {})
             except Exception as e:
                 logger.debug(f"checkpointer skip {base}: {e}")
+
+    def _frequency_starved(self, base: str) -> bool:
+        """True if this symbol is essentially not trading (fire_rate ~0) over a
+        meaningful number of recent evaluations — i.e. a change prevented trading."""
+        evals = self._freq_evals.get(base, 0)
+        entered = self._freq_entered.get(base, 0)
+        min_evals = getattr(config, "FREQ_STARVE_MIN_EVALS", 300)
+        min_fire = getattr(config, "FREQ_STARVE_MIN_FIRE_PCT", 0.3) / 100.0
+        if evals < min_evals:
+            return False
+        return (entered / evals) < min_fire
+
+    def _revert_to_last_firing(self, base: str) -> bool:
+        """Revert the symbol to its last config that was actually producing trades, or
+        relax the most-recently-tightened entry lever. Records the starving direction
+        as a failed direction so the optimizer won't re-apply it. Resets the freq tally."""
+        buk = base.upper()
+        snap = getattr(self, "_last_firing_config", {}).get(buk)
+        acted = False
+        if snap:
+            self._apply_reverted_config(base, snap)
+            logger.warning(f"[FREQ-REVERT] {base}: fire_rate collapsed "
+                           f"({self._freq_entered.get(base,0)}/{self._freq_evals.get(base,0)}) "
+                           f"-> reverted to last-firing config (top block: "
+                           f"{sorted(self._freq_block.get(base,{}).items(), key=lambda x:-x[1])[:1]})")
+            acted = True
+        else:
+            # no snapshot yet: relax the tightest live strength override (stretch) so we
+            # don't stay frozen — widen max_stretch_atr one notch.
+            ov = self._stretch_override.get(buk)
+            if ov:
+                self._stretch_override[buk] = round(ov + 0.3, 2)
+                logger.warning(f"[FREQ-RELAX] {base}: starved, no firing snapshot -> "
+                               f"widened max_stretch_atr {ov}->{self._stretch_override[buk]}")
+                acted = True
+        # mark the starving config as a failed direction + record to RAG
+        try:
+            if self.checkpointer is not None:
+                self.checkpointer._record_failure(
+                    base, self._current_symbol_config(base), -999.0, 0.0)
+        except Exception:
+            pass
+        # reset the tally so the reverted config gets a fresh measurement window
+        self._freq_evals[base] = 0; self._freq_entered[base] = 0; self._freq_block[base] = {}
+        return acted
 
     def _apply_exit_config(self, base_symbol: str, sl_atr: float, tp_rr: float, source: str = "pattern"):
         """#40/#41: lock a discovered exit config into the LIVE per-symbol override
@@ -2436,6 +2497,12 @@ class ScalpEngine:
         self.trades_opened += 1
         self._freq_entered[base] = self._freq_entered.get(base, 0) + 1
         self._freq_evals[base] = self._freq_evals.get(base, 0) + 1
+        # remember the config that IS firing, so the frequency-starvation guard can
+        # revert to it if a later change collapses trading.
+        try:
+            self._last_firing_config[base.upper()] = dict(self._current_symbol_config(base))
+        except Exception:
+            pass
         logger.info(f"OPENED {signal.action.upper()} {resolved} {result.filled_volume}@{result.price} "
                     f"ticket={result.ticket} conf={signal.confidence:.2f} [{combo_str}]")
 

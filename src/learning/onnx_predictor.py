@@ -64,6 +64,11 @@ def _fingerprint(s: dict) -> list:
 
 
 N_FEATURES = 10
+# names of the 10 scale-free entry features (aligned to _fingerprint order) — used to
+# surface which ENTRY-STATE feature best predicts win/loss (feature importance), an
+# adjunct to the optimizer's per-lever change-attribution.
+FEATURE_NAMES = ["macd_atr", "osma_atr", "osma_slope", "ema_slope", "price_stretch",
+                 "bulls_atr", "bears_atr", "rsi_centered", "osma_sign", "macd_sign"]
 
 
 def _model_dir() -> str:
@@ -229,6 +234,18 @@ class OnnxOutcomePredictor:
             f.write(onx.SerializeToString())
         self._meta[k] = {"auc": auc, "n_trades": len(X), "holdout": len(yte),
                          "split": "chronological", "n_features": N_FEATURES}
+        # capture the previously-DISCARDED feature importances: which entry-state
+        # feature most separates winners (e.g. osma_slope > rsi). Cross-validates the
+        # optimizer's lever attribution + IndicatorScorer.
+        try:
+            imp = {FEATURE_NAMES[i]: round(float(v), 4)
+                   for i, v in enumerate(clf.feature_importances_)}
+            self._meta[k]["feature_importance"] = dict(
+                sorted(imp.items(), key=lambda x: -x[1]))
+            top = next(iter(self._meta[k]["feature_importance"].items()))
+            logger.info(f"[ONNX] {k}: top win/loss feature = {top[0]} ({top[1]})")
+        except Exception:
+            pass
         json.dump(self._meta[k], open(meta_p, "w"), indent=2)
         self._load_session(k)
         logger.warning(f"[ONNX] {k}: retrained (chronological) AUC {auc} (prev {prev}) "

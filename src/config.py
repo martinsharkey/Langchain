@@ -284,6 +284,11 @@ ADAPTIVE_MIN_SAMPLE = int(os.getenv("ADAPTIVE_MIN_SAMPLE", "10"))
 # adaptive cadence. Iterations kept modest so it never blocks trading for long.
 OPTIMIZER_ENABLED = os.getenv("OPTIMIZER_ENABLED", "true").lower() in ("true", "1", "yes")
 OPTIMIZER_ITERATIONS = int(os.getenv("OPTIMIZER_ITERATIONS", "30"))  # directed coord-search budget/run (covers strength floors + periods)
+# Frequency-starvation guard: if a config change drops fire-rate below MIN_FIRE_PCT
+# over >= MIN_EVALS evaluations (trading stopped), revert to the last firing config /
+# relax the tightest lever — so a change that prevents trading self-corrects.
+FREQ_STARVE_MIN_EVALS = int(os.getenv("FREQ_STARVE_MIN_EVALS", "300"))
+FREQ_STARVE_MIN_FIRE_PCT = float(os.getenv("FREQ_STARVE_MIN_FIRE_PCT", "0.3"))
 
 # ─── Researcher -> action feedback ──────────────────────────
 # Pause new entries on a symbol the PerformanceResearcher flags as bleeding.
