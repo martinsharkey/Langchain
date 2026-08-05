@@ -153,6 +153,30 @@ def get_rates(
     return result
 
 
+def get_ticks(symbol: str, from_epoch: float, to_epoch: float, max_ticks: int = 5_000_000):
+    """Real bid/ask TICKS for [from_epoch, to_epoch]. Returns a dict of parallel arrays
+    {'time': [...], 'bid': [...], 'ask': [...]} (lists of float), or None if unavailable.
+    Used by the backtester for tick-accurate SL/TP fills (MT5 'real ticks' model). Never
+    raises — returns None so the caller can fall back to bar-based fills."""
+    if not MT5_AVAILABLE:
+        return None
+    try:
+        import datetime as _dt
+        t = mt5.copy_ticks_from(symbol, _dt.datetime.utcfromtimestamp(float(from_epoch)),
+                                int(max_ticks), mt5.COPY_TICKS_ALL)
+        if t is None or len(t) == 0:
+            return None
+        tt = t["time"].astype("int64")
+        # clip to the requested window
+        mask = (tt >= int(from_epoch)) & (tt <= int(to_epoch))
+        return {"time": tt[mask].tolist(),
+                "bid": t["bid"][mask].astype("float64").tolist(),
+                "ask": t["ask"][mask].astype("float64").tolist()}
+    except Exception as e:
+        logger.debug(f"get_ticks failed {symbol}: {e}")
+        return None
+
+
 @mt5_error_handler
 def get_last_price(symbol: str = "XAUUSD") -> Optional[dict]:
     """

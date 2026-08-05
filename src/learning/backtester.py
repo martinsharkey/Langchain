@@ -73,6 +73,71 @@ class Backtester:
                for nm, _ in rules if self.registry.get(nm)}
         n = len(rates); seg = (n - warmup) // windows
 
+        # TICK DATA (real-life fills): fetch real bid/ask ticks for the bar window and
+        # index them by bar so SL/TP are resolved TICK-BY-TICK in correct sequence with
+        # true spread — the MT5 'Every Tick based on Real Ticks' model. Falls back to
+        # bar high/low only when ticks are unavailable.
+        tick_by_bar = None
+        try:
+            from src.mt5.data import get_ticks
+            t0 = int(rates[0]["timestamp"]); t1 = int(rates[-1]["timestamp"]) + 60
+            tk = get_ticks(symbol, t0, t1)
+            if tk and tk["time"]:
+                tt = tk["time"]; tb = tk["bid"]; ta = tk["ask"]
+                tick_by_bar = [None] * n
+                bar_ts = [int(r["timestamp"]) for r in rates]
+                ci = 0
+                for bi in range(n):
+                    end = bar_ts[bi + 1] if bi + 1 < n else bar_ts[bi] + 60
+                    seg_t = []
+                    while ci < len(tt) and tt[ci] < end:
+                        if tt[ci] >= bar_ts[bi]:
+                            seg_t.append((tb[ci], ta[ci]))
+                        ci += 1
+                    tick_by_bar[bi] = seg_t
+                logger.info(f"backtest {symbol}: TICK-accurate fills ({len(tt)} ticks over {n} bars)")
+        except Exception as e:
+            logger.debug(f"tick fetch skip {symbol}: {e}")
+
+        def _resolve_open(ot, i, price, giveback):
+            """Return realised R if the trade closes in bar i, else None. Uses ticks
+            (correct intrabar sequence + spread) when available; else bar high/low."""
+            ticks = tick_by_bar[i] if tick_by_bar else None
+            if ticks:
+                d = ot["dir"]
+                for bid, ask in ticks:
+                    px = bid if d == "buy" else ask   # price we realise on exit
+                    if d == "buy":
+                        ot["peak"] = max(ot["peak"], px)
+                        if px <= ot["sl"]: return -1.0
+                        if px >= ot["tp"]: return ot["rr"]
+                        fav = ot["peak"] - ot["entry"]
+                        if fav >= ot["arm"] and (ot["peak"] - px) >= giveback * fav:
+                            return (px - ot["entry"]) / ot["risk"]
+                    else:
+                        ot["peak"] = min(ot["peak"], px)
+                        if px >= ot["sl"]: return -1.0
+                        if px <= ot["tp"]: return ot["rr"]
+                        fav = ot["entry"] - ot["peak"]
+                        if fav >= ot["arm"] and (px - ot["peak"]) >= giveback * fav:
+                            return (ot["entry"] - px) / ot["risk"]
+                return None
+            # bar fallback
+            hib, lob = rates[i]["high"], rates[i]["low"]
+            if ot["dir"] == "buy":
+                ot["peak"] = max(ot["peak"], hib); fav = ot["peak"] - ot["entry"]
+                if lob <= ot["sl"]: return -1.0
+                if hib >= ot["tp"]: return ot["rr"]
+                if fav >= ot["arm"] and (ot["peak"] - price) >= giveback * fav:
+                    return (price - ot["entry"]) / ot["risk"]
+            else:
+                ot["peak"] = min(ot["peak"], lob); fav = ot["entry"] - ot["peak"]
+                if hib >= ot["sl"]: return -1.0
+                if lob <= ot["tp"]: return ot["rr"]
+                if fav >= ot["arm"] and (price - ot["peak"]) >= giveback * fav:
+                    return (ot["entry"] - price) / ot["risk"]
+            return None
+
         def _sim(lo, hi):
             w = l = 0; gw = gl = 0.0; ot = None
             for i in range(lo, hi):
@@ -83,19 +148,7 @@ class Backtester:
                 if atr <= 0:
                     continue
                 if ot:
-                    hib, lob = rates[i]["high"], rates[i]["low"]; r = None
-                    if ot["dir"] == "buy":
-                        ot["peak"] = max(ot["peak"], hib); fav = ot["peak"] - ot["entry"]
-                        if lob <= ot["sl"]: r = -1.0
-                        elif hib >= ot["tp"]: r = ot["rr"]
-                        elif fav >= ot["arm"] and (ot["peak"] - price) >= giveback * fav:
-                            r = (price - ot["entry"]) / ot["risk"]
-                    else:
-                        ot["peak"] = min(ot["peak"], lob); fav = ot["entry"] - ot["peak"]
-                        if hib >= ot["sl"]: r = -1.0
-                        elif lob <= ot["tp"]: r = ot["rr"]
-                        elif fav >= ot["arm"] and (price - ot["peak"]) >= giveback * fav:
-                            r = (ot["entry"] - price) / ot["risk"]
+                    r = _resolve_open(ot, i, price, giveback)
                     if r is not None:
                         if r > 0: w += 1; gw += r
                         else: l += 1; gl += abs(r)
