@@ -135,10 +135,56 @@ class ParameterOptimizer:
     def _key(self, symbol: str) -> str:
         return symbol.upper()
 
+    def _directed_candidates(self, base: dict):
+        """DIRECTED, non-random coordinate search over the highest-impact levers, in
+        priority order: signed STRENGTH floors (osma/macd/bulls/bears magnitude) FIRST,
+        then indicator PERIODS, then exit shape. For each parameter we yield candidates
+        stepping it UP and DOWN from the current value (coordinate descent). This is
+        purposeful — every lever is tested each run — not a random lottery. The caller
+        evaluates each against the walk-forward gate and greedily keeps improvements."""
+        STRENGTH = ["osma_min_long", "osma_max_short", "macd_min_long", "macd_max_short",
+                    "bulls_min_long", "bears_min_long", "bears_max_short", "bulls_max_short"]
+        PERIODS = ["osma_fast", "osma_slow", "osma_signal", "ema_period",
+                   "atr_period", "power_period", "rsi_period"]
+        SHAPE = ["min_confluence", "min_ema_slope", "atr_min_rel", "atr_min", "atr_max",
+                 "price_stretch_mult", "sl_atr", "tp_rr"]
+        for k in STRENGTH + PERIODS + SHAPE:
+            if k not in PARAM_SPACE:
+                continue
+            lo, hi, step, kind = PARAM_SPACE[k]
+            cur = base.get(k, DEFAULTS.get(k, lo))
+            # step several increments each way so we actually explore the range
+            for mult in (1, 2, 4):
+                for direction in (1, -1):
+                    v = _clamp(cur + direction * step * mult, lo, hi, kind)
+                    if v == cur:
+                        continue
+                    cand = dict(base); cand[k] = v
+                    if cand.get("osma_fast", 12) >= cand.get("osma_slow", 26):
+                        _lo, _hi, _st, _k = PARAM_SPACE["osma_slow"]
+                        cand["osma_slow"] = _clamp(cand["osma_fast"] + 8, _lo, _hi, _k)
+                    yield k, cand
+
     def _mutate(self, params: dict, n_mutations: int = 2) -> dict:
-        """Randomly nudge a few parameters within the search space (micro-adjust)."""
+        """Randomly nudge a few parameters, BIASED toward the highest-impact levers:
+        the signed STRENGTH floors (osma/macd/bulls/bears magnitude) and the indicator
+        PERIODS. A flat random.sample over ~24 keys almost never explores the 9 strength
+        floors, so they stayed at 0 (sign-only). We now weight the sampling so every
+        candidate is likely to move a strength floor and/or a period — these change the
+        signal itself, which is where the edge lives."""
         cand = dict(params)
-        keys = random.sample(list(PARAM_SPACE.keys()), k=min(n_mutations, len(PARAM_SPACE)))
+        strength = [k for k in ("osma_min_long", "osma_max_short", "macd_min_long",
+                                "macd_max_short", "bulls_min_long", "bears_min_long",
+                                "bears_max_short", "bulls_max_short") if k in PARAM_SPACE]
+        periods = [k for k in ("osma_fast", "osma_slow", "osma_signal", "ema_period",
+                               "atr_period", "power_period", "rsi_period") if k in PARAM_SPACE]
+        other = [k for k in PARAM_SPACE if k not in strength and k not in periods]
+        # weighted pool: strength + periods appear more often than the rest
+        weighted = strength * 3 + periods * 2 + other
+        keys = set(random.sample(weighted, k=min(n_mutations + 1, len(weighted))))
+        # guarantee at least one STRENGTH floor is explored when they exist
+        if strength and not (keys & set(strength)):
+            keys.add(random.choice(strength))
         for k in keys:
             lo, hi, step, kind = PARAM_SPACE[k]
             cur = cand.get(k, DEFAULTS[k])
@@ -240,19 +286,33 @@ class ParameterOptimizer:
         directive_worked = False
 
         # candidate list: reflection-guided first, then a #25 mql5-grounded
-        # candidate, then random mutations. All skip #27 failed directions.
+        # candidate, then a DIRECTED coordinate search over the high-impact levers
+        # (strength floors -> periods -> exit shape). All skip #27 failed directions.
         guided = [self._apply_directives(base, directives)] if directives else []
         mql5_cand = self._mql5_guided_candidate(symbol, best_params)
         if mql5_cand is not None:
             guided.append(mql5_cand)
 
-        for idx in range(iterations + len(guided)):
-            cand = guided[idx] if idx < len(guided) else self._mutate(best_params)
-            is_guided = idx < len(guided)
-            # #25: never re-try a direction the checkpointer marked as failed
+        # 1) evaluate the reflection/mql5-guided candidates first
+        for cand in guided:
             if self._is_failed(symbol, cand):
                 continue
             tried += 1
+            res = self.backtest_fn(symbol, cand, cand.get("sl_atr", 1.0), cand.get("tp_rr", 2.0))
+            if res and res.get("generalizes") and res["score"] > best_score + 0.01:
+                best_score = res["score"]; best_params = cand; best_res = res
+                improved = True; directive_worked = True
+
+        # 2) DIRECTED coordinate search — purposeful, not random. Steps each strength
+        # floor / period / exit param up & down; greedily adopts what clears the gate so
+        # the search descends coordinate-by-coordinate from the improving base.
+        budget = max(iterations, 0)
+        for _pname, cand in self._directed_candidates(best_params):
+            if budget <= 0:
+                break
+            if self._is_failed(symbol, cand):
+                continue
+            budget -= 1; tried += 1
             res = self.backtest_fn(symbol, cand, cand.get("sl_atr", 1.0), cand.get("tp_rr", 2.0))
             if not res or not res.get("generalizes"):
                 continue
@@ -261,8 +321,6 @@ class ParameterOptimizer:
             if res["score"] > best_score + 0.01:
                 best_score = res["score"]; best_params = cand; best_res = res
                 improved = True
-                if is_guided:
-                    directive_worked = True
 
         if improved:
             self.tuned[key] = {

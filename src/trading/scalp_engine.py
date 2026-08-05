@@ -1893,7 +1893,7 @@ class ScalpEngine:
                                 sym, iterations=config.OPTIMIZER_ITERATIONS,
                                 directives=per_symbol_directives.get(sym))
                             if r.get("improved"):
-                                src = "reflection-guided" if r.get("from_reflection") else "random-search"
+                                src = "reflection-guided" if r.get("from_reflection") else "directed-search"
                                 logger.info(f"[OPTIMIZER] {sym} improved ({src}): "
                                             f"min-PF {r['score']} params {r['params']}")
                         except Exception as e:
