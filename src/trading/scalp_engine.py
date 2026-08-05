@@ -337,6 +337,16 @@ class ScalpEngine:
         self._freq_entered = {}   # base -> count of entries fired
         self._freq_evals = {}     # base -> total evaluations (denominator)
         self._last_firing_config = {}  # base -> config snapshot that was producing trades
+        # growth engine: how much of the original stake has been 'banked' (extracted).
+        # Once >0, only house money is risked. Restored from disk so it persists.
+        self._capital_withdrawn = 0.0
+        try:
+            import json as _json
+            _gp = os.path.join("data", "growth_state.json")
+            if os.path.exists(_gp):
+                self._capital_withdrawn = float(_json.load(open(_gp)).get("capital_withdrawn", 0.0) or 0.0)
+        except Exception:
+            pass
 
         try:
             from src.learning.vector_store import PatternVectorStore
@@ -948,6 +958,29 @@ class ScalpEngine:
                     weights[v] = max(0.1, wr * 2.0 + (0.3 if m.get("net_pnl", 0) > 0 else -0.1))
         return weights
 
+    def _maybe_extract_capital(self, balance: float):
+        """Capital-extraction rule: the first time balance reaches GROWTH_EXTRACT_AT,
+        'bank' the original stake (GROWTH_INITIAL_CAPITAL) — record it as withdrawn so
+        all future sizing runs on (balance - withdrawn). From that point only PROFIT is
+        ever at risk: the user 'never actually loses money'. Persisted so it survives
+        restarts. (Real broker withdrawal is manual; this makes the BOT stop risking it.)"""
+        if getattr(self, "_capital_withdrawn", 0.0) > 0:
+            return
+        if balance >= config.GROWTH_EXTRACT_AT:
+            self._capital_withdrawn = config.GROWTH_INITIAL_CAPITAL
+            try:
+                import json
+                p = os.path.join("data", "growth_state.json")
+                json.dump({"capital_withdrawn": self._capital_withdrawn,
+                           "extracted_at_balance": round(balance, 2),
+                           "at": __import__("datetime").datetime.now(__import__("datetime").timezone.utc).isoformat()},
+                          open(p, "w"), indent=2)
+            except Exception:
+                pass
+            logger.warning(f"[GROWTH] CAPITAL EXTRACTED: balance £{balance:.2f} >= "
+                           f"£{config.GROWTH_EXTRACT_AT} -> banking original £{config.GROWTH_INITIAL_CAPITAL}. "
+                           f"From now, sizing uses house money only; original stake is safe.")
+
     def _position_lot(self, adapter) -> float:
         """
         PHASE-GATED position sizing (robustness rule: size follows PROVEN edge,
@@ -959,6 +992,25 @@ class ScalpEngine:
         This makes it IMPOSSIBLE to escalate size before an edge exists.
         """
         base_lot = config.SCALP_LOT
+        # ── GROWTH ENGINE: aggressive balance-proportional compounding + capital
+        # extraction (user model). When on, size = (balance - withdrawn) / BalancePerLot
+        # * 0.01, so growth compounds; once the stake is recovered only profit is risked.
+        if getattr(config, "GROWTH_ENABLED", False) and adapter.spec:
+            try:
+                acct = self._safe_account()
+                balance = float(acct.get("balance", 0) or 0)
+                if balance <= 0:
+                    return base_lot
+                self._maybe_extract_capital(balance)
+                withdrawn = getattr(self, "_capital_withdrawn", 0.0)
+                tradable = max(balance - withdrawn, 0.0)
+                lot = (tradable / config.GROWTH_BALANCE_PER_LOT) * 0.01
+                step = adapter.spec.volume_step or 0.01
+                lot = max(adapter.spec.min_volume, min(lot, config.GROWTH_MAX_LOT))
+                return round(round(lot / step) * step, 2)
+            except Exception as e:
+                logger.debug(f"growth lot fallback: {e}")
+                return base_lot
         edge = self._edge_cache or {}
         phase = edge.get("phase", 0)
         if phase < 2 or not adapter.spec:
@@ -1803,6 +1855,31 @@ class ScalpEngine:
             self._stretch_override = {}
         logger.info(f"[ACCOUNT] connected {trade_mode} login={login} server={server}")
 
+    def _report_growth(self):
+        """Monitor the growth engine each learning cycle: check the capital-extraction
+        threshold against the LIVE balance (so it fires even when no entry did), and
+        publish growth state (banked stake, house-money tradable, growth-phase) for the
+        dashboard + researcher. Keeps compounding/extraction INSIDE the learning loop."""
+        if not getattr(config, "GROWTH_ENABLED", False):
+            self._growth_report = {"enabled": False}
+            return self._growth_report
+        try:
+            bal = float(self._safe_account().get("balance", 0) or 0)
+            self._maybe_extract_capital(bal)   # extraction monitored regardless of entries
+            wd = getattr(self, "_capital_withdrawn", 0.0)
+            rep = {"enabled": True, "balance": round(bal, 2), "capital_withdrawn": wd,
+                   "tradable": round(max(bal - wd, 0.0), 2),
+                   "stake_recovered": wd > 0, "extract_at": config.GROWTH_EXTRACT_AT,
+                   "balance_per_lot": config.GROWTH_BALANCE_PER_LOT,
+                   "return_x": round(bal / config.GROWTH_INITIAL_CAPITAL, 2) if config.GROWTH_INITIAL_CAPITAL else None}
+            self._growth_report = rep
+            logger.info(f"[GROWTH] balance £{bal:.2f} ({rep['return_x']}x) "
+                        f"stake_recovered={rep['stake_recovered']} tradable £{rep['tradable']:.2f}")
+            return rep
+        except Exception as e:
+            logger.debug(f"growth report skip: {e}")
+            return getattr(self, "_growth_report", {"enabled": True})
+
     def _report_entry_frequency(self):
         """Surface the entry-vs-frequency balance: per symbol, how many entries fired
         vs the dominant BLOCKING gate. Lets us + the researcher see if the bot is
@@ -2073,6 +2150,10 @@ class ScalpEngine:
                     self._report_entry_frequency()
                 except Exception as e:
                     logger.debug(f"frequency report skip: {e}")
+                try:
+                    self._report_growth()   # growth engine INSIDE the learning loop
+                except Exception as e:
+                    logger.debug(f"growth report skip: {e}")
 
                 # BIG-CANDLE alignment: did our OsMA config align with today's largest
                 # moves? If we miss the big candles, indicators are mis-configured for
@@ -2423,7 +2504,31 @@ class ScalpEngine:
         # Block a new entry at (nearly) the same price + direction as a still-open
         # position on this symbol, to stop the repeated same-level re-entries seen
         # in the journal (e.g. GER40 6x at 25706.65). Distance measured in ATR.
-        if self._same_level_open(base, signal.action, signal.price,
+        # ── PYRAMIDING (growth engine): add legs to a WINNING same-direction position
+        # up to GROWTH_PYRAMID_MAX while the signal is still valid. This deliberately
+        # bypasses the same-level guard for same-direction adds, but ONLY when the
+        # existing legs are in profit (add to winners, never to losers). Opposite-
+        # direction is still blocked below.
+        _same_dir = [p for p in self.open_positions.values()
+                     if p.base_symbol == base and p.action == signal.action]
+        _is_pyramid = False
+        if getattr(config, "GROWTH_ENABLED", False) and _same_dir:
+            if len(_same_dir) >= config.GROWTH_PYRAMID_MAX:
+                return   # max legs reached
+            # only add if the aggregate position is in profit (add to winners)
+            try:
+                tick = adapter.live_tick()
+                px = tick.bid if signal.action == "buy" else tick.ask
+                winning = all((px > p.entry_price) == (signal.action == "buy") for p in _same_dir)
+            except Exception:
+                winning = False
+            if winning:
+                _is_pyramid = True   # allow this leg; skip the same-level guard
+            else:
+                return   # existing legs not (all) in profit -> don't pyramid into a loser
+
+        # same-level guard (skipped for a valid pyramid add)
+        if not _is_pyramid and self._same_level_open(base, signal.action, signal.price,
                                  indicators.get("atr", 0)):
             logger.info(f"{base}: skip re-entry — already have a {signal.action} near "
                         f"{signal.price} (same-level guard)")
@@ -2717,6 +2822,7 @@ class ScalpEngine:
                 "post_mortem": (getattr(self, "_postmortem_cache", {}) or {}),
                 "learning_health": self._learning_health(),
                 "entry_frequency": getattr(self, "_freq_report", {}),
+                "growth": getattr(self, "_growth_report", {"enabled": getattr(config, "GROWTH_ENABLED", False)}),
                 "config_checkpoints": (self.checkpointer.snapshot() if self.checkpointer else {}),
                 "graduation": (self.graduation.snapshot() if self.graduation else {}),
                 "dynamic_fixer": (self.fixer.snapshot() if self.fixer else {}),

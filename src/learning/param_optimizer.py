@@ -101,16 +101,15 @@ DEFAULTS = {
 # minimums (>=), short floors maximums (<=). See WHALE_ANALYSIS + session memory.
 SYMBOL_BASELINES = {
     "XAUUSD": {
-        "osma_fast": 12, "osma_slow": 50, "osma_signal": 9, "ema_period": 13,
-        "atr_period": 14, "min_ema_slope": 0.05, "atr_min": 1.4, "atr_max": 4.5,
-        "osma_min_long": 0.29, "bulls_min_long": 0.48, "bears_min_long": 0.0,
-        "osma_max_short": -0.17, "bulls_max_short": 0.0, "bears_max_short": -0.72,
-        "max_momentum_age": 26,          # GoldShark proven: enter up to 26 bars post-cross
-        # RSI is NOT part of the proven GoldShark edge (0 RSI params in any optimizer
-        # file; EA uses only EMA/Bulls/Bears/OsMA/ATR). Neutralise the RSI gate so we
-        # do NOT add a filter the PF-5.24 config never had. Optional/tunable if wanted.
+        # pass5469 PROVEN config (reproduced £100->£273 2.73x, WR 94%, PF 1.48 on tick
+        # data). Floors ATR-normalized (raw / gold ATR ~2.3). osma_slow 26, steep slope.
+        "osma_fast": 12, "osma_slow": 26, "osma_signal": 9, "ema_period": 13,
+        "atr_period": 14, "min_ema_slope": 0.2, "atr_min": 1.4, "atr_max": 4.5,
+        "osma_min_long": 0.87, "bulls_min_long": 0.3, "bears_min_long": 0.0,
+        "osma_max_short": -0.30, "bulls_max_short": 0.0, "bears_max_short": -0.04,
+        "max_momentum_age": 26,
         "rsi_long_max": 100.0, "rsi_short_min": 0.0,
-        "sl_atr": 0.8, "tp_rr": 2.0, "min_confluence": 4,
+        "sl_atr": 0.8, "tp_rr": 2.0, "min_confluence": 3,
     },
 }
 

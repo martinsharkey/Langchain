@@ -197,6 +197,18 @@ if TRADING_MODE not in _VALID_TRADING_MODES:
 
 # Micro-lot cap applied when TRADING_MODE == "LIVE_MICRO"
 LIVE_MICRO_MAX_LOT = float(os.getenv("LIVE_MICRO_MAX_LOT", "0.01"))
+# ── GROWTH ENGINE (compounding + capital extraction) ──
+# User model: aggressive compounding from L100; once balance hits GROWTH_EXTRACT_AT,
+# "extract" the original stake (GROWTH_INITIAL_CAPITAL) so from then on only PROFIT is
+# ever at risk ("never actually lose money"). Sizing = (balance - withdrawn)/BalancePerLot
+# * 0.01. Disabled by default (pure-entry proving phase); turn on when ready to grow.
+GROWTH_ENABLED = os.getenv("GROWTH_ENABLED", "false").lower() in ("true", "1", "yes")
+GROWTH_INITIAL_CAPITAL = float(os.getenv("GROWTH_INITIAL_CAPITAL", "100.0"))
+GROWTH_EXTRACT_AT = float(os.getenv("GROWTH_EXTRACT_AT", "1000.0"))   # bank the stake here
+GROWTH_BALANCE_PER_LOT = float(os.getenv("GROWTH_BALANCE_PER_LOT", "31.0"))  # pass5469: L31/0.01
+GROWTH_MAX_LOT = float(os.getenv("GROWTH_MAX_LOT", "5.0"))            # broker/sanity ceiling
+GROWTH_PYRAMID_MAX = int(os.getenv("GROWTH_PYRAMID_MAX", "10"))       # add-to-winner legs
+GROWTH_DAILY_LOSS_HALT_PCT = float(os.getenv("GROWTH_DAILY_LOSS_HALT_PCT", "30.0"))  # circuit breaker
 
 
 def is_live_mode() -> bool:

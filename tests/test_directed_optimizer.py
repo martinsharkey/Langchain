@@ -46,7 +46,7 @@ def test_gold_proven_edge_baseline_is_the_starting_point():
     o = ParameterOptimizer(registry=None, backtest_fn=lambda *a, **k: None)
     o.tuned = {}   # fresh clone, no tuned file
     p = o.current_params("XAUUSD-ECN")
-    assert p["osma_slow"] == 50, p            # proven period
+    assert p["osma_slow"] == 26, p            # pass5469 proven period
     assert p["osma_min_long"] > 0, p          # non-zero strength floor (edge, not sign-only)
     assert p["bulls_min_long"] > 0, p
     assert p["osma_max_short"] < 0, p         # short floor is negative
