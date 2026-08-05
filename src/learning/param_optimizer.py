@@ -159,19 +159,35 @@ class ParameterOptimizer:
         except Exception as e:
             logger.warning(f"tuned params persist failed: {e}")
 
+    # entry-QUALITY floors that must never be left ungated (a symbol trading with these
+    # at 0/None fires weak longs straight into drops — observed: GER40/BTC MFE=0 losers).
+    # Until a symbol has its OWN proven values, fall back to the gold-proven floors
+    # (ATR-normalized, so they scale to each symbol's volatility). Applied to EVERY
+    # symbol's params in current_params.
+    _FALLBACK_FLOOR_KEYS = ("osma_min_long", "bulls_min_long", "osma_max_short",
+                            "bears_max_short", "min_ema_slope", "min_confluence", "max_momentum_age")
+
     def current_params(self, symbol: str) -> dict:
         key = self._key(symbol)
+        gold = SYMBOL_BASELINES.get("XAUUSD", {})
         if key in self.tuned and self.tuned[key].get("params"):
-            return dict(self.tuned[key]["params"])
-        # fall back to a PROVEN-EDGE per-symbol baseline (version-controlled) before
-        # the generic DEFAULTS, so the directed optimizer starts from a config with a
-        # demonstrated edge, not zeros. Gold = mined from the GoldShark optimizer
-        # results (top-30 robust configs, avg PF 5.33). Match by symbol prefix.
+            p = dict(self.tuned[key]["params"])
+            # SAFETY: fill any missing/zero entry-quality floor from the gold-proven
+            # baseline so no symbol trades fully ungated (ATR-normalized -> scale-safe).
+            for fk in self._FALLBACK_FLOOR_KEYS:
+                if (p.get(fk) in (None, 0, 0.0)) and gold.get(fk) not in (None, 0, 0.0):
+                    p[fk] = gold[fk]
+            return p
+        # no tuned entry -> proven per-symbol baseline, else DEFAULTS + gold floors.
         for pref, base in SYMBOL_BASELINES.items():
             if key.startswith(pref):
                 merged = dict(DEFAULTS); merged.update(base)
                 return merged
-        return dict(DEFAULTS)
+        merged = dict(DEFAULTS)
+        for fk in self._FALLBACK_FLOOR_KEYS:
+            if gold.get(fk) not in (None, 0, 0.0):
+                merged[fk] = gold[fk]
+        return merged
 
     def _key(self, symbol: str) -> str:
         return symbol.upper()
