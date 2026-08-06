@@ -447,6 +447,13 @@ class ScalpEngine:
         # seeded GoldShark lifecycle records) so the gated signal-driven exit/hold is
         # active from cycle 1, not only after the background researcher loop first runs.
         self._load_seeded_signatures()
+        # SYMBOL ONBOARDING (#floors): any symbol WITHOUT a proven baseline auto-runs a
+        # backtest+forward-test on its OWN history to discover non-zero strength floors
+        # BEFORE it trades — so no symbol ever starts at zero floors / needs long tuning.
+        try:
+            self._onboard_new_symbols()
+        except Exception as e:
+            logger.debug(f"symbol onboarding skip: {e}")
         # Learn per-symbol entry-strength floors from seeded + prior data so the
         # confluence gate uses proven strength levels from cycle 1.
         if self.entry_strength_learner is not None:
@@ -455,6 +462,52 @@ class ScalpEngine:
             except Exception as e:
                 logger.debug(f"entry-strength startup learn skip: {e}")
         return True
+
+    def _onboard_new_symbols(self):
+        """For each traded symbol WITHOUT a proven baseline or tuned entry, auto-run a
+        backtest+forward-test on its own history to discover non-zero strength floors,
+        then persist them as the symbol's baseline. Ensures no symbol trades at zero
+        floors and skips lengthy live tuning. Runs once per symbol (idempotent)."""
+        if self.param_optimizer is None:
+            return
+        try:
+            from src.learning.floor_discovery import FloorDiscovery
+            from src.learning.param_optimizer import SYMBOL_BASELINES
+            from src.mt5.data import get_rates, get_ticks
+        except Exception as e:
+            logger.debug(f"onboarding deps unavailable: {e}")
+            return
+        fd = FloorDiscovery(get_rates, get_ticks)
+        for base, adapter in self.adapters.items():
+            resolved = adapter.resolved_symbol
+            key = base.upper()
+            # already has a proven baseline (in code) or a persisted tuned entry -> skip
+            has_baseline = any(key.startswith(p) for p in SYMBOL_BASELINES)
+            has_tuned = (key in self.param_optimizer.tuned or
+                         resolved.upper() in self.param_optimizer.tuned)
+            if has_baseline or has_tuned:
+                continue
+            logger.warning(f"[ONBOARD] {base}: no baseline — running backtest+forward-test to "
+                           f"discover strength floors before trading...")
+            try:
+                recipe = fd.onboard(resolved)
+            except Exception as e:
+                logger.info(f"[ONBOARD] {base}: discovery failed ({e}); trades structure-only")
+                continue
+            if recipe:
+                from src.learning.param_optimizer import DEFAULTS
+                params = dict(DEFAULTS); params.update({k: v for k, v in recipe.items()
+                                                        if not k.startswith("_")})
+                self.param_optimizer.tuned[resolved.upper()] = {
+                    "params": params, "score": None,
+                    "source": f"onboarding_discovery (fwd green {recipe['_forward']['green_pct']:.0f}% "
+                              f"PF {recipe['_forward']['pf']:.2f})"}
+                try:
+                    self.param_optimizer._persist()
+                except Exception:
+                    pass
+                logger.warning(f"[ONBOARD] {base}: seeded discovered floors "
+                               f"osma>={recipe['osma_min_long']} dom>={recipe['bulls_min_long']}")
 
     def _load_seeded_signatures(self):
         """Populate _reversal_signatures at startup from whatever the DB already holds
