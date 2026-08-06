@@ -111,6 +111,27 @@ SYMBOL_BASELINES = {
         "rsi_long_max": 100.0, "rsi_short_min": 0.0,
         "sl_atr": 0.8, "tp_rr": 2.0, "min_confluence": 3,
     },
+    # BTCUSD + GER40: floors DISCOVERED by independent per-symbol tick backtest
+    # (discover_floors.py) — NOT borrowed from gold. Entry direction is good (66-78%
+    # go green) but exit/frequency balance not yet profitable (PF<1) — these are a
+    # non-zero STARTING baseline for the optimizer to refine, not a proven-profitable
+    # config. ATR-normalized floors so they scale with the symbol's volatility.
+    "BTCUSD": {
+        "osma_fast": 12, "osma_slow": 26, "osma_signal": 9, "ema_period": 13,
+        "atr_period": 14, "min_ema_slope": 0.05, "atr_min": 0.0, "atr_max": 0.0,
+        "osma_min_long": 0.1, "bulls_min_long": 1.5, "bears_min_long": 0.0,
+        "osma_max_short": -0.1, "bulls_max_short": 0.0, "bears_max_short": -1.5,
+        "max_momentum_age": 26, "rsi_long_max": 100.0, "rsi_short_min": 0.0,
+        "sl_atr": 0.8, "tp_rr": 2.0, "min_confluence": 3,
+    },
+    "GER40": {
+        "osma_fast": 12, "osma_slow": 26, "osma_signal": 9, "ema_period": 13,
+        "atr_period": 14, "min_ema_slope": 0.05, "atr_min": 0.0, "atr_max": 0.0,
+        "osma_min_long": 0.2, "bulls_min_long": 1.0, "bears_min_long": 0.0,
+        "osma_max_short": -0.2, "bulls_max_short": 0.0, "bears_max_short": -1.0,
+        "max_momentum_age": 26, "rsi_long_max": 100.0, "rsi_short_min": 0.0,
+        "sl_atr": 0.8, "tp_rr": 2.0, "min_confluence": 3,
+    },
 }
 
 

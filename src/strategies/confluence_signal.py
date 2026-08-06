@@ -50,6 +50,12 @@ def _cfg(cfg):
     c = dict(DEFAULT_CFG)
     if cfg:
         c.update(cfg)
+    # KEY ALIAS: the optimizer/baseline use `min_ema_slope` but the confluence's
+    # EMA-slope soft-check reads `min_ema_slope_atr`. Without this remap the tuned/
+    # proven slope (e.g. pass5469's 0.2) was silently dropped and the check used the
+    # 0.02 default. Alias so the tuned value actually gates the EMA-slope soft-check.
+    if cfg and "min_ema_slope" in cfg and "min_ema_slope_atr" not in cfg:
+        c["min_ema_slope_atr"] = cfg["min_ema_slope"]
     return c
 
 
