@@ -1202,7 +1202,9 @@ class ScalpEngine:
         # (the learner/optimizer can still refine via tuned params). Only sets keys the
         # learned personality hasn't already provided.
         _exit_seed = {
-            "XAUUSD": {"wick_points": 15.0, "be_trigger_pts": 20.0, "trail_wick_mult": 1.0},
+            # XAUUSD: PROVEN pass5469 fixed-point exits (be 347 / trail 73 pts, POINT=0.01).
+            # These reproduced 2.73x/PF1.48 in backtest — do NOT replace with the wick-trail.
+            "XAUUSD": {"be_trigger_pts": 347.0, "trail_points": 73.0},
             "GER40":  {"wick_points": 40.0, "be_trigger_pts": 50.0, "trail_wick_mult": 1.0},
             "BTCUSD": {"wick_points": 400.0, "be_trigger_pts": 600.0, "trail_wick_mult": 1.2},
         }

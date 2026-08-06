@@ -657,6 +657,7 @@ class StrategyRegistry:
             params={"min_confidence": 0.5},
             min_confidence=0.4,
             weight=1,
+            status="disabled",  # RETIRED: live entry is OsMA_Confluence only
         ))
         
         self.register(StrategyDefinition(
@@ -731,6 +732,7 @@ class StrategyRegistry:
             indicators_used=["cci", "close"],
             suitable_regimes=["trending", "volatile"],
             signal_fn=cci_breakout, min_confidence=0.5, weight=1,
+            status="disabled",  # RETIRED: live entry is OsMA_Confluence only
         ))
         self.register(StrategyDefinition(
             name="GoldenCross_50_200",
@@ -745,6 +747,7 @@ class StrategyRegistry:
             indicators_used=["bb_upper", "bb_lower", "volatility_ratio", "trend", "close"],
             suitable_regimes=["quiet", "volatile"],
             signal_fn=bollinger_squeeze_breakout, min_confidence=0.5, weight=2,
+            status="disabled",  # RETIRED: live entry is OsMA_Confluence only
         ))
         self.register(StrategyDefinition(
             name="MACD_Cross",
@@ -766,6 +769,7 @@ class StrategyRegistry:
             indicators_used=["rsi", "macd_histogram", "close"],
             suitable_regimes=["trending"],
             signal_fn=rsi_divergence_momentum, min_confidence=0.45, weight=1,
+            status="disabled",  # RETIRED: live entry is OsMA_Confluence only
         ))
         # NOTE (1b): MACD_OsMA_Power_Confluence was RETIRED. It was a third,
         # lighter-weight confluence (MACD/OsMA/Bulls/Bears only, no EMA/ATR/RSI).
@@ -840,9 +844,17 @@ class StrategyRegistry:
         """Get a specific strategy by name."""
         return self._strategies.get(name)
     
-    def get_names(self) -> list[str]:
-        """Get names of all registered strategies."""
-        return list(self._strategies.keys())
+    def get_names(self, include_disabled: bool = False) -> list[str]:
+        """Get names of registered strategies.
+
+        By default excludes RETIRED strategies (status='disabled') so that
+        reflection/synthesis never proposes an entry the bot no longer trades.
+        The live entry is OsMA_Confluence only.
+        """
+        return [
+            name for name, s in self._strategies.items()
+            if include_disabled or getattr(s, "status", "active") != "disabled"
+        ]
     
     def find_suitable(self, indicators: dict) -> list[StrategyDefinition]:
         """
@@ -855,6 +867,7 @@ class StrategyRegistry:
         suitable = [
             s for s in self._strategies.values()
             if regime in s.suitable_regimes
+            and getattr(s, "status", "active") != "disabled"
         ]
         logger.info(f"Market regime: {regime}, suitable strategies: {[s.name for s in suitable]}")
         return suitable

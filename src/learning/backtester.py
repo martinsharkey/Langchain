@@ -21,7 +21,6 @@ from __future__ import annotations
 from dataclasses import dataclass, asdict
 from typing import Optional, Callable
 
-from src.mt5.data import get_rates
 from src.strategies.indicators import compute_indicator_series
 from src.utils.logger import get_logger
 
@@ -47,8 +46,19 @@ class BacktestResult:
 
 
 class Backtester:
-    def __init__(self, registry):
+    def __init__(self, registry, rates_fn: Optional[Callable] = None,
+                 ticks_fn: Optional[Callable] = None):
+        """rates_fn/ticks_fn default to the live MT5 data layer. Inject alternatives
+        (e.g. src.data_sources.dukascopy.DukascopySource) to backtest the SAME engine
+        on a DIFFERENT data source — used for continuous per-symbol Dukascopy tuning.
+        Both must match src.mt5.data.get_rates / get_ticks signatures."""
         self.registry = registry
+        if rates_fn is None or ticks_fn is None:
+            from src.mt5.data import get_rates as _gr, get_ticks as _gt
+            rates_fn = rates_fn or _gr
+            ticks_fn = ticks_fn or _gt
+        self._get_rates = rates_fn
+        self._get_ticks = ticks_fn
 
     def walkforward_focused(self, symbol, params, sl_atr=1.0, tp_rr=2.0,
                             giveback=0.55, arm=0.5, timeframe="M15",
@@ -62,7 +72,7 @@ class Backtester:
         """
         from src.strategies.indicators import compute_indicator_series
         from src.learning.edge_weights import focused_rules
-        rates = get_rates(symbol, timeframe=timeframe, count=bars)
+        rates = self._get_rates(symbol, timeframe=timeframe, count=bars)
         if not rates or len(rates) < 2000:
             return None
         series = compute_indicator_series(rates, params)  # params drive indicators
@@ -79,9 +89,8 @@ class Backtester:
         # bar high/low only when ticks are unavailable.
         tick_by_bar = None
         try:
-            from src.mt5.data import get_ticks
             t0 = int(rates[0]["timestamp"]); t1 = int(rates[-1]["timestamp"]) + 60
-            tk = get_ticks(symbol, t0, t1)
+            tk = self._get_ticks(symbol, t0, t1)
             if tk and tk["time"]:
                 tt = tk["time"]; tb = tk["bid"]; ta = tk["ask"]
                 tick_by_bar = [None] * n
@@ -191,7 +200,7 @@ class Backtester:
 
     def _load_history(self, symbol: str, timeframe: str, bars: int) -> list[dict]:
         # MT5 copy_rates_from_pos caps around ~ tens of thousands; request in one call.
-        rates = get_rates(symbol, timeframe=timeframe, count=bars)
+        rates = self._get_rates(symbol, timeframe=timeframe, count=bars)
         if not rates or len(rates) < 300:
             logger.warning(f"backtest: insufficient history for {symbol} {timeframe} "
                            f"({0 if not rates else len(rates)} bars)")

@@ -9,6 +9,18 @@ The historical trade telemetry from the successful MQL5 EAs (GoldShark family,
 EMA_OSMA_ATR). This is the source of the **entry edge** (~85-95% entry-direction
 success) and the seed for the reversal-signature + entry-quality learning.
 
+### 1a. GoldShark EA + config + optimiser corpus (RAG reference for gold)
+
+`data/reprodata/goldshark13/` (gitignored, machine-local) — the full GoldShark corpus:
+the canonical **`GoldShark13.mq5`** (v13.13) + **`goldshark13_pass5469.set`**, plus all EA
+versions (`ea_source/`), all tuning configs (`sets/`, 37), MT5 optimiser backtest+forward
+reports (`optimiser_reports/`, 27 XML/CSV/TXT), and per-version PDFs (`pdfs/`, 18). These
+provide the **config <-> tested-result correlation** for gold. See
+`data/reprodata/goldshark13/README.md` for the canonical pass5469 params + the real v13.13
+MFE-defense exit model (hard SL 3347; scale out 50% at MFE 20 -> BE+10; trail 15/30 by MFE
+class; runner exit on M5 MACD/EMA reversal; time-decay 90min). The live XAUUSD baseline in
+`src/learning/param_optimizer.py` is derived from `goldshark13_pass5469.set`.
+
 | Location | Content |
 |---|---|
 | `C:\Users\MartinSharkey\Documents\machine learning\ea_data_archive\{XAUUSD,BTCUSD}\*_Master_Lifecycle_Consolidated.csv` | Cleanest per-trade lifecycle (entry+peak+exit indicators + MFE/MAE). The 95%+ best-config set. |
@@ -65,6 +77,34 @@ Open Danny questions: `cryptorti/martin_qna.md`.
 | `data/chromadb_store/` | Pattern RAG + KnowledgeStore (offline MiniLM). |
 | `data/whale_outcomes.db` | Live whale signal -> realised outcome. |
 | `data/monitor/live_monitor_*.jsonl` | Live monitor telemetry (entry/manage/exit). |
+
+## 5. Dukascopy historical feed (backtest + synthetic forward-test data)
+
+**Some of the best free historical data on the market** — true bid/ask TICK data (with
+volumes) plus candles, for FX / CFD / commodities, going back many years. Used to
+backtest and forward-test the OsMA/GoldShark strategy on a second, independent,
+high-quality source (not just VT Markets MT5).
+
+| Item | Detail |
+|---|---|
+| Feed | `https://datafeed.dukascopy.com/datafeed/{SYMBOL}/{YYYY}/{MM:02d}/{DD:02d}/{HH:02d}h_ticks.bi5` — one LZMA-compressed **hour** of ticks per file. **Month is 0-indexed** (Jan=`00`). |
+| Record | 20 bytes, big-endian `>IIIff`: `ms_offset(uint32), ask(int32), bid(int32), ask_vol(f32), bid_vol(f32)`. Prices are ints scaled by the instrument point (see `_SYMBOL_MAP`). All times UTC. |
+| Ingestion | `src/data_sources/dukascopy.py` — `fetch_ticks()`, `ticks_to_bars()`, and `DukascopySource` (a drop-in `get_rates`/`get_ticks` provider matching `src/mt5/data.py`). Also `save_npy()` / `save_bars_csv()` to emit the `reproduce_*`/`discover_floors` offline formats. Stdlib-only (`lzma`,`struct`,`urllib`) — does NOT use the fragile `duka` pip package. |
+| Cache | Downloads cache under `data/dukascopy_cache/` (gitignored). First pull is network-bound (be gentle: ~4 concurrent workers, or Dukascopy rate-limits); cached backtests load ~192k ticks/day in <0.5s. Warm a range: `python warm_dukascopy_cache.py <start> <end>`. |
+| Symbol map | `XAUUSD→XAUUSD`, `BTCUSD→BTCUSD`, `GER40→DEUIDXEUR` (DAX), plus EURUSD/GBPUSD for pipeline tests. Verify point scale before trusting index/crypto magnitudes. |
+| Reproduction harness | `reproduce_pass5469_dukascopy.py` — runs the exact GoldShark13 rule + `pass5469_cfg.json` on Dukascopy XAUUSD (`--recal` to re-scale floors by percentile). |
+
+**Provenance rule:** tag anything derived from this source `data_source="DUKASCOPY"` so the
+learning-window filter (`experience_db.learning_window_clause`) excludes it from
+**live-magnitude** learning. Use Dukascopy for STRUCTURAL / robustness validation and
+synthetic forward-test data — NOT for re-deriving the MT5-tuned strength-floor
+magnitudes (osma_min_long/bulls/bears, atr_min).
+
+**Regime note (measured):** magnitudes are PRICE-LEVEL/VOLATILITY dependent, not just
+broker-dependent. 2024 gold (~$2300, M1 ATR med ~0.67) vs 2026 gold (~$4030-4147, M1 ATR
+med ~1.83) differ ~3x, so pass5469's absolute floors (min_atr 1.4, minOsL 2.0) only fire
+in the price regime they were tuned in. Test Dukascopy on the SAME period as the MT5
+baseline (2026) for an apples-to-apples comparison.
 
 ## Data-hygiene rules (learned the hard way)
 

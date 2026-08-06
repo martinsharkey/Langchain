@@ -102,14 +102,20 @@ DEFAULTS = {
 SYMBOL_BASELINES = {
     "XAUUSD": {
         # pass5469 PROVEN config (reproduced £100->£273 2.73x, WR 94%, PF 1.48 on tick
-        # data). Floors ATR-normalized (raw / gold ATR ~2.3). osma_slow 26, steep slope.
+        # data). EXACT raw floors from data/reprodata/pass5469_cfg.json + floors_raw so the
+        # live confluence gates on RAW osma/bulls/bears (NOT ATR-scaled) — this makes live
+        # match the backtest. Also carries the proven fixed-point exits (be/tp/trail/stop).
+        "floors_raw": True,
         "osma_fast": 12, "osma_slow": 26, "osma_signal": 9, "ema_period": 13,
-        "atr_period": 14, "min_ema_slope": 0.2, "atr_min": 1.4, "atr_max": 4.5,
-        "osma_min_long": 0.87, "bulls_min_long": 0.3, "bears_min_long": 0.0,
-        "osma_max_short": -0.30, "bulls_max_short": 0.0, "bears_max_short": -0.04,
+        "atr_period": 14, "min_ema_slope": 0.205, "atr_min": 1.4, "atr_max": 50.0,
+        "osma_min_long": 2.0, "bulls_min_long": 0.7, "bears_min_long": 1.8,
+        "osma_max_short": -0.7, "bulls_max_short": -1.5, "bears_max_short": -0.1,
         "max_momentum_age": 26,
         "rsi_long_max": 100.0, "rsi_short_min": 0.0,
         "sl_atr": 0.8, "tp_rr": 2.0, "min_confluence": 3,
+        # proven fixed-point exits (points; POINT=0.01 for gold) — see _exit_seed override
+        "be_trigger_pts": 347.0, "tp_points": 449.0, "trail_points": 73.0,
+        "hard_sl_points": 800.0, "bal_per_lot": 31.0,
     },
     # BTCUSD + GER40: floors DISCOVERED by independent per-symbol tick backtest
     # (discover_floors.py) — NOT borrowed from gold. Entry direction is good (66-78%
@@ -205,6 +211,10 @@ class ParameterOptimizer:
             for fk in self._SHARED_STRUCT_KEYS:
                 if (p.get(fk) in (None, 0, 0.0)) and gold.get(fk) not in (None, 0, 0.0):
                     p[fk] = gold[fk]
+            if is_gold:
+                # gold gates on RAW floors (matches the pass5469 backtest); ensure the
+                # flag survives even if an older tuned entry was persisted without it.
+                p.setdefault("floors_raw", True)
             if not is_gold:
                 # ensure no BORROWED magnitude floor leaks onto a non-gold symbol
                 for mk in self._MAGNITUDE_KEYS:

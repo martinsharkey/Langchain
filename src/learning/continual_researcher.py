@@ -238,12 +238,23 @@ class ContinualResearcher:
         try:
             conn = sqlite3.connect(self.db.db_path)
             conn.row_factory = sqlite3.Row
-            rows = conn.execute(
-                "SELECT outcome, profit_loss, exit_reason, strategy_used FROM trades "
-                "WHERE symbol LIKE ? AND outcome IN ('win','loss','breakeven') "
-                "AND (exit_reason IS NULL OR exit_reason<>'pre_rebuild_synthetic') "
-                "AND (data_source IS NULL OR data_source<>'SIMULATED_OHLC') "
-                "ORDER BY id DESC LIMIT ?", (base_symbol.upper() + "%", limit)).fetchall()
+            q = ("SELECT outcome, profit_loss, exit_reason, strategy_used FROM trades "
+                 "WHERE symbol LIKE ? AND outcome IN ('win','loss','breakeven') "
+                 "AND (exit_reason IS NULL OR exit_reason<>'pre_rebuild_synthetic') ")
+            params: list = [base_symbol.upper() + "%"]
+            # Restrict to the live OsMA_Confluence era (cutover + recency + OsMA-only) AND
+            # exclude ALL simulated sources (the clause now drops SIMULATED_REAL_TICKS too).
+            try:
+                lw, lp = self.db.learning_window_clause(exclude_sim_ohlc=True)
+                q += lw
+                params.extend(lp)
+            except Exception as _e:
+                # Fail-open would silently re-admit simulated/poison data — make it visible.
+                logger.warning(f"learning_window_clause failed for {base_symbol}; "
+                               f"review runs UNFILTERED this cycle: {_e}")
+            q += " ORDER BY id DESC LIMIT ?"
+            params.append(limit)
+            rows = conn.execute(q, tuple(params)).fetchall()
             conn.close()
         except Exception as e:
             logger.debug(f"review skip {base_symbol}: {e}")

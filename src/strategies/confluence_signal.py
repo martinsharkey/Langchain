@@ -250,7 +250,15 @@ def evaluate_confluence_bar(ind: dict, cfg=None) -> dict:
     bulls_v = float(ind.get("bulls_power") or 0); bears_v = float(ind.get("bears_power") or 0)
     macd_v = macd
     _a = atr if atr > 0 else 1.0
-    def _floor(key): return float(c.get(key, 0.0) or 0.0) * _a   # ATR-scaled per symbol
+    # floors_raw=True -> use the stored floor AS-IS (raw units), matching the proven
+    # pass5469 backtest (reproduce_pass5469.py) which gates on raw osma/bulls/bears values.
+    # Default (False) -> ATR-normalized (stored floor is in ATR units, scaled by this bar's
+    # ATR) so one PARAM_SPACE range works across gold/BTC/GER40. XAUUSD is pinned to raw
+    # via SYMBOL_BASELINES["XAUUSD"]["floors_raw"]=True so live == the 2.73x backtest.
+    _raw = bool(c.get("floors_raw", False))
+    def _floor(key):
+        v = float(c.get(key, 0.0) or 0.0)
+        return v if _raw else v * _a
     if direction == "buy":
         gates = [
             ("osma", osma_now, _floor("osma_min_long"), ">="),

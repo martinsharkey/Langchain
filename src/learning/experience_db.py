@@ -154,12 +154,16 @@ class ExperienceDatabase:
         """Return (sql_fragment, params) restricting LEARNING reads to CURRENT
         behaviour: excludes the pre-fix regime (<= LEARNING_REGIME_BREAK), keeps only
         the last LEARNING_WINDOW_DAYS, and (default) restricts to OsMA_Confluence trades
-        and excludes SIMULATED_OHLC. This stops the poisoned pre-fix ensemble era from
-        dragging the learners. Use in checkpointer/entry-quality/edge/graduation/
-        post-mortem reads — NOT in raw recording.
+        and excludes ALL SIMULATED/synthetic sources. This stops the poisoned pre-fix
+        ensemble era AND any simulated/backtest batch (SIMULATED_OHLC,
+        SIMULATED_REAL_TICKS, DUKASCOPY, etc.) from dragging the learners. Use in
+        checkpointer/entry-quality/edge/graduation/post-mortem reads — NOT in raw recording.
 
         osma_only: only strategy_used='OsMA_Confluence' (+ NULL for legacy rows tagged
           before attribution existed) once past the cutover. Set False to include all.
+        exclude_sim_ohlc: exclude EVERY non-live data_source so the learner only adapts
+          on clean live closed trades (project rule: no config change from simulated/weak
+          data). Kept as the original arg name for callers.
         """
         frag, params = "", []
         col = f"{alias}timestamp"
@@ -175,7 +179,13 @@ class ExperienceDatabase:
         if win > 0:
             frag += f" AND datetime({col}) > datetime('now', ?)"; params.append(f"-{win} days")
         if exclude_sim_ohlc:
-            frag += f" AND ({alias}data_source IS NULL OR {alias}data_source<>'SIMULATED_OHLC')"
+            # Exclude EVERY simulated/synthetic/backtest source, not just SIMULATED_OHLC.
+            # SIMULATED_REAL_TICKS blowups (e.g. a 421-trade -£9220 batch) were poisoning
+            # the learner because only SIMULATED_OHLC was previously excluded. NULL/LIVE_*
+            # (real live trades) are kept; anything containing SIMULATED or DUKASCOPY is dropped.
+            col_ds = f"{alias}data_source"
+            frag += (f" AND ({col_ds} IS NULL OR "
+                     f"({col_ds} NOT LIKE '%SIMULATED%' AND {col_ds} NOT LIKE 'DUKASCOPY%'))")
         if osma_flag:
             # only the sole entry strategy (NULL kept for pre-attribution rows inside
             # the window; the regime-break cut already removes the old ensemble era).

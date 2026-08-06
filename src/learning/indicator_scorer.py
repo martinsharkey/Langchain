@@ -55,11 +55,20 @@ class IndicatorScorer:
         q = ("SELECT id, symbol, action, outcome, profit_loss, timestamp, "
              "market_regime, indicators_snapshot, strategy_combination "
              "FROM trades WHERE outcome IN ('win','loss','breakeven')")
-        params = ()
+        params: list = []
         if symbol:
             q += " AND symbol = ?"
-            params = (symbol,)
-        rows = [dict(r) for r in conn.execute(q, params).fetchall()]
+            params.append(symbol)
+        # Restrict learning reads to the live OsMA_Confluence era (cutover +
+        # recency + OsMA-only + exclude SIMULATED_OHLC). Without this the scorer
+        # reasons over the poisoned pre-cutover ensemble era and retired strategies.
+        try:
+            lw, lp = self.experience_db.learning_window_clause()
+            q += lw
+            params.extend(lp)
+        except Exception:
+            pass
+        rows = [dict(r) for r in conn.execute(q, tuple(params)).fetchall()]
         conn.close()
         return rows
 

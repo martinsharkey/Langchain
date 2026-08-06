@@ -35,7 +35,7 @@ from src.utils.logger import get_logger
 logger = get_logger("trade_manager")
 
 # Experiment arms
-VARIANTS = ("BE_PLUS_TRAIL", "TRAIL_ONLY", "SCALP_FIXED", "HYBRID_LLM")
+VARIANTS = ("BE_PLUS_TRAIL", "TRAIL_ONLY", "SCALP_FIXED", "HYBRID_LLM", "GS13_MFE")
 
 
 @dataclass
@@ -206,8 +206,11 @@ class TradeManager:
     def _trail_points(self, st, spread_points, wick) -> float:
         """RESPONSIVE trail distance (pts): wick-sized breathing room, NOT raw ATR
         (which gave too much back). Default ~1.3x wick — follows closely yet survives
-        normal wicks; learnable per symbol via 'trail_wick_mult'."""
+        normal wicks; learnable per symbol via 'trail_wick_mult'. A fixed 'trail_points'
+        (e.g. pass5469's proven 73) overrides the wick-relative trail when present."""
         p = self._personality(st)
+        if "trail_points" in p:
+            return max(float(p["trail_points"]), spread_points + 5)
         mult = float(p.get("trail_wick_mult", 1.3))
         return max(wick * mult, spread_points + 12)
 
@@ -373,7 +376,7 @@ class TradeManager:
         # (or a spread-based floor), so the retain-floor can protect any real peak.
         # The 50% retain floor already prevents scratching tiny winners.
         ratchet_arm = max(self.retain_arm_points(st), spread_points + 20)
-        if st.peak_profit_points >= ratchet_arm:
+        if st.variant != "GS13_MFE" and st.peak_profit_points >= ratchet_arm:
             retain_frac = self.retain_floor_frac(st)          # e.g. 0.5 -> keep >=50% of peak
             floor_points = st.peak_profit_points * retain_frac
             # If price has ALREADY fallen to/through the floor, a stop there would sit
@@ -407,6 +410,7 @@ class TradeManager:
         # It never overrides the retention ratchet (the floor) above.
         st.signal_hold = False
         if reversal_signature and indicators and profit_points > 0 \
+                and st.variant != "GS13_MFE" \
                 and st.peak_profit_points >= max(self.giveback_arm_points(st) * 0.6, spread_points + 20):
             tell = self._reversal_tell(st, indicators, reversal_signature)
             if tell == "rolling_over" and profit_points >= 0.5 * st.peak_profit_points:
@@ -417,7 +421,7 @@ class TradeManager:
                 st.signal_hold = True
 
         arm_peak = max(self.giveback_arm_points(st), spread_points + 15)
-        if st.peak_profit_points >= arm_peak and profit_points > 0:
+        if st.variant != "GS13_MFE" and st.peak_profit_points >= arm_peak and profit_points > 0:
             giveback_frac = self.giveback_fraction(st)
             # signal-supported hold: the reversal tell says the move still has legs
             if getattr(st, "signal_hold", False):
@@ -442,6 +446,41 @@ class TradeManager:
 
         if v == "SCALP_FIXED":
             return None  # rely on broker TP/SL only
+
+        if v == "GS13_MFE":
+            # GoldShark13 v13.13 MFE-DEFENSE (SL-only adaptation; no partial-close).
+            # NOTE: GS13_MFE is intentionally EXEMPT from the generic retention-ratchet
+            # and giveback guards above (gated by st.variant) so this arm is a CLEAN A/B
+            # test of the EA's own MFE-defense (BE+ then class-based trail), not a blend.
+            # Fixes the ~50% MFE-capture leak: keep the hard SL (broker) as the floor,
+            # then once the favourable excursion (peak_profit_points = MFE) reaches the
+            # activation threshold, move to BE+ and trail by MFE CLASS — scalps trail
+            # tight, runners trail wide so big moves keep running. Constants mirror the
+            # EA (#defines): activation 20pts, runner threshold 50pts, trail 15/30pts.
+            # Points here are the symbol's price points (POINT); use tunable overrides
+            # from personality if present so per-symbol tuning still applies.
+            p = self._personality(st)
+            act = float(p.get("mfe_activation_pts", 20.0))
+            runner_thr = float(p.get("mfe_runner_threshold", 50.0))
+            scalp_trail = float(p.get("mfe_scalp_trail_pts", 15.0))
+            runner_trail = float(p.get("mfe_runner_trail_pts", 30.0))
+            mfe = st.peak_profit_points  # favourable excursion in points (tracked)
+            # Step 1: at MFE >= activation, secure risk-free at BE+ (once).
+            if not st.moved_to_be and mfe >= act:
+                be_plus = st.entry + (spread_points + max(5, act * 0.5)) * point * (1 if st.action == "buy" else -1)
+                st.moved_to_be = True
+                st.trail_active = True
+                self._log(st, "gs13_mfe_be", be_plus)
+                return {"modify_sl": round(be_plus, 6)}
+            # Step 2: once active, trail by MFE class (scalp vs runner), SL-only forward.
+            if st.trail_active and mfe > 0:
+                trail_dist = (scalp_trail if mfe < runner_thr else runner_trail) * point
+                new_sl = (st.best_price - trail_dist) if st.action == "buy" else (st.best_price + trail_dist)
+                if self._sl_improves(st, new_sl):
+                    st.sl = new_sl
+                    self._log(st, "gs13_mfe_trail", new_sl)
+                    return {"modify_sl": round(new_sl, 6)}
+            return None
 
         if v in ("BE_PLUS_TRAIL", "HYBRID_LLM"):
             # WICK-AWARE BE + RESPONSIVE TRAIL (user design): raw ATR trailing gave too

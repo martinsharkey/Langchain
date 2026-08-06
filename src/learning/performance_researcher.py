@@ -32,11 +32,20 @@ class PerformanceResearcher:
     def _closed(self):
         conn = sqlite3.connect(self.experience_db.db_path)
         conn.row_factory = sqlite3.Row
-        rows = [dict(r) for r in conn.execute(
-            "SELECT symbol, action, strategy_used, strategy_combination, mgmt_variant, "
-            "outcome, profit_loss, timestamp, market_regime "
-            "FROM trades WHERE outcome IN ('win','loss','breakeven')"
-        ).fetchall()]
+        q = ("SELECT symbol, action, strategy_used, strategy_combination, mgmt_variant, "
+             "outcome, profit_loss, timestamp, market_regime "
+             "FROM trades WHERE outcome IN ('win','loss','breakeven')")
+        params: list = []
+        # Restrict to the live OsMA_Confluence era (cutover + recency + OsMA-only +
+        # exclude SIMULATED_OHLC) so insights written to the knowledge base are not
+        # poisoned by the retired pre-cutover ensemble era.
+        try:
+            lw, lp = self.experience_db.learning_window_clause()
+            q += lw
+            params.extend(lp)
+        except Exception:
+            pass
+        rows = [dict(r) for r in conn.execute(q, tuple(params)).fetchall()]
         conn.close()
         return rows
 

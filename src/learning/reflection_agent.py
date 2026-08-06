@@ -162,6 +162,8 @@ class ReflectionAgent:
             logger.info(f"Reflection[{symbol}]: LLM unavailable ({e})")
             return None
 
+        # Only ACTIVE strategies (get_names excludes retired ones); the live entry
+        # is OsMA_Confluence, so never offer the LLM a retired strategy to combine.
         available = self.registry.get_names()
         prompt = (
             "You are a quantitative trading researcher. Analyze the evidence and "
