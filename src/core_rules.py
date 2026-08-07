@@ -37,6 +37,12 @@ CORE_RULES = [
     "engine auto-runs the onboarding workflow (backtest + forward-test + OsMA-cycle SL "
     "sampling, Dukascopy-first with MT5 fallback) and persists the per-symbol baseline "
     "before it trades. Never hand-tune a new symbol's magnitudes.",
+    "R10 EVIDENCE FIRST — NEVER GUESS: every tunable magnitude (pyramid leg count, SL, "
+    "strength floors, exit params, thresholds) MUST be derived from HARD EVIDENCE — the "
+    "GoldShark XML backtest/forward-test reports, the RAG, live closed-trade data, or a "
+    "backtest-harness result — and cited. NEVER insert a hardcoded guess, arbitrary cap, "
+    "or opinion in place of the data. If no evidence exists, say so and TEST it (harness) "
+    "rather than assume. This applies to the assistant, the researcher, and the bot.",
 ]
 
 # ── canonical constants other modules should import (not re-hardcode) ─────────
@@ -82,6 +88,19 @@ def assert_core_rules() -> list[str]:
             problems.append("R4 violated: learning_window_clause does not exclude SIMULATED sources")
     except Exception as e:
         problems.append(f"R4 check error: {e}")
+
+    # R10: evidence-sourced magnitudes. GROWTH_PYRAMID_MAX must carry an evidence tag
+    # (env GROWTH_PYRAMID_MAX_EVIDENCE) proving it came from the XML/backtest data, not a
+    # guess. Warn (don't hard-fail) so the bot still trades, but the violation is visible.
+    try:
+        from src import config
+        if getattr(config, "GROWTH_ENABLED", False):
+            ev = getattr(config, "GROWTH_PYRAMID_MAX_EVIDENCE", "") or ""
+            if not ev:
+                problems.append("R10 warning: GROWTH_PYRAMID_MAX has no evidence tag "
+                                "(GROWTH_PYRAMID_MAX_EVIDENCE) — value must be data-derived, not guessed")
+    except Exception as e:
+        problems.append(f"R10 check error: {e}")
 
     if problems:
         raise AssertionError("CORE RULES violated:\n  - " + "\n  - ".join(problems))

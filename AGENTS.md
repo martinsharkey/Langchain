@@ -42,6 +42,8 @@ VPS-ready — no editor/Kilo dependency). Change `src/core_rules.py` first if a 
 - **R6 BROKER-SIDE SL ALWAYS** — wide safety-TP is a connectivity failsafe only.
 - **R7 BTCUSD** may use the CryptoRTI whale websocket to augment ENTRY confidence only (not the exit).
 - **R8 KNOWN-GOOD PRESERVED** — winning baseline in RAG + `data/winning_baseline.json`; checkpointer reverts to best realised-expectancy config.
+- **R9 AUTOMATIC ONBOARDING** — new symbols onboard automatically (Dukascopy-primary, MT5 fallback); no manual step.
+- **R10 EVIDENCE FIRST — NEVER GUESS** — every tunable magnitude (pyramid legs, SL, floors, thresholds) comes from HARD evidence (GoldShark XML BT/FT, RAG, live data, or a backtest), cited — never a hardcoded guess. If no evidence, TEST it. Applies to the assistant, researcher, and bot.
 
 ## What we are doing (current focus)
 

@@ -476,8 +476,14 @@ class ContinualResearcher:
         # here are all XAUUSD/gold, so only mine gold-family evidence for XAUUSD.
         if not sym.startswith("XAU"):
             return None
-        bts = [p for p in glob.glob(os.path.join(d, "*.xml"))
-               if "backtest" in os.path.basename(p).lower()]
+        # scan the primary optimiser-reports dir AND the mined MT5-install reports dir
+        # (exported .opt caches land there) — all evidence, R10.
+        dirs = [d, os.path.join(os.path.dirname(d.rstrip("/\\")), "mt5_installs", "reports")]
+        bts = []
+        for dd in dirs:
+            if dd and os.path.isdir(dd):
+                bts += [p for p in glob.glob(os.path.join(dd, "*.xml"))
+                        if "backtest" in os.path.basename(p).lower()]
         if not bts:
             return None
         # pick the largest backtest report (most passes) for the cluster summary

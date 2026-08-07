@@ -1221,6 +1221,11 @@ class ScalpEngine:
                 lot = (tradable / config.GROWTH_BALANCE_PER_LOT) * 0.01
                 step = adapter.spec.volume_step or 0.01
                 lot = max(adapter.spec.min_volume, min(lot, config.GROWTH_MAX_LOT))
+                # In LIVE_MICRO the per-LEG size stays capped; compounding comes from
+                # PYRAMIDING multiple capped legs into a basket (user's growth model), not
+                # from one oversized leg on the micro demo.
+                if config.TRADING_MODE == "LIVE_MICRO":
+                    lot = min(lot, config.LIVE_MICRO_MAX_LOT)
                 return round(round(lot / step) * step, 2)
             except Exception as e:
                 logger.debug(f"growth lot fallback: {e}")

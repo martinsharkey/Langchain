@@ -207,7 +207,16 @@ GROWTH_INITIAL_CAPITAL = float(os.getenv("GROWTH_INITIAL_CAPITAL", "100.0"))
 GROWTH_EXTRACT_AT = float(os.getenv("GROWTH_EXTRACT_AT", "1000.0"))   # bank the stake here
 GROWTH_BALANCE_PER_LOT = float(os.getenv("GROWTH_BALANCE_PER_LOT", "31.0"))  # pass5469: L31/0.01
 GROWTH_MAX_LOT = float(os.getenv("GROWTH_MAX_LOT", "5.0"))            # broker/sanity ceiling
-GROWTH_PYRAMID_MAX = int(os.getenv("GROWTH_PYRAMID_MAX", "10"))       # add-to-winner legs
+# GROWTH_PYRAMID_MAX is DATA-DERIVED (R10), not a guess. Evidence: GoldShark optimiser
+# forward-tested passes (data/reprodata/goldshark13/optimiser_reports): realistic runs
+# 363016 Dukascopy (fwd-profitable median 5, max 15) and 1176166 tick (median 10, max 20);
+# best forward-profit passes cluster 3-8 legs. Set to the cleanest realistic run's
+# forward-validated ceiling (15). The 42-50 leg passes are optimiser range artifacts
+# (£1M-on-£100 compounding blow-ups) and are NOT used.
+GROWTH_PYRAMID_MAX = int(os.getenv("GROWTH_PYRAMID_MAX", "15"))       # add-to-winner legs (evidence-derived)
+GROWTH_PYRAMID_MAX_EVIDENCE = os.getenv(
+    "GROWTH_PYRAMID_MAX_EVIDENCE",
+    "goldshark XML fwd-tested: duka363016 median5/max15, tick1176166 median10/max20, best 3-8")
 GROWTH_DAILY_LOSS_HALT_PCT = float(os.getenv("GROWTH_DAILY_LOSS_HALT_PCT", "30.0"))  # circuit breaker
 # BASKET management (multi-leg pyramids): trail the COMBINED value so the basket runs.
 # Close the whole basket if combined profit gives back this fraction of its combined peak,
