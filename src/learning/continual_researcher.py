@@ -732,6 +732,28 @@ class ContinualResearcher:
             summary["ingest"] = self._ingestor.scan_and_ingest()
         except Exception as e:
             logger.debug(f"auto-ingest skip: {e}")
+        # WINNING-CLUSTER awareness: analyse ALL winning combinations (GoldShark profitable
+        # passes + checkpointer bests + winning baseline) for the cluster of settings that
+        # consistently win, so the researcher KNOWS the winning region and the optimiser
+        # builds on it. Remembered to the RAG for continuity.
+        try:
+            from src.learning.winning_clusters import WinningClusters
+            wc = WinningClusters().analyse()
+            if wc:
+                summary["winning_cluster"] = wc["winning_cluster"]
+                if self.ks is not None:
+                    c = wc["winning_cluster"]
+                    self.ks.remember(
+                        key="winning_cluster", kind="finding", topic="winning combinations cluster",
+                        source="continual_researcher", accumulate=True,
+                        text=(f"WINNING CLUSTER from {wc['n_winning']} winning configs "
+                              f"({wc['dominant_cluster_size']} in dominant cluster): "
+                              f"osma_min_long~{c.get('osma_min_long')} bulls_min_long~{c.get('bulls_min_long')} "
+                              f"atr_min~{c.get('atr_min')} sl_atr~{c.get('sl_atr')} tp_rr~{c.get('tp_rr')}. "
+                              f"The optimiser seeds candidates from this winning region; build here "
+                              f"if the current model is failing."))
+        except Exception as e:
+            logger.debug(f"winning-cluster analysis skip: {e}")
         for sym in symbols:
             r = self.research_symbol(sym)
             # per-symbol indicator-scale profiling (calibrate thresholds per symbol)

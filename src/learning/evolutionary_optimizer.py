@@ -208,12 +208,33 @@ class EvolutionaryOptimizer:
         # initial population: base + evidence-seeded top candidates + random. Every
         # candidate carries the base's non-tunable keys (floors_raw etc.) for like-for-like.
         pop = [dict(base_params)]
+        # WINNING-CLUSTER SEEDS: build candidates around the centroid(s) of ALL known
+        # winning configs (GoldShark profitable passes + checkpointer bests + winning
+        # baseline) so the search BUILDS ON the winning region, not just gold/random.
+        try:
+            from src.learning.winning_clusters import WinningClusters
+            wc = WinningClusters().analyse()
+            if wc:
+                for cen in wc.get("centroids", [])[:3]:
+                    cand = {p: self._clip(p, v) for p, v in cen["params"].items() if p in self.space}
+                    pop.append(self._carry(cand, base_params))
+                    # a couple of mutated variants around each winning centroid
+                    for _ in range(2):
+                        m = dict(cand)
+                        for kk in list(m):
+                            if random.random() < 0.3:
+                                lo, hi, step, typ = self.space[kk]
+                                m[kk] = self._clip(kk, m[kk] + random.choice([-1, 1]) * step)
+                        pop.append(self._carry(m, base_params))
+                logger.warning(f"[EVO] {symbol}: seeded {len(pop)-1} candidates from winning clusters")
+        except Exception as e:
+            logger.debug(f"winning-cluster seed skip: {e}")
         if self._seed_model is not None:
             ranked = sorted((self._sample() for _ in range(seed_pool)),
                             key=self._seed_score, reverse=True)
-            pop += [self._carry(c, base_params) for c in ranked[:pop_size - 1]]
+            pop += [self._carry(c, base_params) for c in ranked[:max(1, pop_size - len(pop))]]
         else:
-            pop += [self._carry(self._sample(), base_params) for _ in range(pop_size - 1)]
+            pop += [self._carry(self._sample(), base_params) for _ in range(max(1, pop_size - len(pop)))]
 
         def fitness(c):
             r = self.backtest_fn(symbol, c, c.get("sl_atr", 1.0), c.get("tp_rr", 2.0))
