@@ -45,7 +45,7 @@ class ContinualResearcher:
                  edge_discovery=None, repo: str = "martinsharkey/Langchain",
                  pattern_optimizer=None, apply_exit_config=None, excursion_analyzer=None,
                  robust_tester=None, optimizer_reports_dir=None, dukascopy_backtest=None,
-                 current_params_fn=None, apply_tuned_fn=None):
+                 current_params_fn=None, apply_tuned_fn=None, onnx_predictor=None):
         self.db = experience_db
         self.mql5 = mql5_knowledge
         self.ks = knowledge_store
@@ -77,6 +77,7 @@ class ContinualResearcher:
         self.dukascopy_backtest = dukascopy_backtest
         self.current_params_fn = current_params_fn
         self.apply_tuned_fn = apply_tuned_fn
+        self.onnx_predictor = onnx_predictor
         self._evidence_cache = {}
         # Single per-symbol EVIDENCE STORE: every BT/FT result (live review, optimiser
         # cluster, Dukascopy backtest) is persisted here so ALL testing data lives in one
@@ -695,7 +696,8 @@ class ContinualResearcher:
         base = self.current_params_fn(base_symbol)
         if not base:
             return {"improved": False, "reason": "no base params"}
-        evo = EvolutionaryOptimizer(PARAM_SPACE, self.dukascopy_backtest)
+        evo = EvolutionaryOptimizer(PARAM_SPACE, self.dukascopy_backtest,
+                                    experience_db=self.db, onnx_predictor=self.onnx_predictor)
         try:
             out = evo.optimise(base_symbol, base, generations=5, pop_size=14)
         except Exception as e:
@@ -707,6 +709,13 @@ class ContinualResearcher:
                                     source=f"joint_evo score {out['score']:.2f} (was {out['base_score']:.2f})")
                 logger.warning(f"[EVO] {base_symbol}: applied joint-optimised config "
                                f"(score {out['base_score']:.2f} -> {out['score']:.2f})")
+                # FEEDBACK to ONNX: retrain the per-symbol win-prob model so it learns from
+                # the new regime (closes the evo<->ONNX loop).
+                if self.onnx_predictor is not None:
+                    try:
+                        self.onnx_predictor.train_symbol(base_symbol)
+                    except Exception:
+                        pass
             except Exception as e:
                 logger.debug(f"apply joint config skip: {e}")
         return {"improved": bool(out and out.get("improved")),

@@ -30,13 +30,19 @@ logger = get_logger("evo_optimizer")
 
 class EvolutionaryOptimizer:
     def __init__(self, param_space: dict, backtest_fn: Callable,
-                 reports_dir: str = None):
+                 reports_dir: str = None, experience_db=None, onnx_predictor=None):
         """param_space: {name:(lo,hi,step,type)}; backtest_fn(symbol,params,sl_atr,tp_rr)
-        -> {'score':float,'generalizes':bool,...} (the real walk-forward backtester)."""
+        -> {'score':float,'generalizes':bool,...} (the real walk-forward backtester).
+        experience_db: optional — pulls LIVE closed trades (ALL symbols) into the seed
+        model so it learns winning combinations across every symbol, not gold-only.
+        onnx_predictor: optional — its per-symbol P(win) is blended into fitness and used
+        to bias seeding, integrating the two ML systems into one learning brain."""
         self.space = param_space
         self.backtest_fn = backtest_fn
         self.reports_dir = reports_dir or os.path.join(
             "data", "reprodata", "goldshark13", "optimiser_reports")
+        self.db = experience_db
+        self.onnx = onnx_predictor
         self._seed_model = None
         self._seed_features = None
 
@@ -100,6 +106,14 @@ class EvolutionaryOptimizer:
         if len(X) < 200:
             logger.info(f"seed model: only {len(X)} usable GoldShark rows — skipping seed stage")
             return False
+        # ALL-SYMBOL LIVE DATA: fold in live closed trades (every symbol) so the seed model
+        # learns winning param/indicator combinations across the whole book, not gold-only.
+        try:
+            nlive = self._add_live_rows(X, y, feats)
+            if nlive:
+                logger.info(f"seed model: added {nlive} live-trade rows (all symbols)")
+        except Exception as e:
+            logger.debug(f"seed live rows skip: {e}")
         model = GradientBoostingRegressor(n_estimators=120, max_depth=3, learning_rate=0.08)
         model.fit(np.array(X), np.array(y))
         self._seed_model = model
@@ -109,6 +123,45 @@ class EvolutionaryOptimizer:
         logger.warning(f"[EVO] seed model trained on {len(X)} GoldShark passes; "
                        f"top PF-driving params: {[(f, round(i,2)) for f,i in imp]}")
         return True
+
+    def _add_live_rows(self, X: list, y: list, feats: list) -> int:
+        """Fold LIVE closed trades (ALL symbols, clean/non-simulated) into the seed training
+        set. Each trade's entry indicator snapshot supplies the strength columns; realised
+        win/loss becomes a pseudo-PF target (win->2.0, breakeven->1.0, loss->0.3) so the
+        model learns which entry-strength combinations actually won across every symbol."""
+        if self.db is None:
+            return 0
+        import sqlite3, json as _json
+        conn = sqlite3.connect(self.db.db_path); conn.row_factory = sqlite3.Row
+        try:
+            lw, lp = "", []
+            try:
+                lw, lp = self.db.learning_window_clause()
+            except Exception:
+                pass
+            rows = conn.execute(
+                "SELECT outcome, indicators_snapshot FROM trades WHERE outcome IN "
+                "('win','loss','breakeven') AND indicators_snapshot IS NOT NULL" + lw
+                + " ORDER BY id DESC LIMIT 5000", lp).fetchall()
+        finally:
+            conn.close()
+        # map snapshot indicator-state -> the same feature columns the GoldShark cols map to
+        snap_map = {"InpMinOsMALong": "osma", "InpMinBullsLong": "bulls_power",
+                    "InpMaxBearsLong": "bears_power", "InpMinATR": "atr", "InpMaxATR": "atr"}
+        added = 0
+        for r in rows:
+            try:
+                snap = _json.loads(r["indicators_snapshot"] or "{}")
+            except Exception:
+                continue
+            if not snap:
+                continue
+            row = [float(snap.get(snap_map.get(c, ""), 0.0) or 0.0) for c in feats]
+            if not any(row):
+                continue
+            tgt = 2.0 if r["outcome"] == "win" else (1.0 if r["outcome"] == "breakeven" else 0.3)
+            X.append(row); y.append(tgt); added += 1
+        return added
 
     def _seed_score(self, cand: dict) -> float:
         if self._seed_model is None:
@@ -142,7 +195,22 @@ class EvolutionaryOptimizer:
 
         def fitness(c):
             r = self.backtest_fn(symbol, c, c.get("sl_atr", 1.0), c.get("tp_rr", 2.0))
-            return (r["score"] if (r and r.get("generalizes")) else -1.0), r
+            base = (r["score"] if (r and r.get("generalizes")) else -1.0)
+            # INTEGRATE ONNX: blend the win-probability the per-symbol ONNX model assigns to
+            # this config's implied entry-strength profile as a small tie-break bias, so the
+            # two ML systems agree on the chosen params (never overrides a failed backtest).
+            if self.onnx is not None and base > 0:
+                try:
+                    pw = self.onnx.predict_win_prob({
+                        "symbol": symbol, "osma": c.get("osma_min_long", 0),
+                        "bulls_power": c.get("bulls_min_long", 0),
+                        "bears_power": c.get("bears_min_long", 0),
+                        "atr": c.get("atr_min", 0)})
+                    if pw is not None:
+                        base += 0.2 * (pw - 0.5)   # +/-0.1 nudge, backtest still dominates
+                except Exception:
+                    pass
+            return base, r
 
         scored = [(*fitness(c), c) for c in pop]  # (score, res, cand)
         best = max(scored, key=lambda t: t[0])

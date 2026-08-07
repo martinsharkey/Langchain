@@ -290,7 +290,7 @@ class ScalpEngine:
                 pattern_optimizer=_patopt, apply_exit_config=self._apply_exit_config,
                 excursion_analyzer=_exc, robust_tester=_robust,
                 dukascopy_backtest=_duka_backtest, current_params_fn=_cur_params,
-                apply_tuned_fn=_apply_tuned)
+                apply_tuned_fn=_apply_tuned, onnx_predictor=getattr(self, "onnx_predictor", None))
         except Exception as e:
             logger.warning(f"ContinualResearcher unavailable: {e}")
 
@@ -351,6 +351,10 @@ class ScalpEngine:
             self.onnx_predictor = OnnxOutcomePredictor(self.experience_db)
         except Exception as e:
             logger.warning(f"OnnxOutcomePredictor unavailable: {e}")
+        # link ONNX into the researcher's joint optimiser (built earlier) so evo fitness
+        # can use win-probability and evo can retrain ONNX on winning configs.
+        if getattr(self, "researcher", None) is not None:
+            self.researcher.onnx_predictor = self.onnx_predictor
 
         # Phase 3 — master risk gate
         from src.trading.risk_manager import RiskManager
