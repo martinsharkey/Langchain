@@ -46,6 +46,40 @@ class EntryStrengthLearner:  # name kept for wiring compatibility
         # entries/day for the symbol, else we keep it looser. This is the balance
         # between entry SUCCESS and stopping trading altogether.
         self.min_trades_per_day = min_trades_per_day
+        # STARVATION RELAX: live cap on how high dom_min/runway_min may go per symbol. The
+        # engine's live frequency guard lowers this when the bot stops trading, and the
+        # per-cycle re-learn must respect it — so the learner cannot re-raise floors above
+        # a level that keeps the bot trading. This is the missing downward pressure that
+        # lets the bot LEARN to keep itself trading. {symbol: {"dom_min":x,"runway_min":y}}
+        self._relax_cap = {}
+
+    def relax_for_starvation(self, symbol_prefix: str, step: float = 0.5) -> dict:
+        """Called when a symbol's LIVE fire-rate collapses: lower its dom_min/runway_min
+        floor cap by one step (never below 0) so entries resume. Returns the new caps.
+        Persisted in-memory; the next learn_symbol clamps its recipe to these caps."""
+        key = symbol_prefix.upper().split("-")[0]
+        cur = self._relax_cap.get(key, {"dom_min": 1.5, "runway_min": 2.0})
+        cur = {"dom_min": max(0.0, round(cur["dom_min"] - step, 2)),
+               "runway_min": max(0.0, round(cur["runway_min"] - step, 2))}
+        self._relax_cap[key] = cur
+        logger.warning(f"[ENTRY-QUALITY] {key}: STARVED -> relaxing floor cap to "
+                       f"dom<={cur['dom_min']} runway<={cur['runway_min']} (learning to keep trading)")
+        return cur
+
+    def _apply_relax_cap(self, symbol_prefix: str, recipe: dict) -> dict:
+        """Clamp a learned recipe to the symbol's starvation relax cap (if any)."""
+        key = symbol_prefix.upper().split("-")[0]
+        cap = self._relax_cap.get(key)
+        if cap and recipe:
+            if "dom_min" in recipe:
+                recipe["dom_min"] = min(recipe["dom_min"], cap["dom_min"])
+                if recipe["dom_min"] <= 0:
+                    recipe.pop("dom_min", None)
+            if "runway_min" in recipe:
+                recipe["runway_min"] = min(recipe["runway_min"], cap["runway_min"])
+                if recipe["runway_min"] <= 0:
+                    recipe.pop("runway_min", None)
+        return recipe
 
     def _samples(self, symbol_prefix: str):
         conn = sqlite3.connect(self.db.db_path)
@@ -120,7 +154,8 @@ class EntryStrengthLearner:  # name kept for wiring compatibility
                 # osma strength alone doesn't gate (proven not to separate); we only
                 # carry dom/runway (+ stretch from the greedy pass below if it helps)
                 improves = rec["success"] > a["base_success"] + 0.02
-                return {"recipe": recipe if improves else {},
+                final_recipe = self._apply_relax_cap(symbol_prefix, recipe if improves else {})
+                return {"recipe": final_recipe,
                         "n": a["n"], "base_success": a["base_success"],
                         "gated_success": rec["success"], "kept": rec["n"],
                         "per_day": rec["per_day"], "improves": improves,
@@ -155,6 +190,7 @@ class EntryStrengthLearner:  # name kept for wiring compatibility
         if improves:
             for key, _f, _op, val in chosen:
                 recipe[key] = val
+        recipe = self._apply_relax_cap(symbol_prefix, recipe)
         return {"recipe": recipe, "n": n, "base_success": round(base, 3),
                 "gated_success": round(cur, 3), "kept": kept, "improves": improves,
                 "gates": [f"{g[1]}{g[2]}{g[3]}" for g in chosen]}

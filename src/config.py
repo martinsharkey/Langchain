@@ -313,7 +313,7 @@ OPTIMIZER_ITERATIONS = int(os.getenv("OPTIMIZER_ITERATIONS", "30"))  # directed 
 # Frequency-starvation guard: if a config change drops fire-rate below MIN_FIRE_PCT
 # over >= MIN_EVALS evaluations (trading stopped), revert to the last firing config /
 # relax the tightest lever — so a change that prevents trading self-corrects.
-FREQ_STARVE_MIN_EVALS = int(os.getenv("FREQ_STARVE_MIN_EVALS", "300"))
+FREQ_STARVE_MIN_EVALS = int(os.getenv("FREQ_STARVE_MIN_EVALS", "120"))
 FREQ_STARVE_MIN_FIRE_PCT = float(os.getenv("FREQ_STARVE_MIN_FIRE_PCT", "0.3"))
 
 # ─── Researcher -> action feedback ──────────────────────────

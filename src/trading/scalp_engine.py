@@ -1641,6 +1641,26 @@ class ScalpEngine:
         buk = base.upper()
         snap = getattr(self, "_last_firing_config", {}).get(buk)
         acted = False
+        # PRIMARY FIX: the real blockers are the learned dom_min/runway_min floors in
+        # self._entry_strength (recipes), set by self.entry_strength_learner. Lower that
+        # symbol's floor cap so future re-learns can't re-raise it, AND clear the stale high
+        # floors from the LIVE recipe now (don't wait for the next re-learn).
+        if getattr(self, "entry_strength_learner", None) is not None:
+            try:
+                cap = self.entry_strength_learner.relax_for_starvation(base)
+                for key, sv in (getattr(self, "_entry_strength", {}) or {}).items():
+                    if not buk.startswith(key.upper()):
+                        continue
+                    rec = sv.get("recipe") if isinstance(sv, dict) else None
+                    if isinstance(rec, dict):
+                        for k in ("dom_min", "runway_min"):
+                            if k in rec and rec[k] > cap.get(k, 0):
+                                rec[k] = cap[k]
+                            if rec.get(k, 1) <= 0:
+                                rec.pop(k, None)
+                acted = True
+            except Exception as e:
+                logger.debug(f"entry-strength relax skip {base}: {e}")
         if snap:
             self._apply_reverted_config(base, snap)
             logger.warning(f"[FREQ-REVERT] {base}: fire_rate collapsed "
@@ -1664,8 +1684,11 @@ class ScalpEngine:
                     base, self._current_symbol_config(base), -999.0, 0.0)
         except Exception:
             pass
-        # reset the tally so the reverted config gets a fresh measurement window
-        self._freq_evals[base] = 0; self._freq_entered[base] = 0; self._freq_block[base] = {}
+        # Partial cooldown, not a full reset: keep a fraction of the eval tally so that if
+        # ONE relax step wasn't enough the guard re-triggers soon and steps the floor down
+        # again — the bot keeps easing floors until it actually resumes trading.
+        self._freq_evals[base] = self._freq_evals.get(base, 0) // 2
+        self._freq_entered[base] = 0; self._freq_block[base] = {}
         return acted
 
     def _apply_exit_config(self, base_symbol: str, sl_atr: float, tp_rr: float, source: str = "pattern"):
