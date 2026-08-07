@@ -1023,7 +1023,10 @@ class ScalpEngine:
         historical variant performance.
         """
         from src.trading.trade_manager import VARIANTS
-        weights = {v: 1.0 for v in VARIANTS}  # exploration floor
+        # GS_PROVEN is the gold-pinned proven model (assigned directly for XAUUSD), NOT an
+        # exploratory arm for other symbols — keep it out of the A/B weight pool.
+        _explore = tuple(v for v in VARIANTS if v != "GS_PROVEN")
+        weights = {v: 1.0 for v in _explore}  # exploration floor
         if not config.LEARNING_ADAPTATION_ENABLED:
             return weights
         # variant perf may be keyed by resolved symbol; match by prefix
@@ -1777,7 +1780,12 @@ class ScalpEngine:
                     logger.debug(f"exhaustion exit skip {ticket}: {e}")
             if intent:
                 if "modify_sl" in intent:
-                    _mres = adapter.modify_sl(ticket, intent["modify_sl"])
+                    # remove_tp: once trailing arms (proven model) we clear the broker TP
+                    # (tp=0.0) so the trailing stop runs and a runner is never capped.
+                    if intent.get("remove_tp"):
+                        _mres = adapter.modify_sl(ticket, intent["modify_sl"], tp=0.0)
+                    else:
+                        _mres = adapter.modify_sl(ticket, intent["modify_sl"])
                     if not _mres.ok:
                         logger.warning(f"SL modify REJECTED {ticket} -> {intent['modify_sl']}: "
                                        f"{_mres.reason} (retcode={getattr(_mres,'retcode',None)})")
@@ -2549,10 +2557,20 @@ class ScalpEngine:
         sl_atr_mult = _ov.get("sl_atr", _tp.get("sl_atr", config.SCALP_SL_ATR_MULT))
         tp_rr = _ov.get("tp_rr", _tp.get("tp_rr", config.SCALP_TP_RR))
         atr_pts = (indicators.get("atr", 0) or 0) / pt if pt else 0
-        sl_pts = max(sl_atr_mult * atr_pts, min_dist_pts) if atr_pts > 0 \
-            else max(config.SCALP_SL_POINTS, min_dist_pts)
-        # PAYOFF LEVER (backtest-proven): TP as a MULTIPLE of the actual SL.
-        tp_pts = sl_pts * tp_rr
+        # PROVEN GoldShark exit (per-symbol): a FIXED-POINT broker SL (data-derived
+        # tolerance that keeps ~96% of winners) + a WIDE safety-TP that exists ONLY as a
+        # connectivity failsafe (never near price, never cuts a winner). When present these
+        # override the ATR sizing. The trade manager REMOVES the TP once trailing arms so
+        # runners are never capped. See SYMBOL_BASELINES hard_sl_points / safety_tp_points.
+        _hard_sl = _tp.get("hard_sl_points"); _safety_tp = _tp.get("safety_tp_points")
+        if _hard_sl:
+            sl_pts = max(float(_hard_sl), min_dist_pts)
+            tp_pts = max(float(_safety_tp or 0), sl_pts * max(tp_rr, 2.0)) if (_safety_tp or 0) else sl_pts * tp_rr
+        else:
+            sl_pts = max(sl_atr_mult * atr_pts, min_dist_pts) if atr_pts > 0 \
+                else max(config.SCALP_SL_POINTS, min_dist_pts)
+            # PAYOFF LEVER (backtest-proven): TP as a MULTIPLE of the actual SL.
+            tp_pts = sl_pts * tp_rr
 
         if signal.action == "buy":
             sl = price - sl_pts * pt

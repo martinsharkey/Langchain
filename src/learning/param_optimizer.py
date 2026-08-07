@@ -113,9 +113,14 @@ SYMBOL_BASELINES = {
         "max_momentum_age": 26,
         "rsi_long_max": 100.0, "rsi_short_min": 0.0,
         "sl_atr": 0.8, "tp_rr": 2.0, "min_confluence": 3,
-        # proven fixed-point exits (points; POINT=0.01 for gold) — see _exit_seed override
-        "be_trigger_pts": 347.0, "tp_points": 449.0, "trail_points": 73.0,
-        "hard_sl_points": 800.0, "bal_per_lot": 31.0,
+        # PROVEN GoldShark gold exit (GS_PROVEN variant). Broker SL is DATA-DERIVED, not
+        # the .set's 3347: 218 live trades show 400pts ($4.00) keeps ~96% of winners while
+        # cutting losers; safety_tp is a WIDE connectivity failsafe only (removed once
+        # trailing arms). be_trigger 200 (winners clear their p75 66pt dip by then), lock
+        # +50, then trail 73pts behind best price letting runners run (no TP cap).
+        "hard_sl_points": 400.0, "safety_tp_points": 1500.0,
+        "be_trigger_pts": 200.0, "be_lock_pts": 50.0, "trail_points": 73.0,
+        "bal_per_lot": 31.0,
     },
     # BTCUSD + GER40: floors DISCOVERED by independent per-symbol tick backtest
     # (discover_floors.py) — NOT borrowed from gold. Entry direction is good (66-78%

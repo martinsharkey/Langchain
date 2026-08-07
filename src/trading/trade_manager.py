@@ -35,7 +35,7 @@ from src.utils.logger import get_logger
 logger = get_logger("trade_manager")
 
 # Experiment arms
-VARIANTS = ("BE_PLUS_TRAIL", "TRAIL_ONLY", "SCALP_FIXED", "HYBRID_LLM", "GS13_MFE")
+VARIANTS = ("BE_PLUS_TRAIL", "TRAIL_ONLY", "SCALP_FIXED", "HYBRID_LLM", "GS13_MFE", "GS_PROVEN")
 
 
 @dataclass
@@ -261,6 +261,13 @@ class TradeManager:
 
     # ── variant assignment (learning biases this over time) ──
     def assign_variant(self, symbol: str) -> str:
+        # GOLD is PINNED to the proven GoldShark exit (GS_PROVEN): data-derived wide SL +
+        # BE-lock + trailing with the TP removed once trailing arms. Gold has the proven
+        # model (pass5469 + 218 live trades); don't dilute it with the exploratory A/B.
+        # BTC/GER40 keep the weighted A/B until they earn their own proven model.
+        base = (symbol or "").upper().split("-")[0].split(".")[0]
+        if base == "XAUUSD":
+            return "GS_PROVEN"
         weights = None
         if self.get_variant_weights:
             try:
@@ -376,7 +383,7 @@ class TradeManager:
         # (or a spread-based floor), so the retain-floor can protect any real peak.
         # The 50% retain floor already prevents scratching tiny winners.
         ratchet_arm = max(self.retain_arm_points(st), spread_points + 20)
-        if st.variant != "GS13_MFE" and st.peak_profit_points >= ratchet_arm:
+        if st.variant not in ("GS13_MFE","GS_PROVEN") and st.peak_profit_points >= ratchet_arm:
             retain_frac = self.retain_floor_frac(st)          # e.g. 0.5 -> keep >=50% of peak
             floor_points = st.peak_profit_points * retain_frac
             # If price has ALREADY fallen to/through the floor, a stop there would sit
@@ -410,7 +417,7 @@ class TradeManager:
         # It never overrides the retention ratchet (the floor) above.
         st.signal_hold = False
         if reversal_signature and indicators and profit_points > 0 \
-                and st.variant != "GS13_MFE" \
+                and st.variant not in ("GS13_MFE","GS_PROVEN") \
                 and st.peak_profit_points >= max(self.giveback_arm_points(st) * 0.6, spread_points + 20):
             tell = self._reversal_tell(st, indicators, reversal_signature)
             if tell == "rolling_over" and profit_points >= 0.5 * st.peak_profit_points:
@@ -421,7 +428,7 @@ class TradeManager:
                 st.signal_hold = True
 
         arm_peak = max(self.giveback_arm_points(st), spread_points + 15)
-        if st.variant != "GS13_MFE" and st.peak_profit_points >= arm_peak and profit_points > 0:
+        if st.variant not in ("GS13_MFE","GS_PROVEN") and st.peak_profit_points >= arm_peak and profit_points > 0:
             giveback_frac = self.giveback_fraction(st)
             # signal-supported hold: the reversal tell says the move still has legs
             if getattr(st, "signal_hold", False):
@@ -446,6 +453,36 @@ class TradeManager:
 
         if v == "SCALP_FIXED":
             return None  # rely on broker TP/SL only
+
+        if v == "GS_PROVEN":
+            # PROVEN GoldShark gold exit (data-derived + pass5469 .set). Broker SL is set
+            # WIDE at entry (hard_sl_points, ~400pts — keeps ~96% of winners). This arm:
+            #   1) at +be_trigger pts, move SL to BE + be_lock (small locked profit);
+            #   2) from then on TRAIL behind best_price and REMOVE the broker TP so the
+            #      runner is never capped (user rule: at BE we trail, drop the TP);
+            #   3) SL only ever moves favourably (ratchet).
+            # Params per-symbol via personality (proven gold defaults below). Exempt from
+            # the generic ratchet/giveback (gated by st.variant) so it's the pure model.
+            p = self._personality(st)
+            be_trig = float(p.get("be_trigger_pts", 200.0))
+            be_lock = float(p.get("be_lock_pts", 50.0))
+            trail = float(p.get("trail_points", 73.0))
+            sgn = 1 if st.action == "buy" else -1
+            if not st.moved_to_be and profit_points >= be_trig:
+                be_plus = st.entry + be_lock * point * sgn
+                st.moved_to_be = True
+                st.trail_active = True
+                self._log(st, "gs_proven_be_lock", be_plus)
+                # remove the safety-TP now that we're trailing (let the runner run)
+                return {"modify_sl": round(be_plus, 6), "remove_tp": True, "_tag": "gs_proven_be"}
+            if st.trail_active:
+                trail_dist = trail * point
+                new_sl = (st.best_price - trail_dist) if st.action == "buy" else (st.best_price + trail_dist)
+                if self._sl_improves(st, new_sl):
+                    st.sl = new_sl
+                    self._log(st, "gs_proven_trail", new_sl)
+                    return {"modify_sl": round(new_sl, 6), "remove_tp": True, "_tag": "gs_proven_trail"}
+            return None
 
         if v == "GS13_MFE":
             # GoldShark13 v13.13 MFE-DEFENSE (SL-only adaptation; no partial-close).

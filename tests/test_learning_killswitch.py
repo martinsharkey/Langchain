@@ -38,7 +38,9 @@ def test_frozen_adaptation_gives_uniform_variant_weights():
         # even with a strong learned bias in the cache, frozen -> uniform
         cache = {"BTCUSD": {"BE_PLUS_TRAIL": {"trades": 20, "win_rate": 5, "net_pnl": -50}}}
         w = _weights_for(cache)
-        assert set(w.keys()) == set(VARIANTS)
+        # GS_PROVEN is the gold-pinned proven model, deliberately excluded from the
+        # exploratory A/B weight pool; the rest of the arms are present and uniform.
+        assert set(w.keys()) == set(VARIANTS) - {"GS_PROVEN"}
         assert len(set(w.values())) == 1, f"expected uniform weights when frozen, got {w}"
     finally:
         config.LEARNING_ADAPTATION_ENABLED = prev
