@@ -45,7 +45,7 @@ class ContinualResearcher:
                  edge_discovery=None, repo: str = "martinsharkey/Langchain",
                  pattern_optimizer=None, apply_exit_config=None, excursion_analyzer=None,
                  robust_tester=None, optimizer_reports_dir=None, dukascopy_backtest=None,
-                 current_params_fn=None):
+                 current_params_fn=None, apply_tuned_fn=None):
         self.db = experience_db
         self.mql5 = mql5_knowledge
         self.ks = knowledge_store
@@ -76,6 +76,7 @@ class ContinualResearcher:
             "data", "reprodata", "goldshark13", "optimiser_reports")
         self.dukascopy_backtest = dukascopy_backtest
         self.current_params_fn = current_params_fn
+        self.apply_tuned_fn = apply_tuned_fn
         self._evidence_cache = {}
         # Single per-symbol EVIDENCE STORE: every BT/FT result (live review, optimiser
         # cluster, Dukascopy backtest) is persisted here so ALL testing data lives in one
@@ -674,6 +675,43 @@ class ContinualResearcher:
         return None
 
     # ── daily orchestration ──
+    def joint_optimise(self, base_symbol: str, resolved: str = None) -> dict:
+        """JOINT evolutionary parameter search over the full space, seeded from the
+        GoldShark passes, scored by the walk-forward Dukascopy backtest. Slow cadence.
+        Applies the winner only if it BEATS the incumbent (walk-forward validated) via
+        the injected apply_tuned_fn. Non-fatal; returns {improved, ...}."""
+        if self.dukascopy_backtest is None or self.current_params_fn is None:
+            return {"improved": False, "reason": "no backtest/params fn"}
+        # cadence: run every 3rd research day per symbol (it runs many backtests)
+        import datetime as _dt
+        day_ord = _dt.datetime.now(timezone.utc).toordinal()
+        if (day_ord % 3) != (abs(hash(base_symbol.upper())) % 3):
+            return {"improved": False, "reason": "not scheduled today"}
+        try:
+            from src.learning.evolutionary_optimizer import EvolutionaryOptimizer
+            from src.learning.param_optimizer import PARAM_SPACE
+        except Exception as e:
+            return {"improved": False, "reason": f"import: {e}"}
+        base = self.current_params_fn(base_symbol)
+        if not base:
+            return {"improved": False, "reason": "no base params"}
+        evo = EvolutionaryOptimizer(PARAM_SPACE, self.dukascopy_backtest)
+        try:
+            out = evo.optimise(base_symbol, base, generations=5, pop_size=14)
+        except Exception as e:
+            logger.debug(f"joint optimise skip {base_symbol}: {e}")
+            return {"improved": False, "reason": str(e)[:80]}
+        if out and out.get("improved") and self.apply_tuned_fn:
+            try:
+                self.apply_tuned_fn(resolved or base_symbol, out["params"],
+                                    source=f"joint_evo score {out['score']:.2f} (was {out['base_score']:.2f})")
+                logger.warning(f"[EVO] {base_symbol}: applied joint-optimised config "
+                               f"(score {out['base_score']:.2f} -> {out['score']:.2f})")
+            except Exception as e:
+                logger.debug(f"apply joint config skip: {e}")
+        return {"improved": bool(out and out.get("improved")),
+                "score": out.get("score") if out else None}
+
     def daily_cycle(self, symbols: list[str], force: bool = False) -> dict:
         """
         Run the once-per-day ReAct research pass across symbols. Returns a summary.
@@ -704,6 +742,10 @@ class ContinualResearcher:
             # #44: full-confluence random-window robust optimisation (mql5 ranges);
             # applies the winning config live if it passes a majority of windows.
             rob = self.robust_optimise(sym)
+            # JOINT evolutionary search over the FULL param space, seeded from the
+            # GoldShark passes — finds winning COMBINATIONS the greedy tuner cannot.
+            # Slow cadence (every Nth day) since it runs many backtests. Non-fatal.
+            joint = self.joint_optimise(sym)
             summary["symbols"][sym.upper()] = {
                 "expectancy": r["review"].get("expectancy"),
                 "hypothesis": bool(r["hypothesis"]),
@@ -712,6 +754,7 @@ class ContinualResearcher:
                 "pattern_locked": pat.get("found", False),
                 "excursion_peak_pts": (exc.get("median_peak_pts") if exc.get("found") else None),
                 "robust_applied": rob.get("found", False),
+                "joint_improved": joint.get("improved", False),
             }
             # If a symbol persistently has no edge, propose a development issue
             rv = r["review"]

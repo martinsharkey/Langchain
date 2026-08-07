@@ -271,12 +271,26 @@ class ScalpEngine:
             _cur_params = None
             if self.param_optimizer is not None:
                 _cur_params = self.param_optimizer.current_params
+
+            def _apply_tuned(sym, params, source="joint_evo"):
+                """Persist a joint-optimised, walk-forward-validated config as the symbol's
+                tuned entry so it goes live (checkpointer still guards realised expectancy)."""
+                if self.param_optimizer is None:
+                    return
+                self.param_optimizer.tuned[sym.upper()] = {
+                    "params": dict(params), "score": None, "source": source}
+                try:
+                    self.param_optimizer._persist()
+                except Exception:
+                    pass
+
             self.researcher = ContinualResearcher(
                 self.experience_db, mql5_knowledge=self.mql5_knowledge,
                 knowledge_store=self.knowledge_store, edge_discovery=self.edge_discovery,
                 pattern_optimizer=_patopt, apply_exit_config=self._apply_exit_config,
                 excursion_analyzer=_exc, robust_tester=_robust,
-                dukascopy_backtest=_duka_backtest, current_params_fn=_cur_params)
+                dukascopy_backtest=_duka_backtest, current_params_fn=_cur_params,
+                apply_tuned_fn=_apply_tuned)
         except Exception as e:
             logger.warning(f"ContinualResearcher unavailable: {e}")
 
