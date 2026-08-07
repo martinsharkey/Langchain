@@ -209,6 +209,11 @@ GROWTH_BALANCE_PER_LOT = float(os.getenv("GROWTH_BALANCE_PER_LOT", "31.0"))  # p
 GROWTH_MAX_LOT = float(os.getenv("GROWTH_MAX_LOT", "5.0"))            # broker/sanity ceiling
 GROWTH_PYRAMID_MAX = int(os.getenv("GROWTH_PYRAMID_MAX", "10"))       # add-to-winner legs
 GROWTH_DAILY_LOSS_HALT_PCT = float(os.getenv("GROWTH_DAILY_LOSS_HALT_PCT", "30.0"))  # circuit breaker
+# BASKET management (multi-leg pyramids): trail the COMBINED value so the basket runs.
+# Close the whole basket if combined profit gives back this fraction of its combined peak,
+# once the peak passes the arm (points). GoldShark-style InpBasketGivebackPct/PeakThreshold.
+GROWTH_BASKET_GIVEBACK_PCT = float(os.getenv("GROWTH_BASKET_GIVEBACK_PCT", "0.35"))
+GROWTH_BASKET_ARM_POINTS = float(os.getenv("GROWTH_BASKET_ARM_POINTS", "200.0"))
 
 
 def is_live_mode() -> bool:

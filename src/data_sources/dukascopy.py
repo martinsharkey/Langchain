@@ -181,7 +181,7 @@ def _hour_range(start: datetime, end: datetime):
 
 
 def fetch_ticks(symbol: str, start: datetime, end: datetime,
-                use_cache: bool = True, workers: int = 8) -> list[tuple]:
+                use_cache: bool = True, workers: int = 8, progress_cb=None) -> list[tuple]:
     """Download + decode all ticks in [start, end] (UTC). Returns a flat, time-sorted
     list of (epoch_sec, bid, ask, bid_vol, ask_vol). Missing hours are skipped.
 
@@ -200,13 +200,25 @@ def fetch_ticks(symbol: str, start: datetime, end: datetime,
 
     if workers and workers > 1 and len(hours) > 1:
         from concurrent.futures import ThreadPoolExecutor
+        done = 0
         with ThreadPoolExecutor(max_workers=workers) as ex:
             for hour_epoch, ticks in ex.map(_one, hours):
                 results[hour_epoch] = ticks
+                done += 1
+                if progress_cb and (done % 24 == 0 or done == len(hours)):
+                    try:
+                        progress_cb(done, len(hours))
+                    except Exception:
+                        pass
     else:
-        for dt_hour in hours:
+        for idx, dt_hour in enumerate(hours, 1):
             hour_epoch, ticks = _one(dt_hour)
             results[hour_epoch] = ticks
+            if progress_cb and (idx % 24 == 0 or idx == len(hours)):
+                try:
+                    progress_cb(idx, len(hours))
+                except Exception:
+                    pass
 
     all_ticks: list[tuple] = []
     for hour_epoch in sorted(results):
@@ -278,10 +290,13 @@ class DukascopySource:
     """
 
     def __init__(self, until: Optional[datetime] = None, use_cache: bool = True,
-                 use_mid: bool = True):
+                 use_mid: bool = True, workers: int = 3, progress_cb=None):
         self.until = until or datetime.now(timezone.utc)
         self.use_cache = use_cache
         self.use_mid = use_mid
+        # gentle by default (onboarding is patient — avoid rate-limit give-ups)
+        self.workers = workers
+        self.progress_cb = progress_cb
 
     def get_rates(self, symbol: str, timeframe: str = "M1", count: int = 500) -> list[dict]:
         tf = _TF_SECONDS.get(timeframe)
@@ -290,7 +305,8 @@ class DukascopySource:
         # widen the tick window a little so the first/last buckets are complete
         span_sec = tf * count
         start = self.until - timedelta(seconds=span_sec + tf)
-        ticks = fetch_ticks(symbol, start, self.until, use_cache=self.use_cache)
+        ticks = fetch_ticks(symbol, start, self.until, use_cache=self.use_cache,
+                            workers=self.workers, progress_cb=self.progress_cb)
         bars = ticks_to_bars(ticks, tf, use_mid=self.use_mid)
         return bars[-count:] if count and len(bars) > count else bars
 
@@ -298,7 +314,7 @@ class DukascopySource:
                   max_ticks: int = 5_000_000):
         start = datetime.fromtimestamp(float(from_epoch), tz=timezone.utc)
         end = datetime.fromtimestamp(float(to_epoch), tz=timezone.utc)
-        ticks = fetch_ticks(symbol, start, end, use_cache=self.use_cache)
+        ticks = fetch_ticks(symbol, start, end, use_cache=self.use_cache, workers=self.workers)
         if not ticks:
             return None
         ticks = ticks[:max_ticks]

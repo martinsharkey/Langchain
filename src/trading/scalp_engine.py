@@ -500,68 +500,106 @@ class ScalpEngine:
                 logger.debug(f"onboard skip {base}: {e}")
 
     def _ensure_onboarded(self, base, adapter) -> bool:
-        """Onboard ONE symbol if it has no baseline yet. Prefers DUKASCOPY history (deep,
-        broker-independent — a brand-new symbol always has enough) and falls back to MT5.
-        Runs the FloorDiscovery workflow (floors + forward test + per-symbol OsMA-cycle SL)
-        and persists it as the symbol's baseline. Returns True if newly onboarded."""
+        """Kick off PATIENT background onboarding for ONE symbol if it has no baseline yet.
+        Onboarding acquires the BEST data (Dukascopy PRIMARY, MT5 SECONDARY/fallback), runs
+        backtest + forward-test + OsMA-cycle SL + parameter search, and persists the
+        baseline. It runs in a BACKGROUND THREAD (may take many minutes / >30 min) so it
+        NEVER blocks trading, and its progress is tracked in data/onboarding_status.json.
+        Returns True if onboarding was started (or already done), False if not applicable."""
         if self.param_optimizer is None:
             return False
-        from src.learning.param_optimizer import SYMBOL_BASELINES, DEFAULTS
+        from src.learning.param_optimizer import SYMBOL_BASELINES
         resolved = adapter.resolved_symbol
         key = base.upper()
         has_baseline = any(key.startswith(p) for p in SYMBOL_BASELINES)
         has_tuned = (key in self.param_optimizer.tuned or resolved.upper() in self.param_optimizer.tuned)
-        if has_baseline or has_tuned or key in getattr(self, "_onboard_attempted", set()):
+        if has_baseline or has_tuned:
             return False
-        if not hasattr(self, "_onboard_attempted"):
-            self._onboard_attempted = set()
-        self._onboard_attempted.add(key)
+        if not hasattr(self, "_onboard_threads"):
+            self._onboard_threads = {}
+        # already onboarding or done?
+        t = self._onboard_threads.get(key)
+        if t and t.is_alive():
+            return True
+        try:
+            from src.learning.onboarding_tracker import OnboardingTracker
+            if not hasattr(self, "_onboard_tracker"):
+                self._onboard_tracker = OnboardingTracker()
+            if self._onboard_tracker.is_done(key):
+                return True
+        except Exception:
+            pass
+        import threading
+        th = threading.Thread(target=self._run_onboarding, args=(base, adapter),
+                              name=f"onboard-{key}", daemon=True)
+        self._onboard_threads[key] = th
+        th.start()
+        logger.warning(f"[ONBOARD] {base}: PATIENT background onboarding STARTED "
+                       f"(Dukascopy primary, MT5 fallback) — will not block trading.")
+        return True
 
+    def _run_onboarding(self, base, adapter):
+        """Background worker: patient Dukascopy-primary acquisition + full discovery, then
+        MT5 as a SECONDARY validation/fallback. Persists the baseline + tracks progress.
+        Patience over speed: no premature give-up on data acquisition."""
+        from src.learning.onboarding_tracker import OnboardingTracker
         from src.learning.floor_discovery import FloorDiscovery
-        # DUKASCOPY-FIRST data source (deep history, works for any new symbol); MT5 fallback.
+        from src.learning.param_optimizer import DEFAULTS
+        tracker = getattr(self, "_onboard_tracker", None) or OnboardingTracker()
+        self._onboard_tracker = tracker
+        key = base.upper(); resolved = adapter.resolved_symbol
+        _pt = getattr(getattr(adapter, "spec", None), "point", 0.01) or 0.01
+        tracker.update(key, "acquiring_dukascopy", source="dukascopy", note="primary baseline")
+        recipe = None; src_used = None
+
+        # ── PRIMARY: Dukascopy (best tick quality, broker-independent baseline) ──
         try:
             from src.data_sources.dukascopy import DukascopySource
-            _dk = DukascopySource(use_cache=True)
-            get_rates, get_ticks, src_name = _dk.get_rates, _dk.get_ticks, "dukascopy"
-        except Exception:
-            from src.mt5.data import get_rates, get_ticks
-            src_name = "mt5"
-        logger.warning(f"[ONBOARD] {base}: no baseline — auto backtest+forward-test + OsMA-cycle "
-                       f"SL sampling on {src_name} history before trading...")
-        fd = FloorDiscovery(get_rates, get_ticks)
-        recipe = None
-        _pt = getattr(getattr(adapter, "spec", None), "point", 0.01) or 0.01
-        try:
-            recipe = fd.onboard(base if src_name == "dukascopy" else resolved, point=_pt)
+            dk = DukascopySource(use_cache=True)
+            def _rates(sym, timeframe="M1", count=60000):
+                # patient: single worker, big retry budget handled in fetch layer
+                return dk.get_rates(sym, timeframe=timeframe, count=count)
+            fd = FloorDiscovery(dk.get_rates, dk.get_ticks)
+            tracker.update(key, "backtesting", source="dukascopy")
+            recipe = fd.onboard(base, point=_pt)
+            if recipe:
+                src_used = "dukascopy"
         except Exception as e:
-            logger.info(f"[ONBOARD] {base}: {src_name} discovery failed ({e})")
-        # fall back to MT5 if Dukascopy produced nothing
-        if not recipe and src_name == "dukascopy":
+            tracker.update(key, "dukascopy_error", error=str(e)[:200])
+
+        # ── SECONDARY / FALLBACK: MT5 (only if Dukascopy could not produce a baseline) ──
+        if not recipe:
+            tracker.update(key, "fallback_mt5", source="mt5", note="dukascopy unavailable")
             try:
                 from src.mt5.data import get_rates as _gr, get_ticks as _gt
                 recipe = FloorDiscovery(_gr, _gt).onboard(resolved, point=_pt)
-                src_name = "mt5(fallback)"
+                if recipe:
+                    src_used = "mt5(fallback)"
             except Exception as e:
-                logger.info(f"[ONBOARD] {base}: mt5 fallback failed ({e})")
+                tracker.update(key, "mt5_error", error=str(e)[:200])
+
         if not recipe:
-            logger.info(f"[ONBOARD] {base}: discovery produced no recipe; trades structure-only")
-            return False
+            tracker.update(key, "failed", note="no baseline from dukascopy or mt5; trades structure-only")
+            return
+
+        cyc = recipe.get("_osma_cycle_sample") or {}
+        tracker.update(key, "sampling_cycles", n_cycles=cyc.get("n_cycles"),
+                       hard_sl_points=recipe.get("hard_sl_points"))
         params = dict(DEFAULTS)
         params.update({k: v for k, v in recipe.items() if not k.startswith("_")})
         self.param_optimizer.tuned[resolved.upper()] = {
             "params": params, "score": None,
-            "source": f"onboarding_discovery[{src_name}] (fwd green {recipe['_forward']['green_pct']:.0f}% "
-                      f"PF {recipe['_forward']['pf']:.2f})"}
+            "source": f"onboarding[{src_used}] fwd green {recipe['_forward']['green_pct']:.0f}% "
+                      f"PF {recipe['_forward']['pf']:.2f}"}
         try:
             self.param_optimizer._persist()
         except Exception:
             pass
-        cyc = recipe.get("_osma_cycle_sample")
-        logger.warning(f"[ONBOARD] {base}: baseline SET — floors osma>={recipe['osma_min_long']} "
-                       f"dom>={recipe['bulls_min_long']}"
-                       + (f", SL={recipe.get('hard_sl_points')}pts from {cyc['n_cycles']} OsMA cycles"
-                          if cyc else "") + " (auto, no manual step)")
-        return True
+        tracker.update(key, "baseline_set", source=src_used,
+                       osma_min_long=recipe.get("osma_min_long"),
+                       hard_sl_points=recipe.get("hard_sl_points"),
+                       fwd_pf=round(recipe["_forward"]["pf"], 2),
+                       fwd_green_pct=round(recipe["_forward"]["green_pct"], 1))
 
     def _load_seeded_signatures(self):
         """Populate _reversal_signatures at startup from whatever the DB already holds
@@ -933,6 +971,14 @@ class ScalpEngine:
                 except Exception as e:
                     logger.warning(f"strategy weight update failed: {e}")
                     self._last_learning_error = f"weight update: {str(e)[:80]}"
+        # PROGRESS EVIDENCE: surface whether losses are reducing / profits increasing
+        # per symbol (rolling expectancy, clean live only). Visible proof the researcher +
+        # bot are making meaningful progress. Cheap; every ~30 cycles.
+        if self.cycle % 30 == 2:
+            try:
+                self._report_progress()
+            except Exception as e:
+                logger.debug(f"progress report skip: {e}")
             try:
                 self._variant_perf_cache = self.experience_db.get_variant_performance()
             except Exception as e:
@@ -1050,6 +1096,53 @@ class ScalpEngine:
             if open_for_symbol >= config.SCALP_MAX_OPEN_PER_SYMBOL:
                 continue
             self._evaluate_and_trade(base, adapter)
+
+    def _report_progress(self):
+        """PROGRESS EVIDENCE: per-symbol rolling expectancy on CLEAN live trades, comparing
+        the recent window vs the prior window so we can SEE losses reducing / profits rising.
+        Logs a clear [PROGRESS] line and persists to data/progress.json + LearningLog."""
+        import sqlite3, os, json, time
+        from src import config as _cfg
+        db = os.path.join(_cfg.DATA_DIR, "trading_experience.db")
+        conn = sqlite3.connect(db); conn.row_factory = sqlite3.Row
+        try:
+            lw, lp = self.experience_db.learning_window_clause()  # clean, sim-free
+        except Exception:
+            lw, lp = "", []
+        out = {}
+        for base in self.adapters:
+            key = base.upper()
+            q = ("SELECT profit_loss, timestamp FROM trades WHERE symbol LIKE ? "
+                 "AND outcome IN ('win','loss','breakeven') AND data_source='LIVE_MICRO'" + lw +
+                 " ORDER BY id DESC LIMIT 60")
+            try:
+                rows = conn.execute(q, [key + "%"] + lp).fetchall()
+            except Exception:
+                rows = []
+            if len(rows) < 10:
+                continue
+            pls = [r["profit_loss"] or 0 for r in rows]
+            recent = pls[:len(pls) // 2]; prior = pls[len(pls) // 2:]
+            exp_recent = sum(recent) / len(recent)
+            exp_prior = sum(prior) / len(prior)
+            wr_recent = sum(1 for p in recent if p > 0) / len(recent) * 100
+            trend = "IMPROVING" if exp_recent > exp_prior else "declining"
+            out[key] = {"n": len(rows), "exp_recent": round(exp_recent, 4),
+                        "exp_prior": round(exp_prior, 4), "wr_recent": round(wr_recent, 1),
+                        "trend": trend, "positive": exp_recent > 0}
+            logger.warning(f"[PROGRESS] {key}: expectancy {exp_prior:+.3f} -> {exp_recent:+.3f} "
+                           f"({trend}), WR {wr_recent:.0f}%, n={len(rows)}"
+                           + ("  << POSITIVE EDGE" if exp_recent > 0 else ""))
+        conn.close()
+        if out:
+            try:
+                p = os.path.join(_cfg.DATA_DIR, "progress.json")
+                blob = {"updated": time.time(), "symbols": out}
+                json.dump(blob, open(p, "w"), indent=1)
+            except Exception:
+                pass
+        self._progress = out
+        return out
 
     def _variant_weights_for(self, base_symbol: str) -> dict:
         """
@@ -1668,10 +1761,75 @@ class ScalpEngine:
                 return True
         return False
 
+    def _manage_baskets(self):
+        """GoldShark-style BASKET management for profit-gated pyramids. When a symbol has
+        >=2 same-direction legs, treat them as one basket: track the COMBINED unrealised
+        profit (points) and its PEAK, and close the WHOLE basket if it gives back more than
+        GROWTH_BASKET_GIVEBACK_PCT of the combined peak (once the peak is meaningful). This
+        lets the combined value RUN rather than trailing each leg out early. Losing baskets
+        are untouched here — individual legs are still cut by their broker SL as today."""
+        if not getattr(config, "GROWTH_ENABLED", False):
+            return
+        if not hasattr(self, "_basket_peak"):
+            self._basket_peak = {}
+        # group open legs by (base_symbol, action)
+        groups = {}
+        for ticket, pos in self.open_positions.items():
+            groups.setdefault((pos.base_symbol, pos.action), []).append((ticket, pos))
+        live_keys = set()
+        for (base, action), legs in groups.items():
+            if len(legs) < 2:
+                continue   # not a basket
+            adapter = self.adapters.get(base)
+            if adapter is None or adapter.spec is None:
+                continue
+            pt = adapter.spec.point or 0.01
+            try:
+                tick = adapter.live_tick()
+                px = tick.bid if action == "buy" else tick.ask
+            except Exception:
+                continue
+            # combined profit in points across all legs (lot-weighted)
+            combined = 0.0
+            for _t, p in legs:
+                move = (px - p.entry_price) if action == "buy" else (p.entry_price - px)
+                combined += (move / pt) * (getattr(p, "volume", 0.01) / 0.01)
+            gk = f"{base}:{action}"
+            live_keys.add(gk)
+            peak = max(self._basket_peak.get(gk, 0.0), combined)
+            self._basket_peak[gk] = peak
+            giveback = float(getattr(config, "GROWTH_BASKET_GIVEBACK_PCT", 0.35))
+            arm = float(getattr(config, "GROWTH_BASKET_ARM_POINTS", 200.0))
+            # only act once the basket banked a meaningful combined peak AND is still positive
+            if peak >= arm and combined > 0 and (peak - combined) >= giveback * peak:
+                logger.warning(f"[BASKET] {base} {action} x{len(legs)}: giveback "
+                               f"{(peak-combined)/peak:.0%} of {peak:.0f}pt peak -> closing basket "
+                               f"(combined {combined:.0f}pt)")
+                for _t, _p in legs:
+                    try:
+                        r = adapter.close(_t)
+                        if r.ok and not r.simulated:
+                            self._retire_managed(_t)
+                    except Exception as e:
+                        logger.debug(f"basket close skip {_t}: {e}")
+                self._basket_peak.pop(gk, None)
+        # forget peaks for baskets that no longer exist
+        for gk in list(self._basket_peak):
+            if gk not in live_keys:
+                self._basket_peak.pop(gk, None)
+
     def _manage_open_positions(self):
-        """Run the trade manager over each open position; execute SL/exit intents."""
+        """Run the trade manager over each open position; execute SL/exit intents.
+        BASKET RULE: when a symbol has >1 same-direction leg (built by profit-gated
+        pyramiding), manage them as ONE basket — trail the COMBINED value so the basket
+        runs, instead of cutting individual legs early."""
         if not self.open_positions:
             return
+        # ── BASKET-LEVEL management (multi-leg pyramids) ──
+        try:
+            self._manage_baskets()
+        except Exception as e:
+            logger.debug(f"basket manage skip: {e}")
         for ticket, pos in list(self.open_positions.items()):
             adapter = self.adapters.get(pos.base_symbol)
             if adapter is None or adapter.spec is None:
@@ -2585,17 +2743,23 @@ class ScalpEngine:
         if getattr(config, "GROWTH_ENABLED", False) and _same_dir:
             if len(_same_dir) >= config.GROWTH_PYRAMID_MAX:
                 return   # max legs reached
-            # only add if the aggregate position is in profit (add to winners)
+            # only add if EVERY existing leg is BEYOND break-even into profit (not merely
+            # above entry) — a pyramid is only ever built on a genuinely winning trade.
             try:
                 tick = adapter.live_tick()
                 px = tick.bid if signal.action == "buy" else tick.ask
-                winning = all((px > p.entry_price) == (signal.action == "buy") for p in _same_dir)
+                pt = adapter.spec.point if adapter.spec else 0.01
+                spread_pts = abs((tick.ask - tick.bid) / pt) if pt else 0
+                be_buffer = max(spread_pts, 5) * pt   # past spread/costs = truly in profit
+                winning = all(
+                    ((px - p.entry_price) if signal.action == "buy" else (p.entry_price - px)) > be_buffer
+                    for p in _same_dir)
             except Exception:
                 winning = False
             if winning:
                 _is_pyramid = True   # allow this leg; skip the same-level guard
             else:
-                return   # existing legs not (all) in profit -> don't pyramid into a loser
+                return   # a leg not yet beyond BE -> never pyramid into it
 
         # same-level guard (skipped for a valid pyramid add)
         if not _is_pyramid and self._same_level_open(base, signal.action, signal.price,
