@@ -35,6 +35,12 @@ class ChangeValidator:
         except Exception:
             self._path = os.path.join("data", "best_ever_scores.json")
         self._best = self._load()
+        self._memo = {}   # per-run memo: (symbol, params-hash) -> result (avoid re-backtesting the same config)
+
+    def _memo_key(self, symbol, params):
+        import hashlib, json as _j
+        h = hashlib.md5(_j.dumps({k: params.get(k) for k in sorted(params)}, default=str).encode()).hexdigest()[:12]
+        return f"{symbol.upper().split('-')[0]}:{h}"
 
     def _load(self) -> dict:
         try:
@@ -53,27 +59,50 @@ class ChangeValidator:
             pass
 
     def best_score(self, symbol: str) -> float:
-        return float(self._best.get(symbol.upper().split("-")[0], {}).get("score", -1.0))
+        """Best-ever validated score, with TIME DECAY so an unbeaten high-water mark relaxes
+        over time (prevents a fluke peak permanently freezing tuning). Decays toward 1.0 at
+        ~0.02 PF/day unbeaten, floored at 1.0 (still must be profitable to pass)."""
+        rec = self._best.get(symbol.upper().split("-")[0], {})
+        raw = float(rec.get("score", -1.0))
+        if raw <= 1.0:
+            return raw
+        try:
+            at = rec.get("at")
+            if at:
+                age_days = (datetime.now(timezone.utc) - datetime.fromisoformat(at)).total_seconds() / 86400.0
+                decayed = raw - 0.02 * max(0.0, age_days)
+                return max(1.0, round(decayed, 3))
+        except Exception:
+            pass
+        return raw
 
-    def validate(self, symbol: str, params: dict, source: str = "?") -> dict:
+    def validate(self, symbol: str, params: dict, source: str = "?", min_trades: int = 40) -> dict:
         """Backtest+forward test `params`. Return {passed, score, forward_pf, best, reason}.
-        A pass REQUIRES: generalizes, forward-window PF>=1, and score beats best-ever+margin.
+        A pass REQUIRES: generalizes, forward-window PF>=1, enough trades (min_trades so a
+        thin fluke can't set the bar), and score beats the (time-decayed) best-ever+margin.
         Records the outcome (pass OR fail) to the RAG. Never applies anything itself."""
         sym = symbol.upper().split("-")[0]
+        mk = self._memo_key(symbol, params)
+        if mk in self._memo:
+            return self._memo[mk]
         res = self.backtest_fn(symbol, params, params.get("sl_atr", 1.0), params.get("tp_rr", 2.0))
         if not res:
             out = {"passed": False, "score": None, "reason": "no backtest data (thin cache)"}
             self._remember(sym, params, out, source)
+            self._memo[mk] = out
             return out
         score = res.get("score", -1.0)
         pfs = res.get("pfs") or []
         forward_pf = pfs[-1] if pfs else 0.0   # last chronological window = forward/OOS
         generalizes = bool(res.get("generalizes"))
+        n_total = res.get("n_total") or 0
         best = self.best_score(sym)
-        passed = generalizes and forward_pf >= 1.0 and score > best + self.margin
+        enough = n_total >= min_trades
+        passed = generalizes and forward_pf >= 1.0 and enough and score > best + self.margin
         reason = ("beats best-ever" if passed else
                   "does not generalize" if not generalizes else
                   f"forward PF {forward_pf:.2f} < 1" if forward_pf < 1.0 else
+                  f"only {n_total} trades (<{min_trades})" if not enough else
                   f"score {score:.2f} <= best-ever {best:.2f}+{self.margin}")
         out = {"passed": passed, "score": round(score, 3), "forward_pf": round(forward_pf, 2),
                "generalizes": generalizes, "best_ever": round(best, 3),
@@ -84,6 +113,7 @@ class ChangeValidator:
                                "params": {k: v for k, v in params.items() if not k.startswith("_")}}
             self._save()
         self._remember(sym, params, out, source)
+        self._memo[mk] = out
         logger.warning(f"[VALIDATE] {sym} ({source}): {'PASS' if passed else 'REJECT'} "
                        f"score {out.get('score')} fwdPF {out.get('forward_pf')} vs best {out['best_ever']} — {reason}")
         return out

@@ -24,6 +24,10 @@ from src.utils.logger import get_logger
 
 logger = get_logger("winning_clusters")
 
+# module-level cache (keyed by winning-source signature) so the 6-XML parse + KMeans isn't
+# repeated per symbol / per cycle (researcher + each evo optimise() call ask for it).
+_CLUSTER_CACHE = {"sig": None, "result": None}
+
 
 def _data_dir() -> str:
     try:
@@ -93,10 +97,15 @@ class WinningClusters:
     def analyse(self, k: int = 3, min_rows: int = 50) -> Optional[dict]:
         """Cluster the winning configs; return the dominant winning cluster centroid (as
         {param:value}) + summary. None if too little winning evidence."""
+        # CACHE: skip the 6-XML parse + KMeans if the winning-source files are unchanged.
+        sig = self._sources_sig()
+        if _CLUSTER_CACHE["sig"] == sig and _CLUSTER_CACHE["result"] is not None:
+            return _CLUSTER_CACHE["result"]
         feats = self._feature_params()
         rows = self._winning_rows(feats)
         if len(rows) < min_rows:
             logger.info(f"winning clusters: only {len(rows)} winning configs — skipping")
+            _CLUSTER_CACHE.update(sig=sig, result=None)
             return None
         X = np.array([[r[p] for p in feats] for r in rows], dtype=float)
         try:
@@ -127,4 +136,22 @@ class WinningClusters:
                        f"({counts[dom]} members) centroid: "
                        f"osma_min_long={cluster.get('osma_min_long')} bulls_min_long={cluster.get('bulls_min_long')} "
                        f"atr_min={cluster.get('atr_min')} sl_atr={cluster.get('sl_atr')} tp_rr={cluster.get('tp_rr')}")
+        _CLUSTER_CACHE.update(sig=sig, result=summary)
         return summary
+
+    def _sources_sig(self):
+        """Cheap signature of the winning-evidence sources (mtimes/sizes) for caching."""
+        import glob
+        parts = []
+        try:
+            for d in (self.reports_dir, os.path.join("data", "reprodata", "mt5_installs", "reports")):
+                if os.path.isdir(d):
+                    for p in glob.glob(os.path.join(d, "*.xml")):
+                        parts.append((p, int(os.path.getmtime(p)), os.path.getsize(p)))
+            for fn in ("config_checkpoints.json", "winning_baseline.json"):
+                p = os.path.join(_data_dir(), fn)
+                if os.path.exists(p):
+                    parts.append((p, int(os.path.getmtime(p)), os.path.getsize(p)))
+        except Exception:
+            return None
+        return tuple(sorted(parts))

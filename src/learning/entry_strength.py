@@ -81,8 +81,9 @@ class EntryStrengthLearner:  # name kept for wiring compatibility
 
     def relax_for_starvation(self, symbol_prefix: str, step: float = 0.5) -> dict:
         """Called when a symbol's LIVE fire-rate collapses: lower its dom_min/runway_min
-        floor cap by one step (never below 0) so entries resume. Returns the new caps.
-        Persisted in-memory; the next learn_symbol clamps its recipe to these caps."""
+        floor cap by one step so entries resume. Returns the new caps. Persisted; the next
+        learn_symbol clamps its recipe to these caps. NOT a one-way ratchet — see
+        relax_recover(), which raises the cap back when the symbol trades healthily again."""
         key = symbol_prefix.upper().split("-")[0]
         cur = self._relax_cap.get(key, {"dom_min": 1.5, "runway_min": 2.0})
         cur = {"dom_min": max(0.0, round(cur["dom_min"] - step, 2)),
@@ -92,6 +93,29 @@ class EntryStrengthLearner:  # name kept for wiring compatibility
         logger.warning(f"[ENTRY-QUALITY] {key}: STARVED -> relaxing floor cap to "
                        f"dom<={cur['dom_min']} runway<={cur['runway_min']} (learning to keep trading)")
         return cur
+
+    def relax_recover(self, symbol_prefix: str, step: float = 0.25,
+                      ceiling: dict = None) -> Optional[dict]:
+        """Re-tighten path (self-healing): when a symbol is trading healthily again, step the
+        relax cap back UP toward the ceiling so the learner may re-raise evidence-backed
+        floors it was forced to drop during starvation. Clears the cap once fully recovered
+        (no permanent floor deletion). Returns the new cap, or None if nothing to recover."""
+        key = symbol_prefix.upper().split("-")[0]
+        cur = self._relax_cap.get(key)
+        if not cur:
+            return None
+        ceil = ceiling or {"dom_min": 1.5, "runway_min": 2.0}
+        nxt = {"dom_min": round(min(ceil["dom_min"], cur["dom_min"] + step), 2),
+               "runway_min": round(min(ceil["runway_min"], cur["runway_min"] + step), 2)}
+        if nxt["dom_min"] >= ceil["dom_min"] and nxt["runway_min"] >= ceil["runway_min"]:
+            self._relax_cap.pop(key, None)   # fully recovered -> no cap (learner free again)
+            self._save_relax()
+            logger.warning(f"[ENTRY-QUALITY] {key}: healthy again -> relax cap CLEARED (floors free)")
+            return {}
+        self._relax_cap[key] = nxt
+        self._save_relax()
+        logger.info(f"[ENTRY-QUALITY] {key}: recovering -> cap raised to dom<={nxt['dom_min']} runway<={nxt['runway_min']}")
+        return nxt
 
     def _apply_relax_cap(self, symbol_prefix: str, recipe: dict) -> dict:
         """Clamp a learned recipe to the symbol's starvation relax cap (if any)."""

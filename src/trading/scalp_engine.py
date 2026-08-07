@@ -254,15 +254,15 @@ class ScalpEngine:
                 from src.data_sources.dukascopy import DukascopySource
                 from src.learning.backtester import Backtester as _BT
 
-                def _duka_backtest(sym, params):
+                def _duka_backtest(sym, params, sl_atr=None, tp_rr=None):
                     src = DukascopySource(use_cache=True)
                     bt = _BT(self.registry, rates_fn=src.get_rates, ticks_fn=src.get_ticks)
                     # M5 keeps it light enough for a research cycle while clearing the
                     # 2000-bar floor (BTC 24/7 gets ~3000; gold/GER40 ~2200 from the
                     # cached ~13-day window). Cached per-day in gold_evidence.
                     return bt.walkforward_focused(sym, params,
-                                                  sl_atr=params.get("sl_atr", 1.0),
-                                                  tp_rr=params.get("tp_rr", 2.0),
+                                                  sl_atr=(sl_atr if sl_atr is not None else params.get("sl_atr", 1.0)),
+                                                  tp_rr=(tp_rr if tp_rr is not None else params.get("tp_rr", 2.0)),
                                                   timeframe="M5", bars=3000, windows=3)
             except Exception as e:
                 logger.debug(f"Dukascopy backtest wiring unavailable: {e}")
@@ -580,6 +580,13 @@ class ScalpEngine:
                 self._onboard_tracker = OnboardingTracker()
             if self._onboard_tracker.is_done(key):
                 return True
+            # BACKOFF: if a prior attempt FAILED, don't re-spawn a heavy Dukascopy pull every
+            # cycle — wait a cooldown before retrying (prevents per-cycle network hammering).
+            st = self._onboard_tracker.status(key) or {}
+            if st.get("stage") == "failed":
+                import time as _t
+                if _t.time() - float(st.get("updated_ts", 0)) < 3600:   # 1h cooldown
+                    return True
         except Exception:
             pass
         import threading
@@ -1668,6 +1675,16 @@ class ScalpEngine:
                 if self._frequency_starved(base):
                     if self._revert_to_last_firing(base):
                         continue
+                else:
+                    # HEALTHY again -> step the starvation relax cap back up (self-healing)
+                    # so floors that were force-dropped can be re-derived. Only when the
+                    # symbol has recently fired enough that it's clearly not starved.
+                    if (self.entry_strength_learner is not None
+                            and self._freq_entered.get(base, 0) >= 3):
+                        try:
+                            self.entry_strength_learner.relax_recover(base)
+                        except Exception:
+                            pass
 
                 exp, n = self._recent_expectancy(base)
                 if n < self.checkpointer.min_sample:

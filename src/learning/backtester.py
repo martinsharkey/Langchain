@@ -79,7 +79,6 @@ class Backtester:
             logger.warning(f"[BACKTEST] {symbol} {timeframe}: only {len(rates) if rates else 0} bars "
                            f"(<2000) — cannot validate; warm the cache for a rolling window.")
             return None
-            return None
         series = compute_indicator_series(rates, params)  # params drive indicators
         rules = focused_rules(symbol) or []
         if not rules:
