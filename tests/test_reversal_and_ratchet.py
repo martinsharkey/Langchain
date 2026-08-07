@@ -1,5 +1,16 @@
 """
-Tests for the profit-retention ratchet + reversal-signature capture/analysis.
+Tests for peak/MFE tracking, intra-cycle extreme capture, the reversal-signature
+capture/analysis, and the scale-free reversal tell.
+
+NOTE (exit-model standardisation): the generic profit-retention RATCHET and the
+signal-driven exit/hold blocks were REMOVED from TradeManager.evaluate() when the
+bot standardised on the single GS_PROVEN exit model. Those behaviours are no
+longer tested here. What remains and is still exercised:
+  * peak_profit_points / MFE tracking (used by GS_PROVEN + persisted for research);
+  * intra-cycle EXTREME price updating the peak (15s-poll blindness fix);
+  * peak-indicator snapshot capture at a new MFE peak;
+  * the ReversalSignatureAnalyzer aggregation from the DB;
+  * the scale-free _reversal_tell classifier (per-symbol, magnitude-agnostic).
 Pure logic; no MT5.
 """
 import sys, os, tempfile, sqlite3, json
@@ -13,34 +24,20 @@ from src.learning.reversal_signature import ReversalSignatureAnalyzer
 def _state(action="buy", entry=2000.0, atr_points=300.0):
     return ManagedState(ticket=1, symbol="XAUUSD-ECN", base_symbol="XAUUSD", action=action,
                         entry=entry, volume=0.01, sl=0.0, tp=0.0, point=0.01,
-                        atr_points=atr_points, variant="TRAIL_ONLY", opened_at=0.0,
+                        atr_points=atr_points, variant="GS_PROVEN", opened_at=0.0,
                         best_price=entry)
 
 
-def test_retention_ratchet_cuts_after_giving_back_floor():
-    """Peak 400 pts (arm at 0.8*ATR=240), floor 0.5 -> must cut once profit <= 200 pts."""
+def test_peak_profit_points_tracks_mfe():
+    """evaluate() must track the best favourable excursion (MFE) in points."""
     tm = TradeManager()
     st = _state()
     point = 0.01
-    # drive to a 400-pt peak: price = entry + 400*point
     tm.evaluate(st, price=2000.0 + 400 * point, point=point, spread_points=5)
     assert st.peak_profit_points >= 400
-    # still well above floor (300 pts) -> no ratchet exit
-    r = tm.evaluate(st, price=2000.0 + 300 * point, point=point, spread_points=5)
-    assert not (r and "retention" in str(r.get("close", "")))
-    # drop to 150 pts (<= 200 floor) -> ratchet must fire
-    r = tm.evaluate(st, price=2000.0 + 150 * point, point=point, spread_points=5)
-    assert r and "close" in r and "retention" in r["close"], r
-
-
-def test_retention_ratchet_does_not_arm_below_threshold():
-    """A small peak (below 0.8*ATR) must not arm the ratchet."""
-    tm = TradeManager()
-    st = _state(atr_points=300.0)   # arm ~240 pts
-    point = 0.01
-    tm.evaluate(st, price=2000.0 + 100 * point, point=point, spread_points=5)  # peak 100 < 240
-    r = tm.evaluate(st, price=2000.0 + 10 * point, point=point, spread_points=5)
-    assert not (r and "retention" in str(r.get("close", ""))), r
+    # a lower later price must NOT reduce the tracked peak
+    tm.evaluate(st, price=2000.0 + 150 * point, point=point, spread_points=5)
+    assert st.peak_profit_points >= 400
 
 
 def test_peak_indicator_snapshot_captured_on_new_peak():
@@ -100,49 +97,6 @@ def _proven_signature(shrink_pct=80.0, retained=0.5):
     }
 
 
-def test_signal_exit_fires_when_momentum_rolls_over():
-    """With a proven signature, if live OsMA/MACD-hist have collapsed from peak while
-    still >50% of peak profit, take the signal exit (earlier than blind giveback)."""
-    tm = TradeManager()
-    st = _state(atr_points=300.0)
-    point = 0.01
-    # peak at 400 pts with strong momentum
-    tm.evaluate(st, price=2000.0 + 400 * point, point=point, spread_points=5,
-                indicators={"osma": 1.0, "macd_histogram": 0.6})
-    # pull back to 280 pts (70% of peak, above the 50% ratchet floor) with momentum collapsed
-    r = tm.evaluate(st, price=2000.0 + 280 * point, point=point, spread_points=5,
-                    indicators={"osma": 0.2, "macd_histogram": 0.1},
-                    reversal_signature=_proven_signature())
-    assert r and "close" in r and "reversal signal" in r["close"], r
-
-
-def test_signal_hold_when_momentum_still_supported():
-    """If momentum is still near its peak, the trade should NOT signal-exit (ride)."""
-    tm = TradeManager()
-    st = _state(atr_points=300.0)
-    point = 0.01
-    tm.evaluate(st, price=2000.0 + 400 * point, point=point, spread_points=5,
-                indicators={"osma": 1.0, "macd_histogram": 0.6})
-    r = tm.evaluate(st, price=2000.0 + 360 * point, point=point, spread_points=5,
-                    indicators={"osma": 0.95, "macd_histogram": 0.58},
-                    reversal_signature=_proven_signature())
-    assert not (r and "reversal signal" in str(r.get("close", ""))), r
-    assert st.signal_hold is True
-
-
-def test_signal_ignored_when_signature_unproven():
-    """An unreliable signature (low shrink%) must NOT trigger a signal exit."""
-    tm = TradeManager()
-    st = _state(atr_points=300.0)
-    point = 0.01
-    tm.evaluate(st, price=2000.0 + 400 * point, point=point, spread_points=5,
-                indicators={"osma": 1.0, "macd_histogram": 0.6})
-    r = tm.evaluate(st, price=2000.0 + 280 * point, point=point, spread_points=5,
-                    indicators={"osma": 0.2, "macd_histogram": 0.1},
-                    reversal_signature=_proven_signature(shrink_pct=20.0))  # unreliable
-    assert not (r and "reversal signal" in str(r.get("close", ""))), r
-
-
 def test_reversal_tell_is_scale_free_across_symbols():
     """The SAME proportional reversal must read identically whether the indicators
     are on gold's scale (~1) or BTC's scale (~50). Proves per-symbol scale-independence."""
@@ -171,41 +125,14 @@ def test_intra_cycle_extreme_updates_peak_not_missed():
     tm.evaluate(st, price=2000.0 + 50 * point, point=point, spread_points=5,
                 extreme_price=2000.0 + 600 * point)
     assert st.peak_profit_points >= 600, st.peak_profit_points
-    # and the retention ratchet now protects that true peak: a later poll at +200
-    # (< 50% of 600) must trigger the ratchet exit
-    r = tm.evaluate(st, price=2000.0 + 200 * point, point=point, spread_points=5,
-                    extreme_price=2000.0 + 200 * point)
-    assert r and "retention" in str(r.get("close", "")), r
-
-
-def test_retention_ratchet_places_broker_stop_at_floor():
-    """The critical fix: once armed, the ratchet must push a REAL broker stop-loss to
-    the protected floor so the BROKER enforces it between 15s polls (intra-cycle
-    peak->reversal can't be caught by polling alone)."""
-    tm = TradeManager()
-    st = _state(action="buy", entry=2000.0, atr_points=300.0)
-    point = 0.01
-    # peak +600pts (arms ratchet: >= max(0.8*300, 300) = 300)
-    r = tm.evaluate(st, price=2000.0 + 600 * point, point=point, spread_points=5)
-    # should return a modify_sl at the 50% floor = +300pts => price 2003.0
-    assert r and "modify_sl" in r, r
-    expected_floor = 2000.0 + 0.5 * 600 * point   # 2003.0
-    assert abs(r["modify_sl"] - expected_floor) < 1e-6, (r, expected_floor)
-    assert st.sl == expected_floor
-    # ratchet only tightens: a later, higher peak moves the stop UP, never down
-    r2 = tm.evaluate(st, price=2000.0 + 1000 * point, point=point, spread_points=5)
-    assert r2 and "modify_sl" in r2 and r2["modify_sl"] > expected_floor, r2
+    # best_price must also reflect the intra-cycle extreme
+    assert st.best_price >= 2000.0 + 600 * point
 
 
 if __name__ == "__main__":
-    test_retention_ratchet_cuts_after_giving_back_floor()
-    test_retention_ratchet_does_not_arm_below_threshold()
+    test_peak_profit_points_tracks_mfe()
     test_peak_indicator_snapshot_captured_on_new_peak()
     test_signature_from_captured_reads_snapshots()
-    test_signal_exit_fires_when_momentum_rolls_over()
-    test_signal_hold_when_momentum_still_supported()
-    test_signal_ignored_when_signature_unproven()
     test_reversal_tell_is_scale_free_across_symbols()
     test_intra_cycle_extreme_updates_peak_not_missed()
-    test_retention_ratchet_places_broker_stop_at_floor()
-    print("reversal + ratchet tests passed")
+    print("reversal + peak tracking tests passed")

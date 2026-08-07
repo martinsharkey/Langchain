@@ -155,42 +155,6 @@ def ema_trend_follow(indicators: dict, params: dict) -> Signal:
     return Signal(action="hold", reason=f"EMA trend: {trend}", confidence=0.0)
 
 
-def macd_momentum(indicators: dict, params: dict) -> Signal:
-    """
-    MACD Momentum Strategy.
-    
-    Buys when MACD histogram turns positive (increasing momentum).
-    Sells when MACD histogram turns negative (decreasing momentum).
-    Works in both trending and ranging markets.
-    """
-    macd_hist = indicators.get("macd_histogram")
-    close = indicators.get("close")
-    
-    if macd_hist is None or close is None:
-        return Signal(action="hold", reason="Missing MACD data", confidence=0.0)
-    
-    min_conf = params.get("min_confidence", 0.5)
-    strength = abs(macd_hist)
-    confidence = min(strength * 10 + 0.3, 0.9)
-    
-    if macd_hist > 0 and confidence >= min_conf:
-        return Signal(
-            action="buy",
-            confidence=confidence,
-            price=close,
-            reason=f"MACD Momentum: Positive histogram ({macd_hist:.2f})",
-        )
-    elif macd_hist < 0 and confidence >= min_conf:
-        return Signal(
-            action="sell",
-            confidence=confidence,
-            price=close,
-            reason=f"MACD Momentum: Negative histogram ({macd_hist:.2f})",
-        )
-    
-    return Signal(action="hold", reason=f"MACD neutral: {macd_hist:.2f}", confidence=0.0)
-
-
 def bollinger_bounce(indicators: dict, params: dict) -> Signal:
     """
     Bollinger Band Bounce Strategy.
@@ -464,21 +428,6 @@ def williams_r_reversal(indicators: dict, params: dict) -> Signal:
     return Signal(action="hold", reason=f"Williams %R neutral: {wr:.0f}", confidence=0.0)
 
 
-def cci_breakout(indicators: dict, params: dict) -> Signal:
-    """CCI breakout beyond +/-100."""
-    cci_v = indicators.get("cci")
-    close = indicators.get("close")
-    if cci_v is None or close is None:
-        return Signal(action="hold", reason="Missing CCI", confidence=0.0)
-    if cci_v > 100:
-        return Signal(action="buy", confidence=min(cci_v / 300 + 0.5, 0.85), price=close,
-                      reason=f"CCI breakout up: {cci_v:.0f}")
-    if cci_v < -100:
-        return Signal(action="sell", confidence=min(abs(cci_v) / 300 + 0.5, 0.85), price=close,
-                      reason=f"CCI breakout down: {cci_v:.0f}")
-    return Signal(action="hold", reason=f"CCI neutral: {cci_v:.0f}", confidence=0.0)
-
-
 def golden_cross_50_200(indicators: dict, params: dict) -> Signal:
     """Long-term trend via price vs EMA200 / SMA50 alignment."""
     close = indicators.get("close")
@@ -491,24 +440,6 @@ def golden_cross_50_200(indicators: dict, params: dict) -> Signal:
     if close < sma50 < ema200:
         return Signal(action="sell", confidence=0.6, price=close, reason="Price<SMA50<EMA200 (downtrend)")
     return Signal(action="hold", reason="MAs not aligned", confidence=0.0)
-
-
-def bollinger_squeeze_breakout(indicators: dict, params: dict) -> Signal:
-    """Low-volatility squeeze then breakout in trend direction."""
-    close = indicators.get("close")
-    bb_u = indicators.get("bb_upper")
-    bb_l = indicators.get("bb_lower")
-    vr = indicators.get("volatility_ratio", 1.0)
-    trend = indicators.get("trend", "neutral")
-    if close is None or bb_u is None or bb_l is None:
-        return Signal(action="hold", reason="Missing BB", confidence=0.0)
-    # squeeze = volatility contracting
-    if vr < 0.9:
-        if close >= bb_u and trend != "bearish":
-            return Signal(action="buy", confidence=0.65, price=close, reason="BB squeeze breakout up")
-        if close <= bb_l and trend != "bullish":
-            return Signal(action="sell", confidence=0.65, price=close, reason="BB squeeze breakout down")
-    return Signal(action="hold", reason=f"No squeeze breakout (vr={vr:.2f})", confidence=0.0)
 
 
 def macd_cross(indicators: dict, params: dict) -> Signal:
@@ -545,58 +476,6 @@ def volume_breakout(indicators: dict, params: dict) -> Signal:
     return Signal(action="hold", reason="Volume normal", confidence=0.0)
 
 
-def rsi_divergence_momentum(indicators: dict, params: dict) -> Signal:
-    """RSI momentum with mid-line (50) as trend filter."""
-    rsi_val = indicators.get("rsi")
-    close = indicators.get("close")
-    macd_hist = indicators.get("macd_histogram", 0) or 0
-    if rsi_val is None or close is None:
-        return Signal(action="hold", reason="Missing RSI", confidence=0.0)
-    if rsi_val > 50 and macd_hist > 0:
-        return Signal(action="buy", confidence=min((rsi_val - 50) / 50 + 0.45, 0.8), price=close,
-                      reason=f"RSI momentum up {rsi_val:.0f} + MACD+")
-    if rsi_val < 50 and macd_hist < 0:
-        return Signal(action="sell", confidence=min((50 - rsi_val) / 50 + 0.45, 0.8), price=close,
-                      reason=f"RSI momentum down {rsi_val:.0f} + MACD-")
-    return Signal(action="hold", reason=f"RSI/MACD mixed: {rsi_val:.0f}", confidence=0.0)
-
-
-def macd_osma_power_confluence(indicators: dict, params: dict) -> Signal:
-    """
-    RETIRED (1b): no longer registered as a live strategy. Kept ONLY as a
-    reference for the DELIBERATE Bulls/Bears zero-line math (see memory
-    `bulls_bears_power_logic`). The live confluence is OsMA_Confluence
-    (src/strategies/osma_confluence.py -> confluence_signal.py).
-
-    ⚠️ Bulls/Bears zero-line logic is DELIBERATE and CORRECT — DO NOT flip the
-    operators (LLMs tend to "fix" these back to the legacy bug).
-
-    LONG when:  MACD line > 0  AND  OsMA > 0  AND  Bears Power >= 0.0
-    SHORT when: MACD line < 0  AND  OsMA < 0  AND  Bulls Power <= 0.0
-    """
-    close = indicators.get("close")
-    macd_line = indicators.get("macd_line")
-    osma = indicators.get("osma")
-    bulls = indicators.get("bulls_power")
-    bears = indicators.get("bears_power")
-    if None in (close, macd_line, osma, bulls, bears):
-        return Signal(action="hold", reason="Missing confluence inputs", confidence=0.0)
-
-    # LONG: momentum up (MACD>0, OsMA>0) with bears neutralised (>= 0.0)  [CORRECT: >= not <]
-    if macd_line > 0 and osma > 0 and bears >= 0.0:
-        conf = min(0.6 + min(osma, 1.0) * 0.2 + (0.1 if bulls > 0 else 0), 0.9)
-        return Signal(action="buy", confidence=conf, price=close,
-                      reason=f"Confluence LONG: MACD>0, OsMA>0, Bears={bears:.2f}>=0 (neutralised)")
-
-    # SHORT: momentum down (MACD<0, OsMA<0) with bulls neutralised (<= 0.0)  [CORRECT: <= not >]
-    if macd_line < 0 and osma < 0 and bulls <= 0.0:
-        conf = min(0.6 + min(abs(osma), 1.0) * 0.2 + (0.1 if bears < 0 else 0), 0.9)
-        return Signal(action="sell", confidence=conf, price=close,
-                      reason=f"Confluence SHORT: MACD<0, OsMA<0, Bulls={bulls:.2f}<=0 (neutralised)")
-
-    return Signal(action="hold", reason="No MACD/OsMA/Power confluence", confidence=0.0)
-
-
 # ═══════════════════════════════════════════════════════════════════════════════
 #  STRATEGY REGISTRY
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -613,11 +492,8 @@ class StrategyRegistry:
         # Get all strategies
         all_strats = registry.get_all()
         
-        # Find strategies suitable for current market
-        suitable = registry.find_suitable(indicators)
-        
-        # Get best strategy based on historical performance
-        best = registry.get_best_strategy(indicators, vector_store)
+        # Get the focused, high-edge entry (the single live entry: OsMA_Confluence)
+        signal = registry.get_focused_signal(indicators, tuned_params)
     """
     
     def __init__(self):
@@ -646,18 +522,6 @@ class StrategyRegistry:
             params={"min_confidence": 0.5},
             min_confidence=0.5,
             weight=2,
-        ))
-        
-        self.register(StrategyDefinition(
-            name="MACD_Momentum",
-            description="MACD histogram momentum: trade with momentum direction",
-            indicators_used=["macd_histogram", "close"],
-            suitable_regimes=["trending", "ranging"],
-            signal_fn=macd_momentum,
-            params={"min_confidence": 0.5},
-            min_confidence=0.4,
-            weight=1,
-            status="disabled",  # RETIRED: live entry is OsMA_Confluence only
         ))
         
         self.register(StrategyDefinition(
@@ -727,34 +591,11 @@ class StrategyRegistry:
             signal_fn=williams_r_reversal, min_confidence=0.5, weight=1,
         ))
         self.register(StrategyDefinition(
-            name="CCI_Breakout",
-            description="CCI breakout beyond +/-100",
-            indicators_used=["cci", "close"],
-            suitable_regimes=["trending", "volatile"],
-            signal_fn=cci_breakout, min_confidence=0.5, weight=1,
-            status="disabled",  # RETIRED: live entry is OsMA_Confluence only
-        ))
-        self.register(StrategyDefinition(
             name="GoldenCross_50_200",
             description="Long-term trend via price/SMA50/EMA200 alignment",
             indicators_used=["close", "sma_50", "ema_200"],
             suitable_regimes=["trending"],
             signal_fn=golden_cross_50_200, min_confidence=0.5, weight=2,
-        ))
-        self.register(StrategyDefinition(
-            name="BB_SqueezeBreakout",
-            description="Low-volatility squeeze then breakout",
-            indicators_used=["bb_upper", "bb_lower", "volatility_ratio", "trend", "close"],
-            suitable_regimes=["quiet", "volatile"],
-            signal_fn=bollinger_squeeze_breakout, min_confidence=0.5, weight=2,
-            status="disabled",  # RETIRED: live entry is OsMA_Confluence only
-        ))
-        self.register(StrategyDefinition(
-            name="MACD_Cross",
-            description="MACD line vs signal crossover",
-            indicators_used=["macd_line", "macd_signal", "close"],
-            suitable_regimes=["trending", "ranging"],
-            signal_fn=macd_cross, min_confidence=0.45, weight=1,
         ))
         self.register(StrategyDefinition(
             name="Volume_Breakout",
@@ -764,17 +605,15 @@ class StrategyRegistry:
             signal_fn=volume_breakout, min_confidence=0.5, weight=1,
         ))
         self.register(StrategyDefinition(
-            name="RSI_Momentum",
-            description="RSI mid-line momentum with MACD filter",
-            indicators_used=["rsi", "macd_histogram", "close"],
-            suitable_regimes=["trending"],
-            signal_fn=rsi_divergence_momentum, min_confidence=0.45, weight=1,
-            status="disabled",  # RETIRED: live entry is OsMA_Confluence only
+            name="MACD_Cross",
+            description="MACD line vs signal crossover",
+            indicators_used=["macd_line", "macd_signal", "close"],
+            suitable_regimes=["trending", "ranging"],
+            signal_fn=macd_cross, min_confidence=0.45, weight=1,
         ))
-        # NOTE (1b): MACD_OsMA_Power_Confluence was RETIRED. It was a third,
-        # lighter-weight confluence (MACD/OsMA/Bulls/Bears only, no EMA/ATR/RSI).
-        # The single source of truth is now OsMA_Confluence (src/strategies/
-        # osma_confluence.py -> confluence_signal.py).
+        # RETIRED: MACD_Momentum, CCI_Breakout, BB_SqueezeBreakout, RSI_Momentum and
+        # MACD_OsMA_Power_Confluence have been REMOVED. The single, standardised entry
+        # is OsMA_Confluence (src/strategies/osma_confluence.py -> confluence_signal.py).
         #
         # (1c) Register OsMA_Confluence HERE too, not only at engine start, so that
         # ANY registry (optimizer, edge-discovery, backtester, tests) can resolve the
@@ -856,22 +695,6 @@ class StrategyRegistry:
             if include_disabled or getattr(s, "status", "active") != "disabled"
         ]
     
-    def find_suitable(self, indicators: dict) -> list[StrategyDefinition]:
-        """
-        Find strategies suitable for the current market regime.
-        
-        Analyzes indicators to determine the current market regime,
-        then returns strategies that work well in that regime.
-        """
-        regime = self._detect_market_regime(indicators)
-        suitable = [
-            s for s in self._strategies.values()
-            if regime in s.suitable_regimes
-            and getattr(s, "status", "active") != "disabled"
-        ]
-        logger.info(f"Market regime: {regime}, suitable strategies: {[s.name for s in suitable]}")
-        return suitable
-    
     def _detect_market_regime(self, indicators: dict) -> str:
         """
         Detect the current market regime from indicators.
@@ -910,58 +733,6 @@ class StrategyRegistry:
         else:
             return "quiet"
     
-    def get_best_strategy(
-        self,
-        indicators: dict,
-        vector_store=None,
-    ) -> Optional[StrategyDefinition]:
-        """
-        Get the best strategy for current market conditions.
-        
-        Uses a combination of:
-        1. Market regime detection (filters suitable strategies)
-        2. Historical performance from vector store (prefers winning strategies)
-        3. Strategy weight (prefers higher-weight strategies when tied)
-        
-        Args:
-            indicators: Current technical indicators.
-            vector_store: Optional PatternVectorStore for historical performance.
-        
-        Returns:
-            The best StrategyDefinition, or None if no strategy is suitable.
-        """
-        suitable = self.find_suitable(indicators)
-        if not suitable:
-            logger.warning("No suitable strategies found for current market regime")
-            return None
-        
-        # If we have historical data, use it to rank strategies
-        if vector_store:
-            best_strategies = vector_store.get_best_strategies(min_samples=1)
-            strategy_win_rates = {s["strategy"]: s["win_rate"] for s in best_strategies}
-            
-            # Score each suitable strategy
-            scored = []
-            for s in suitable:
-                score = s.weight * 10  # Base score from weight
-                
-                # Bonus from historical win rate
-                win_rate = strategy_win_rates.get(s.name, 50.0)
-                score += win_rate * 0.5  # Win rate contributes up to 50 points
-                
-                scored.append((score, s))
-            
-            scored.sort(key=lambda x: x[0], reverse=True)
-            best = scored[0][1]
-            logger.info(f"Best strategy (scored): {best.name} (score={scored[0][0]:.1f})")
-            return best
-        
-        # Without historical data, use weight and suitability
-        suitable.sort(key=lambda s: s.weight, reverse=True)
-        best = suitable[0]
-        logger.info(f"Best strategy (weight): {best.name}")
-        return best
-    
     def run_strategy(
         self,
         strategy_name: str,
@@ -982,32 +753,6 @@ class StrategyRegistry:
             return Signal(action="hold", reason=f"Unknown strategy: {strategy_name}", confidence=0.0)
         
         return strategy.signal_fn(indicators, strategy.params)
-    
-    def run_all_strategies(
-        self,
-        indicators: dict,
-    ) -> list[tuple[str, Signal]]:
-        """
-        Run all strategies and return their signals.
-        
-        Used by the meta-strategy agent to evaluate all approaches.
-        
-        Args:
-            indicators: Current technical indicators.
-        
-        Returns:
-            List of (strategy_name, Signal) tuples.
-        """
-        results = []
-        for name, strategy in self._strategies.items():
-            try:
-                signal = strategy.signal_fn(indicators, strategy.params)
-                results.append((name, signal))
-            except Exception as e:
-                logger.error(f"Error running strategy {name}: {e}")
-                results.append((name, Signal(action="hold", reason=f"Error: {e}", confidence=0.0)))
-        
-        return results
     
     def get_focused_signal(self, indicators: dict, params: dict = None):
         """
@@ -1056,112 +801,6 @@ class StrategyRegistry:
         return Signal(action="hold", confidence=0.0, price=close,
                       reason=(last_reason or f"no focused pocket in {regime}"))
 
-    def get_ensemble_signal(
-        self,
-        indicators: dict,
-        min_agreement: int = 2,
-    ) -> Signal:
-        """
-        Get an ensemble signal by combining all strategies.
-        
-        Uses a voting mechanism: if enough strategies agree on a direction,
-        generate a signal with confidence proportional to agreement.
-        
-        Args:
-            indicators: Current technical indicators.
-            min_agreement: Minimum number of strategies that must agree.
-        
-        Returns:
-            Ensemble Signal.
-        """
-        results = self.run_all_strategies(indicators)
-
-        # Weighted voting: each strategy's vote is scaled by its learned weight
-        # (adapted from real performance) so strategies that actually win count
-        # more. Confidence reflects weighted agreement.
-        buys = 0
-        sells = 0
-        w_buy = 0.0
-        w_sell = 0.0
-        total_confidence_buy = 0.0
-        total_confidence_sell = 0.0
-        reasons = []
-
-        # per-symbol edge multipliers (edge is symbol-specific — a combo that
-        # wins on gold can lose on an index), applied on top of learned weights.
-        _sym = indicators.get("symbol", "")
-        _regime = self._detect_market_regime(indicators)
-        try:
-            from src.learning.edge_weights import edge_weight, regime_edge_weight
-        except Exception:
-            edge_weight = regime_edge_weight = None
-
-        for name, signal in results:
-            strat = self._strategies.get(name)
-            # Skip disabled AND testing strategies — synthesized candidates
-            # (status='testing') must NOT influence live trades until the
-            # backtester promotes them to 'active'. This is the promotion gate.
-            if strat is not None and getattr(strat, "status", "active") in ("disabled", "testing"):
-                continue
-            w = getattr(strat, "weight", 1.0) if strat else 1.0
-            if edge_weight is not None and _sym:
-                # symbol edge x regime-conditioned edge (edge often lives in one regime)
-                w *= edge_weight(_sym, name) * regime_edge_weight(_sym, name, _regime)
-            if signal.action == "buy":
-                buys += 1
-                w_buy += w
-                total_confidence_buy += signal.confidence * w
-                reasons.append(f"{name}: BUY ({signal.confidence:.0%}, w={w:.2f})")
-            elif signal.action == "sell":
-                sells += 1
-                w_sell += w
-                total_confidence_sell += signal.confidence * w
-                reasons.append(f"{name}: SELL ({signal.confidence:.0%}, w={w:.2f})")
-
-        close = indicators.get("close")
-
-        # ── Conviction-based decision (fixes structural long/side bias) ──
-        # Raw weighted-majority always favours the larger camp (we have many more
-        # trend-followers than mean-reversion strategies), which structurally
-        # buries valid counter-trend / trend-short signals. Instead we score each
-        # side by CONVICTION = average weighted confidence (rewards a few
-        # high-confidence votes) with a mild breadth bonus. A strong minority can
-        # therefore win. Learned weights still matter (they scale each vote).
-        import os
-        bias_dampen = float(os.getenv("ENSEMBLE_BIAS_DAMPEN", "1.0"))  # 1.0 = neutral
-
-        def conviction(total_conf_w, w_side, n_side):
-            if w_side <= 0 or n_side <= 0:
-                return 0.0
-            avg_conf = total_conf_w / w_side          # avg confidence, weight-adjusted
-            breadth = min(n_side / 3.0, 1.0)           # up to 3 agreeing = full breadth
-            return avg_conf * (0.7 + 0.3 * breadth)    # mostly conviction, some breadth
-
-        buy_score = conviction(total_confidence_buy, w_buy, buys)
-        sell_score = conviction(total_confidence_sell, w_sell, sells) * bias_dampen
-
-        if buys >= min_agreement and buy_score >= sell_score and buy_score > 0:
-            return Signal(
-                action="buy",
-                confidence=min(buy_score, 1.0),
-                price=close,
-                reason=f"Ensemble BUY (score {buy_score:.2f} vs {sell_score:.2f}): " + " | ".join(reasons),
-            )
-        elif sells >= min_agreement and sell_score > buy_score and sell_score > 0:
-            return Signal(
-                action="sell",
-                confidence=min(sell_score, 1.0),
-                price=close,
-                reason=f"Ensemble SELL (score {sell_score:.2f} vs {buy_score:.2f}): " + " | ".join(reasons),
-            )
-
-        return Signal(
-            action="hold",
-            confidence=0.0,
-            price=close,
-             reason=f"Ensemble: Buy={buys}({buy_score:.2f}), Sell={sells}({sell_score:.2f})",
-        )
-    
     # ← FIX #4: UPDATE WEIGHTS FROM PERFORMANCE
     def update_weights_from_performance(self, performance_data: dict):
         """

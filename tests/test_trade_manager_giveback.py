@@ -1,12 +1,17 @@
 """
-Tests for the giveback/exit fix (issue: winners cut early).
+GS_PROVEN exit-model coverage (replaces the obsolete generic-giveback tests).
 
-Pure TradeManager.evaluate() logic — no MT5, no DB. Verifies:
-  * The giveback guard does NOT arm on a small profit (arm threshold raised to
-    ~1.5x ATR), so normal trades are left to reach their TP.
-  * A trade still well short of a large TP is not scratched on a moderate
-    pullback (TP-awareness requires a big giveback below 60% of TP).
-  * A genuinely large winner that gives back most of its peak IS closed.
+The legacy A/B management arms and the generic retention-ratchet / signal-driven /
+giveback guards were REMOVED during the exit-model standardisation. The single
+live management model is GS_PROVEN:
+  * a WIDE broker SL is set on entry (by the engine);
+  * at +be_trigger pts, SL moves to BE + a small locked profit and the broker TP
+    is removed (runner uncapped);
+  * from then on SL TRAILS behind best_price, only ever tightening (a ratchet).
+Plus the always-on hard-adverse ("violent reversal") exit that applies to ALL
+variants (NOT gated by variant).
+
+Pure TradeManager.evaluate() logic — no MT5, no DB.
 """
 import sys, os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -14,59 +19,69 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from src.trading.trade_manager import TradeManager, ManagedState
 
 
-def _state(entry=100.0, tp=112.0, atr_points=100.0, action="buy"):
+def _state(entry=2000.0, tp=2100.0, atr_points=100.0, action="buy"):
     return ManagedState(
-        ticket=1, symbol="TEST", base_symbol="TEST", action=action,
-        entry=entry, volume=0.01, sl=88.0, tp=tp, point=1.0,
-        atr_points=atr_points, variant="TRAIL_ONLY", opened_at=0.0,
+        ticket=1, symbol="XAUUSD-ECN", base_symbol="XAUUSD", action=action,
+        entry=entry, volume=0.01, sl=0.0, tp=tp, point=0.01,
+        atr_points=atr_points, variant="GS_PROVEN", opened_at=0.0,
         best_price=entry,
     )
 
 
 def _mgr():
-    # no personality / no experience db -> uses config defaults
+    # no personality / no experience db -> uses GS_PROVEN defaults
     return TradeManager()
 
 
-def test_small_profit_does_not_arm_giveback():
-    """A TINY profit (below the retention-ratchet arm) must never trigger a close —
-    only genuinely meaningful peaks are protected."""
+def test_gs_proven_below_be_trigger_does_nothing():
+    """Below the BE trigger (200 pts default), GS_PROVEN leaves the broker SL alone."""
     mgr = _mgr()
-    st = _state(atr_points=100.0)  # retention arm ~ 0.35*100 = 35 pts
-    # peak +30pts (below the 35pt arm) then pull back to +10pts
-    mgr.evaluate(st, price=130.0, point=1.0, spread_points=2.0)   # peak +30
-    intent = mgr.evaluate(st, price=110.0, point=1.0, spread_points=2.0)  # back to +10
-    assert not (intent and intent.get("close")), (
-        f"ratchet/giveback armed on a tiny (+30pt) peak below the ~35pt arm: {intent}"
-    )
+    st = _state()
+    point = 0.01
+    intent = mgr.evaluate(st, price=2000.0 + 100 * point, point=point, spread_points=5)
+    assert intent is None, intent
+    assert not st.moved_to_be
 
 
-def test_winner_short_of_tp_not_scratched_on_moderate_pullback():
-    """A winner that peaked well short of a large TP keeps running on a moderate pullback."""
+def test_gs_proven_locks_be_and_removes_tp():
+    """At/after +be_trigger pts, GS_PROVEN moves SL to BE+ and removes the TP."""
     mgr = _mgr()
-    # TP is +1200pts away; ATR 100 -> arm ~150. Peak +300 (25% of TP), pull to +200.
-    st = _state(entry=100.0, tp=1300.0, atr_points=100.0)
-    mgr.evaluate(st, price=400.0, point=1.0, spread_points=2.0)   # peak +300
-    intent = mgr.evaluate(st, price=300.0, point=1.0, spread_points=2.0)  # gave back 33%
-    assert not (intent and intent.get("close")), (
-        f"scratched a winner still far from TP on a 33% pullback: {intent}"
-    )
+    st = _state()
+    point = 0.01
+    intent = mgr.evaluate(st, price=2000.0 + 250 * point, point=point, spread_points=5)
+    assert intent and "modify_sl" in intent and intent.get("remove_tp") is True, intent
+    assert st.moved_to_be and st.trail_active
+    # BE+ locks a small profit above entry (be_lock 50 pts default)
+    assert intent["modify_sl"] > st.entry
 
 
-def test_large_winner_giving_back_most_is_closed():
-    """A big winner (peak >> arm, and gives back a large fraction) IS cut."""
+def test_gs_proven_trail_only_tightens():
+    """After BE lock, a higher peak trails the SL up; a lower peak never loosens it."""
     mgr = _mgr()
-    # small TP so peak exceeds 60% of TP (TP-awareness relaxed), big giveback.
-    st = _state(entry=100.0, tp=250.0, atr_points=100.0)  # TP +150pts
-    mgr.evaluate(st, price=400.0, point=1.0, spread_points=2.0)   # peak +300 (>arm, >TP)
-    intent = mgr.evaluate(st, price=180.0, point=1.0, spread_points=2.0)  # gave back 73%
-    assert intent and intent.get("close"), (
-        "a large winner that gave back 73% of a +300pt peak should be closed"
-    )
+    st = _state()
+    point = 0.01
+    r1 = mgr.evaluate(st, price=2000.0 + 250 * point, point=point, spread_points=5)  # BE lock
+    r2 = mgr.evaluate(st, price=2000.0 + 600 * point, point=point, spread_points=5)  # trail up
+    assert r2 and "modify_sl" in r2 and r2["modify_sl"] > r1["modify_sl"], (r1, r2)
+    prev_sl = st.sl
+    # a pullback must NOT move the stop backwards (ratchet)
+    r3 = mgr.evaluate(st, price=2000.0 + 500 * point, point=point, spread_points=5)
+    assert st.sl == prev_sl, (prev_sl, st.sl, r3)
+
+
+def test_violent_reversal_hard_exit_applies_to_gs_proven():
+    """The always-on hard-adverse exit (NOT gated by variant) cuts a violent reversal."""
+    mgr = _mgr()
+    st = _state(atr_points=100.0)
+    point = 0.01
+    # move sharply against a buy: adverse > max(1.5*ATR, 2*spread+50) = 150 pts
+    intent = mgr.evaluate(st, price=2000.0 - 300 * point, point=point, spread_points=5)
+    assert intent and "close" in intent and "violent" in intent["close"], intent
 
 
 if __name__ == "__main__":
-    test_small_profit_does_not_arm_giveback()
-    test_winner_short_of_tp_not_scratched_on_moderate_pullback()
-    test_large_winner_giving_back_most_is_closed()
-    print("all giveback tests passed")
+    test_gs_proven_below_be_trigger_does_nothing()
+    test_gs_proven_locks_be_and_removes_tp()
+    test_gs_proven_trail_only_tightens()
+    test_violent_reversal_hard_exit_applies_to_gs_proven()
+    print("GS_PROVEN exit tests passed")

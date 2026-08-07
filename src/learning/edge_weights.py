@@ -52,36 +52,28 @@ def _load_overlay() -> dict:
 _OVERLAY = _load_overlay()
 
 EDGE_WEIGHTS_BY_SYMBOL = {
-    # XAUUSD-ECN M15 evidence: Volume_Breakout 1.32, BB_Bounce 1.15,
-    # CCI_Breakout 1.13, RSI_MeanReversion 1.10, MACD_OsMA_Power 1.08,
-    # ADX 1.07; losers: BB_SqueezeBreakout 0.75, Stochastic 0.95, MACD_Cross ~1.0
+    # XAUUSD-ECN M15 evidence (retired ensemble strategies removed; the single
+    # live entry is OsMA_Confluence): Volume_Breakout 1.32, BB_Bounce 1.15,
+    # RSI_MeanReversion 1.10, ADX 1.07.
     "XAUUSD": {
         "Volume_Breakout": 2.5,
         "BB_Bounce": 1.8,
-        "CCI_Breakout": 1.7,
         "RSI_MeanReversion": 1.4,
         "OsMA_Confluence": 1.3,
         "ADX_TrendStrength": 1.2,
         "EMA_TrendFollow": 1.1,
-        "RSI_Momentum": 0.7,
         "MACD_Cross": 0.6,
         "GoldenCross_50_200": 0.5,
         "Stochastic_Reversal": 0.4,
-        "BB_SqueezeBreakout": 0.3,
     },
-    # GER40 M15 evidence: MACD_Momentum 1.02, MACD_Cross 1.02, CCI 1.06,
-    # BB_SqueezeBreakout 1.2, MACD_OsMA_Power 1.05; losers: RSI_MeanReversion 0.79,
-    # Volume_Breakout 0.91, BB_Bounce 0.91, RSI_Momentum 0.95
+    # GER40 M15 evidence (retired ensemble strategies removed): MACD_Cross 1.02;
+    # losers: RSI_MeanReversion 0.79, Volume_Breakout 0.91, BB_Bounce 0.91.
     "GER40": {
-        "BB_SqueezeBreakout": 1.6,
-        "CCI_Breakout": 1.4,
         "OsMA_Confluence": 1.3,
         "MACD_Cross": 1.2,
-        "MACD_Momentum": 1.2,
         "Volume_Breakout": 0.5,
         "BB_Bounce": 0.5,
         "RSI_MeanReversion": 0.3,
-        "RSI_Momentum": 0.6,
     },
 }
 
@@ -111,7 +103,6 @@ REGIME_EDGE = {
     "XAUUSD": {
         "Volume_Breakout":            {"volatile": 1.6, "trending": 1.2, "ranging": 0.5, "quiet": 0.6},
         "BB_Bounce":                  {"ranging": 1.6,  "volatile": 1.0, "trending": 0.8, "quiet": 1.0},
-        "CCI_Breakout":               {"volatile": 1.2, "trending": 1.2, "ranging": 1.0, "quiet": 0.9},
         "RSI_MeanReversion":          {"trending": 1.2, "volatile": 1.0, "ranging": 0.9, "quiet": 0.9},
         "ADX_TrendStrength":          {"trending": 1.3, "volatile": 0.7, "ranging": 0.7, "quiet": 0.8},
         "OsMA_Confluence":            {"trending": 1.3, "ranging": 0.8, "volatile": 0.7, "quiet": 0.8},

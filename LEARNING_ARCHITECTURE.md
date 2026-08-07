@@ -1,5 +1,11 @@
 # How Learning Works — Our System vs Hermes / TradingAgents
 
+> **SUPERSEDED SECTIONS (2026-08-07):** the "ensemble / 16-strategy weighted-voting"
+> model described below is RETIRED. The system is now standardised to ONE entry
+> (`OsMA_Confluence`) and ONE exit (`GS_PROVEN`) — see the CORE RULES in `AGENTS.md`
+> and `src/core_rules.py` (the authority). `get_ensemble_signal`/`run_all_strategies`/
+> `find_suitable` have been removed. Read the ensemble mentions below as HISTORY.
+
 > **Update (2026-08-02): full current architecture — the continual learning loop is
 > CLOSED and every loop verified wired end-to-end (audit 2026-08-02).**
 >

@@ -1,5 +1,11 @@
 # Trading Bot — Core Rules & Mission
 
+> **AUTHORITY NOTE (2026-08-07):** the standardised, enforced core rules now live in
+> `src/core_rules.py` (portable, asserted at startup) and are summarised in `AGENTS.md`.
+> Where this document calls `XAUUSDStrategy` "the primary strategy", that is STALE:
+> `XAUUSDStrategy` is only the indicator-math calculator; the sole entry is
+> `OsMA_Confluence` and the sole exit is `GS_PROVEN`. Defer to `src/core_rules.py`.
+
 ## 🎯 Core Mission
 
 Build an **autonomous agentic trading bot** that:

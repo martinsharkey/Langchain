@@ -1,15 +1,15 @@
 """
-Tests for the learning kill-switch (#27): when LEARNING_ADAPTATION_ENABLED is
-false, the bot must NOT bias itself from historical performance.
+Tests for the learning kill-switch (#27) after the exit-model standardisation.
 
-We test the pure, construction-free pieces:
-  * _variant_weights_for returns UNIFORM weights when adaptation is frozen
-    (so variant selection is pure exploration, not biased by net-negative history).
-  * returns NON-uniform (learned) weights when adaptation is enabled and a
-    variant perf cache exists.
+The bot now uses a SINGLE proven management model (GS_PROVEN); the old A/B
+management arms have been removed. GS_PROVEN is deliberately excluded from the
+exploratory variant-weight pool (it is the pinned proven model, not an arm to
+explore), so the exploratory pool is now EMPTY and _variant_weights_for returns
+no exploratory weights regardless of the adaptation flag.
 
-These avoid constructing a full ScalpEngine (which loads heavy deps); we bind the
-unbound method to a lightweight stub carrying only the attributes it reads.
+We test the pure, construction-free piece: _variant_weights_for. We avoid
+constructing a full ScalpEngine (which loads heavy deps) by binding the unbound
+method to a lightweight stub carrying only the attributes it reads.
 """
 import sys, os, types
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -31,34 +31,38 @@ def _weights_for(cache, base="BTCUSD"):
     return ScalpEngine._variant_weights_for(stub, base)
 
 
-def test_frozen_adaptation_gives_uniform_variant_weights():
+def test_variants_standardised_to_gs_proven_only():
+    """The legacy A/B arms are removed; GS_PROVEN is the single model."""
+    assert VARIANTS == ("GS_PROVEN",), VARIANTS
+
+
+def test_exploratory_pool_empty_when_frozen():
     prev = config.LEARNING_ADAPTATION_ENABLED
     try:
         config.LEARNING_ADAPTATION_ENABLED = False
-        # even with a strong learned bias in the cache, frozen -> uniform
-        cache = {"BTCUSD": {"BE_PLUS_TRAIL": {"trades": 20, "win_rate": 5, "net_pnl": -50}}}
+        # even with a learned bias in the cache, GS_PROVEN is excluded from the
+        # exploratory pool -> no exploratory arms remain.
+        cache = {"BTCUSD": {"GS_PROVEN": {"trades": 20, "win_rate": 55, "net_pnl": 10}}}
         w = _weights_for(cache)
-        # GS_PROVEN is the gold-pinned proven model, deliberately excluded from the
-        # exploratory A/B weight pool; the rest of the arms are present and uniform.
-        assert set(w.keys()) == set(VARIANTS) - {"GS_PROVEN"}
-        assert len(set(w.values())) == 1, f"expected uniform weights when frozen, got {w}"
+        assert w == {}, f"expected empty exploratory pool (GS_PROVEN only), got {w}"
     finally:
         config.LEARNING_ADAPTATION_ENABLED = prev
 
 
-def test_enabled_adaptation_biases_from_history():
+def test_exploratory_pool_empty_when_enabled():
     prev = config.LEARNING_ADAPTATION_ENABLED
     try:
         config.LEARNING_ADAPTATION_ENABLED = True
-        # a variant with >=3 trades and a strong win rate should move off the floor
-        cache = {"BTCUSD": {"SCALP_FIXED": {"trades": 10, "win_rate": 70, "net_pnl": 5}}}
+        # adaptation on still yields no exploratory arms — GS_PROVEN is pinned, not explored.
+        cache = {"BTCUSD": {"GS_PROVEN": {"trades": 10, "win_rate": 70, "net_pnl": 5}}}
         w = _weights_for(cache)
-        assert len(set(w.values())) > 1, f"expected learned (non-uniform) weights, got {w}"
+        assert w == {}, f"expected empty exploratory pool (GS_PROVEN only), got {w}"
     finally:
         config.LEARNING_ADAPTATION_ENABLED = prev
 
 
 if __name__ == "__main__":
-    test_frozen_adaptation_gives_uniform_variant_weights()
-    test_enabled_adaptation_biases_from_history()
+    test_variants_standardised_to_gs_proven_only()
+    test_exploratory_pool_empty_when_frozen()
+    test_exploratory_pool_empty_when_enabled()
     print("learning kill-switch tests passed")

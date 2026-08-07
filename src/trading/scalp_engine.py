@@ -750,6 +750,17 @@ class ScalpEngine:
         self.running = True
         logger.info(f"ScalpEngine started | mode={config.TRADING_MODE} "
                     f"symbols={list(self.adapters)} target={config.SCALP_TARGET_TRADES}")
+        # STANDARDISATION GUARD: assert the core rules (one entry, one exit model, sim-free
+        # learning) still hold. Non-fatal in live so it never blocks trading, but logs LOUD
+        # so any drift/regression is caught immediately. See src/core_rules.py.
+        try:
+            from src.core_rules import assert_core_rules
+            assert_core_rules()
+            logger.info("[CORE-RULES] standardisation guard passed (one entry, one exit, sim-free learning).")
+        except AssertionError as _cr:
+            logger.error(f"[CORE-RULES] STANDARDISATION VIOLATION — {_cr}")
+        except Exception as _cr:
+            logger.debug(f"[CORE-RULES] guard skipped: {_cr}")
         if not config.LEARNING_ADAPTATION_ENABLED:
             logger.warning(
                 "LEARNING ADAPTATION FROZEN (LEARNING_ADAPTATION_ENABLED=false): the bot "
@@ -1820,76 +1831,6 @@ class ScalpEngine:
                                        f"keeping trade tracked, will retry next cycle")
                 continue
 
-            # ── HYBRID_LLM: throttled LLM review (what makes this arm distinct) ──
-            if self.trade_manager.llm_review_due(st):
-                self._llm_trade_review(st, pos, adapter, price, spread_pts)
-
-    def _llm_trade_review(self, st, pos, adapter, price, spread_pts):
-        """
-        Periodic LLM review for HYBRID_LLM-managed trades. The LLM sees the trade
-        context and returns HOLD / TIGHTEN / EXIT. This runs at most every few
-        minutes (throttled) so it never slows the fast protective path.
-
-        Degrades honestly: if no LLM is available, it logs that HYBRID_LLM is
-        running rules-only (it does NOT silently pretend to be a different arm).
-        """
-        try:
-            from src.core.llm import get_llm
-        except Exception:
-            logger.info(f"[HYBRID_LLM] #{st.ticket}: LLM unavailable — rules-only review")
-            return
-
-        if st.action == "buy":
-            profit_pts = (price - st.entry) / (adapter.spec.point or 1)
-        else:
-            profit_pts = (st.entry - price) / (adapter.spec.point or 1)
-
-        prompt = (
-            "You are a scalp trade-management reviewer. Given the open trade, reply "
-            "with EXACTLY one word: HOLD, TIGHTEN, or EXIT.\n"
-            f"Symbol: {st.symbol}\nSide: {st.action}\nEntry: {st.entry}\n"
-            f"Current price: {price}\nProfit (points): {profit_pts:.0f}\n"
-            f"Spread (points): {spread_pts:.0f}\nATR (points): {st.atr_points:.0f}\n"
-            f"Already at break-even: {st.moved_to_be}\n"
-            "Rules: EXIT only if the move looks exhausted/reversing against us. "
-            "TIGHTEN if strongly in profit and worth locking in. Otherwise HOLD."
-        )
-        try:
-            llm = get_llm(temperature=0.2)
-            resp = llm.invoke(prompt)
-            from src.core.llm import extract_text
-            text = extract_text(resp).upper()
-        except Exception as e:
-            logger.info(f"[HYBRID_LLM] #{st.ticket}: LLM review failed ({e}) — rules-only")
-            return
-
-        decision = "HOLD"
-        for k in ("EXIT", "TIGHTEN", "HOLD"):
-            if k in text:
-                decision = k
-                break
-        st.actions.append({"t": time.time(), "action": f"llm_{decision.lower()}", "price": price})
-        logger.info(f"[HYBRID_LLM] #{st.ticket}: LLM review -> {decision} (profit {profit_pts:.0f}pts)")
-
-        if decision == "EXIT" and profit_pts > spread_pts:
-            # only act on EXIT when not crystallising a spread-sized loss
-            res = adapter.close(st.ticket)
-            if res.ok and not res.simulated:
-                logger.info(f"[HYBRID_LLM] #{st.ticket}: LLM EXIT ({res.reason})")
-                self.managed.pop(st.ticket, None)
-            elif res.simulated or adapter.mode in ("OBSERVE", "PAPER"):
-                logger.warning(f"[HYBRID_LLM] #{st.ticket}: LLM EXIT wanted but mode="
-                               f"{adapter.mode} — SIMULATED, no real order")
-            else:
-                logger.warning(f"[HYBRID_LLM] #{st.ticket}: LLM EXIT close FAILED ({res.reason})")
-        elif decision == "TIGHTEN" and profit_pts > (spread_pts + 20):
-            tighten = max((st.atr_points or 60) * 0.3, spread_pts + 10) * adapter.spec.point
-            new_sl = (price - tighten) if st.action == "buy" else (price + tighten)
-            if self.trade_manager._sl_improves(st, new_sl):
-                st.sl = new_sl
-                adapter.modify_sl(st.ticket, round(new_sl, 6))
-                logger.info(f"[HYBRID_LLM] #{st.ticket}: LLM TIGHTEN -> SL {new_sl:.5f}")
-
     def _set_trade_variant(self, db_trade_id: int, variant: str):
         import sqlite3
         conn = sqlite3.connect(self.experience_db.db_path)
@@ -2581,17 +2522,13 @@ class ScalpEngine:
         sl = round(sl, spec.digits)
         tp = round(tp, spec.digits)
 
-        # which strategies agreed (for learning attribution)
-        # ATTRIBUTION: the entry IS OsMA_Confluence (the sole signal). `also_agreed`
-        # is only informational context (which other indicators happened to align);
-        # it must NOT masquerade as the entry strategy in the learning data.
+        # ATTRIBUTION: the entry IS OsMA_Confluence (the sole signal). The retired
+        # ensemble strategies have been removed, so there is no informational
+        # `also_agreed` context to compute — the attribution is simply the entry.
         entry_strategy = (signal.metadata or {}).get("strategy", "OsMA_Confluence") \
             if hasattr(signal, "metadata") else "OsMA_Confluence"
-        also_agreed = [n for n, s in self.registry.run_all_strategies(indicators)
-                       if s.action == signal.action]
         combo = [entry_strategy]
-        combo_str = entry_strategy + (" (+" + ",".join(a for a in also_agreed
-                     if a != entry_strategy) + ")" if also_agreed else "")
+        combo_str = entry_strategy
 
         comment = f"scalp-{signal.action[:1]}-{base[:6]}"
         # Broker-side SL is mandatory — never place a naked position (esp. gold).

@@ -450,7 +450,7 @@ class ContinualResearcher:
             if live["expectancy"] < 0 and opt and opt.get("median_bt_pf", 0) >= 1.3:
                 flags.append(
                     f"live expectancy {live['expectancy']} NEGATIVE vs optimiser median PF {opt['median_bt_pf']} "
-                    f"— likely EXIT capture (proven entry, leaking exits); test GS13_MFE / exit tuning")
+                    f"— likely EXIT capture (proven entry, leaking exits); test GS_PROVEN exit tuning")
         # current floors below the optimiser robust cluster (too loose) 
         if cur and opt and opt.get("osma_min_long_range"):
             lo, hi = opt["osma_min_long_range"]

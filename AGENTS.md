@@ -28,6 +28,21 @@ SHARKEY, server VTMarkets-Demo, GBP). It combines:
 Goal: turn this into a **standalone application that runs OUTSIDE VS Code**. Keep
 all runtime code editor-agnostic and offline-capable (no Kilo/editor deps at runtime).
 
+## CORE RULES (standardised — enforced at startup by `src/core_rules.py`)
+
+These are the fixed, evidence-derived rules the system MUST follow. `assert_core_rules()`
+runs at engine startup and logs `[CORE-RULES]` loud on any drift. Portable (pure Python,
+VPS-ready — no editor/Kilo dependency). Change `src/core_rules.py` first if a rule changes.
+
+- **R1 ONE ENTRY** — sole signal is `OsMA_Confluence`. No ensemble/voting; MACD/CCI/BB/RSI are removed.
+- **R2 ONE EXIT** — every symbol uses `GS_PROVEN`: wide data-derived broker SL + BE-lock + trailing stop, and the broker **TP is removed once trailing arms**. No per-symbol exit A/B variants.
+- **R3 PER-SYMBOL SL AT ONBOARDING** — SL/TP/BE/trail derived from the symbol's OsMA-cycle excursion (`FloorDiscovery.sample_osma_cycles`, ~20 cycles), then live-tuned. Never borrow magnitudes across symbols.
+- **R4 CLEAN-DATA LEARNING** — learning reads exclude all simulated sources (`experience_db.learning_window_clause`).
+- **R5 STRUCTURE SYMBOL-AGNOSTIC, MAGNITUDES SYMBOL-SPECIFIC.**
+- **R6 BROKER-SIDE SL ALWAYS** — wide safety-TP is a connectivity failsafe only.
+- **R7 BTCUSD** may use the CryptoRTI whale websocket to augment ENTRY confidence only (not the exit).
+- **R8 KNOWN-GOOD PRESERVED** — winning baseline in RAG + `data/winning_baseline.json`; checkpointer reverts to best realised-expectancy config.
+
 ## What we are doing (current focus)
 
 1. **CryptoRTI whale-wave prediction — now SELF-SUSTAINING.** Large whale orders

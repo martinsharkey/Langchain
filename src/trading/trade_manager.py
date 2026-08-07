@@ -1,23 +1,20 @@
 """
-Trade Manager — manages OPEN positions, and does so as a LEARNING EXPERIMENT.
+Trade Manager — manages OPEN positions using the ONE proven exit model.
 
-Per your directive: don't hardcode the "right" way to manage a trade — let the
-bot TRIAL competing management styles per symbol and let the learning loop pick
-winners from real outcomes.
+STANDARDISED (legacy removal): after the audit, the bot uses a SINGLE management
+variant — GS_PROVEN — the proven GoldShark exit:
 
-Each open trade is assigned a MANAGEMENT VARIANT (an A/B/C experiment arm):
+  GS_PROVEN — a data-derived WIDE broker SL set on entry (keeps ~96% of winners),
+              then at +be_trigger pts move SL to BE + a small locked profit, then
+              TRAIL behind best_price and REMOVE the broker TP once trailing arms so
+              a runner is never capped. SL only ever moves favourably (a ratchet).
 
-  BE_PLUS_TRAIL  — wait for a profit buffer, then move SL to break-even+ (in
-                   profit so spread noise can't stop it flat), then trail to a
-                   "less destructive" distance. (Your gold concern, done right.)
-  TRAIL_ONLY     — never move to BE; trail at an ATR distance once in profit.
-  SCALP_FIXED    — take profit quickly at the fixed scalp target, hard SL, no BE.
-  HYBRID_LLM     — deterministic fast reactions, but an LLM review can widen/tighten
-                   or exit based on context (slower; trialled against the rest).
+The old A/B management arms (BE_PLUS_TRAIL / TRAIL_ONLY / SCALP_FIXED / HYBRID_LLM /
+GS13_MFE) and the generic retention-ratchet / signal-driven / giveback guards have
+been REMOVED — they never ran once GS_PROVEN became the only assigned variant.
 
 Every management action and the final outcome is tagged with the variant + symbol,
-written to the experience DB, so we can measure which variant wins per symbol and
-shift future assignment toward it. THIS is the visible learning-behaviour change.
+written to the experience DB.
 
 Broker-side SL is ALWAYS set on entry (handled by the engine via BrokerAdapter);
 this manager only MODIFIES the existing broker SL — it never leaves a trade naked.
@@ -26,7 +23,6 @@ this manager only MODIFIES the existing broker SL — it never leaves a trade na
 from __future__ import annotations
 
 import time
-import random
 from dataclasses import dataclass, field
 from typing import Optional
 
@@ -34,8 +30,8 @@ from src.utils.logger import get_logger
 
 logger = get_logger("trade_manager")
 
-# Experiment arms
-VARIANTS = ("BE_PLUS_TRAIL", "TRAIL_ONLY", "SCALP_FIXED", "HYBRID_LLM", "GS13_MFE", "GS_PROVEN")
+# The ONE proven management model (legacy A/B arms removed).
+VARIANTS = ("GS_PROVEN",)
 
 
 @dataclass
@@ -56,7 +52,6 @@ class ManagedState:
     trail_active: bool = False
     best_price: float = 0.0    # most favourable price seen (for trailing)
     actions: list = field(default_factory=list)
-    last_llm_review: float = 0.0   # epoch of last HYBRID_LLM review (throttle)
     peak_profit_points: float = 0.0  # best unrealized profit (points) ever seen (MFE)
     worst_profit_points: float = 0.0 # worst unrealized profit (points) ever seen (MAE, <=0)
     trend_aligned: bool = False      # entry aligned with higher-TF trend (ride mode)
@@ -352,95 +347,6 @@ class TradeManager:
         st.peak_profit_points = max(st.peak_profit_points, peak_profit_now)
         st.worst_profit_points = min(st.worst_profit_points, profit_points)  # MAE tracking
 
-        # ── PROFIT-RETENTION RATCHET (retain what we've earned) ──────────────
-        # The observed leak: gold trades reached large peaks (e.g. 700+ pts / £5)
-        # then round-tripped almost entirely because the giveback guard below only
-        # arms at 1.5*ATR and tolerates 60-90% giveback. This ratchet fires FIRST
-        # and is absolute: once a trade has banked a meaningful peak, it must not
-        # surrender more than `retain_floor_frac` of that peak. It only ever tightens
-        # (a ratchet), it never loosens, so winners still run — they just can't give
-        # the whole move back. Tunable per symbol via config; ATR-scaled arm so it
-        # is symbol-agnostic (gold's big ATR and FX's small ATR both work). It also
-        # requires a real absolute buffer (>= 1*ATR of peak) so tiny winners that
-        # never built a meaningful cushion are left for the trail/giveback, not
-        # scratched by the ratchet.
-        # Arm as soon as there is a MEANINGFUL profit buffer — NOT a full ATR. Live
-        # data showed a 1xATR arm never engaged on most BTC trades (median MFE 14347
-        # < 1xATR 14995), leaving big winners unprotected. Arm at a fraction of ATR
-        # (or a spread-based floor), so the retain-floor can protect any real peak.
-        # The 50% retain floor already prevents scratching tiny winners.
-        ratchet_arm = max(self.retain_arm_points(st), spread_points + 20)
-        if st.variant not in ("GS13_MFE","GS_PROVEN") and st.peak_profit_points >= ratchet_arm:
-            retain_frac = self.retain_floor_frac(st)          # e.g. 0.5 -> keep >=50% of peak
-            floor_points = st.peak_profit_points * retain_frac
-            # If price has ALREADY fallen to/through the floor, a stop there would sit
-            # on the wrong side of market (retcode 10016). CLOSE now — that captures
-            # the floor immediately and is what a broker stop would have done anyway.
-            if profit_points <= floor_points:
-                self._log(st, "retention_ratchet_exit", price)
-                return {"close": (f"profit retention: banked {st.peak_profit_points:.0f}pts peak, "
-                                  f"protecting {retain_frac:.0%} floor ({floor_points:.0f}pts), "
-                                  f"now {profit_points:.0f}pts")}
-            # Otherwise price is still comfortably above the floor: place a REAL broker
-            # stop at the floor (valid, below market) so it protects tick-by-tick even
-            # between fast-manage ticks. Ratchets: only ever tightens toward profit.
-            floor_price = (st.entry + floor_points * point) if st.action == "buy" \
-                else (st.entry - floor_points * point)
-            if self._sl_improves(st, floor_price):
-                st.sl = floor_price
-                st.moved_to_be = True
-                self._log(st, "retention_ratchet_sl", floor_price)
-                return {"modify_sl": round(floor_price, 6)}
-
-        # ── SIGNAL-DRIVEN EXIT / HOLD (gated: only when a proven signature exists) ──
-        # Our confluence indicators are strong for ENTRY; the reversal-signature
-        # research measures whether they also mark the EXIT (indicators turning back
-        # toward neutral at the peak). When the engine passes a proven signature AND
-        # the trade is in real profit, we use the LIVE indicators two ways:
-        #   * EXIT earlier than the blind giveback if the tell is firing (momentum
-        #     rolling over) and we have already captured a decent chunk of the peak.
-        #   * HOLD (loosen giveback) if the indicators still strongly support our
-        #     direction — this is how we ride runners instead of scratching a dip.
-        # It never overrides the retention ratchet (the floor) above.
-        st.signal_hold = False
-        if reversal_signature and indicators and profit_points > 0 \
-                and st.variant not in ("GS13_MFE","GS_PROVEN") \
-                and st.peak_profit_points >= max(self.giveback_arm_points(st) * 0.6, spread_points + 20):
-            tell = self._reversal_tell(st, indicators, reversal_signature)
-            if tell == "rolling_over" and profit_points >= 0.5 * st.peak_profit_points:
-                self._log(st, "signal_reversal_exit", price)
-                return {"close": (f"reversal signal: momentum turning at "
-                                  f"{profit_points:.0f}/{st.peak_profit_points:.0f}pts peak")}
-            elif tell == "still_supported":
-                st.signal_hold = True
-
-        arm_peak = max(self.giveback_arm_points(st), spread_points + 15)
-        if st.variant not in ("GS13_MFE","GS_PROVEN") and st.peak_profit_points >= arm_peak and profit_points > 0:
-            giveback_frac = self.giveback_fraction(st)
-            # signal-supported hold: the reversal tell says the move still has legs
-            if getattr(st, "signal_hold", False):
-                giveback_frac = min(giveback_frac + 0.2, 0.9)
-            # ride mode: if aligned with the higher-TF trend, tolerate more giveback
-            if st.trend_aligned:
-                giveback_frac = min(giveback_frac + 0.2, 0.9)
-            # TP-awareness: if the trade is still on its way to a much larger TP
-            # and hasn't yet reached most of that target, don't scratch it on a
-            # normal pullback — let the pre-set RR play out. Only the giveback
-            # guard (not the broker TP) was cutting winners early.
-            if st.tp and point:
-                tp_points = abs(st.tp - st.entry) / point
-                if tp_points > 0 and st.peak_profit_points < 0.6 * tp_points:
-                    # peak is still well short of TP — require a BIG giveback to cut
-                    giveback_frac = max(giveback_frac, 0.8)
-            given_back = (st.peak_profit_points - profit_points) / st.peak_profit_points
-            if given_back >= giveback_frac:
-                self._log(st, "giveback_exit", price)
-                return {"close": (f"winner rolling over: gave back {given_back:.0%} of peak "
-                                  f"{st.peak_profit_points:.0f}pts")}
-
-        if v == "SCALP_FIXED":
-            return None  # rely on broker TP/SL only
-
         if v == "GS_PROVEN":
             # PROVEN GoldShark gold exit (data-derived + pass5469 .set). Broker SL is set
             # WIDE at entry (hard_sl_points, ~400pts — keeps ~96% of winners). This arm:
@@ -469,75 +375,6 @@ class TradeManager:
                     st.sl = new_sl
                     self._log(st, "gs_proven_trail", new_sl)
                     return {"modify_sl": round(new_sl, 6), "remove_tp": True, "_tag": "gs_proven_trail"}
-            return None
-
-        if v == "GS13_MFE":
-            # GoldShark13 v13.13 MFE-DEFENSE (SL-only adaptation; no partial-close).
-            # NOTE: GS13_MFE is intentionally EXEMPT from the generic retention-ratchet
-            # and giveback guards above (gated by st.variant) so this arm is a CLEAN A/B
-            # test of the EA's own MFE-defense (BE+ then class-based trail), not a blend.
-            # Fixes the ~50% MFE-capture leak: keep the hard SL (broker) as the floor,
-            # then once the favourable excursion (peak_profit_points = MFE) reaches the
-            # activation threshold, move to BE+ and trail by MFE CLASS — scalps trail
-            # tight, runners trail wide so big moves keep running. Constants mirror the
-            # EA (#defines): activation 20pts, runner threshold 50pts, trail 15/30pts.
-            # Points here are the symbol's price points (POINT); use tunable overrides
-            # from personality if present so per-symbol tuning still applies.
-            p = self._personality(st)
-            act = float(p.get("mfe_activation_pts", 20.0))
-            runner_thr = float(p.get("mfe_runner_threshold", 50.0))
-            scalp_trail = float(p.get("mfe_scalp_trail_pts", 15.0))
-            runner_trail = float(p.get("mfe_runner_trail_pts", 30.0))
-            mfe = st.peak_profit_points  # favourable excursion in points (tracked)
-            # Step 1: at MFE >= activation, secure risk-free at BE+ (once).
-            if not st.moved_to_be and mfe >= act:
-                be_plus = st.entry + (spread_points + max(5, act * 0.5)) * point * (1 if st.action == "buy" else -1)
-                st.moved_to_be = True
-                st.trail_active = True
-                self._log(st, "gs13_mfe_be", be_plus)
-                return {"modify_sl": round(be_plus, 6)}
-            # Step 2: once active, trail by MFE class (scalp vs runner), SL-only forward.
-            if st.trail_active and mfe > 0:
-                trail_dist = (scalp_trail if mfe < runner_thr else runner_trail) * point
-                new_sl = (st.best_price - trail_dist) if st.action == "buy" else (st.best_price + trail_dist)
-                if self._sl_improves(st, new_sl):
-                    st.sl = new_sl
-                    self._log(st, "gs13_mfe_trail", new_sl)
-                    return {"modify_sl": round(new_sl, 6)}
-            return None
-
-        if v in ("BE_PLUS_TRAIL", "HYBRID_LLM"):
-            # WICK-AWARE BE + RESPONSIVE TRAIL (user design): raw ATR trailing gave too
-            # much back. Instead: (1) move to BE+ once profit clears the symbol's WICK
-            # noise (so we don't get wicked out prematurely), then (2) trail at a
-            # distance sized to the wick (breathing room) but TIGHTER + more responsive
-            # than raw ATR, following best_price so it retains more of the move.
-            wick = self._wick_points(st)                      # symbol's typical adverse wick (pts)
-            be_trigger = self._be_trigger_points(st, spread_points, wick)
-            if not st.moved_to_be and profit_points >= be_trigger:
-                be_plus = st.entry + (spread_points + max(5, wick * 0.25)) * point * (1 if st.action == "buy" else -1)
-                st.moved_to_be = True
-                st.trail_active = True
-                self._log(st, "move_to_be_plus", be_plus)
-                return {"modify_sl": round(be_plus, 6)}
-            if st.trail_active:
-                trail_dist = self._trail_points(st, spread_points, wick) * point
-                new_sl = (st.best_price - trail_dist) if st.action == "buy" else (st.best_price + trail_dist)
-                if self._sl_improves(st, new_sl):
-                    st.sl = new_sl
-                    self._log(st, "trail_sl", new_sl)
-                    return {"modify_sl": round(new_sl, 6)}
-            return None
-
-        if v == "TRAIL_ONLY":
-            wick = self._wick_points(st)
-            if profit_points > (spread_points + max(10, wick * 0.5)):
-                trail_dist = self._trail_points(st, spread_points, wick) * point
-                new_sl = (st.best_price - trail_dist) if st.action == "buy" else (st.best_price + trail_dist)
-                if self._sl_improves(st, new_sl):
-                    st.sl = new_sl
-                    self._log(st, "trail_sl", new_sl)
-                    return {"modify_sl": round(new_sl, 6)}
             return None
 
         return None
@@ -645,16 +482,6 @@ class TradeManager:
             self._log(st, "weak_poc_target_exit", price)
             return {"close": f"weak short: reached POC target {st.poc_target:.5f}"}
         return None
-
-    def llm_review_due(self, st: ManagedState, interval_sec: int = 180) -> bool:
-        """True if a HYBRID_LLM position is due for its throttled LLM review."""
-        if st.variant != "HYBRID_LLM":
-            return False
-        now = time.time()
-        if now - st.last_llm_review >= interval_sec:
-            st.last_llm_review = now
-            return True
-        return False
 
     def _sl_improves(self, st: ManagedState, new_sl: float) -> bool:
         """Only ever move SL in the protective direction (never widen risk)."""
