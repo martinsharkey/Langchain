@@ -1,6 +1,12 @@
 """
 Per-symbol strength-floor DISCOVERY (independent backtest).
 
+NOTE (standardisation R9): onboarding is AUTOMATIC — the engine auto-runs the onboarding
+workflow (FloorDiscovery.onboard: backtest + forward-test + OsMA-cycle SL sampling,
+Dukascopy-first) the first time any new symbol is seen and persists its baseline. This
+script is now only an OPTIONAL manual diagnostic / override for inspecting a symbol's
+floors offline; it is NOT a required step to add a symbol.
+
 The indicator combination is symbol-agnostic but strength MAGNITUDES are not: gold's
 pass5469 floors fail on BTC/GER40. This finds each symbol's OWN floors by incrementally
 sweeping the magnitudes on that symbol's own bar+tick data, scoring a BALANCE of:

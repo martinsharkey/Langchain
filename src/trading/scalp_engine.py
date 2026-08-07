@@ -490,50 +490,78 @@ class ScalpEngine:
         return True
 
     def _onboard_new_symbols(self):
-        """For each traded symbol WITHOUT a proven baseline or tuned entry, auto-run a
-        backtest+forward-test on its own history to discover non-zero strength floors,
-        then persist them as the symbol's baseline. Ensures no symbol trades at zero
-        floors and skips lengthy live tuning. Runs once per symbol (idempotent)."""
-        if self.param_optimizer is None:
-            return
-        try:
-            from src.learning.floor_discovery import FloorDiscovery
-            from src.learning.param_optimizer import SYMBOL_BASELINES
-            from src.mt5.data import get_rates, get_ticks
-        except Exception as e:
-            logger.debug(f"onboarding deps unavailable: {e}")
-            return
-        fd = FloorDiscovery(get_rates, get_ticks)
-        for base, adapter in self.adapters.items():
-            resolved = adapter.resolved_symbol
-            key = base.upper()
-            # already has a proven baseline (in code) or a persisted tuned entry -> skip
-            has_baseline = any(key.startswith(p) for p in SYMBOL_BASELINES)
-            has_tuned = (key in self.param_optimizer.tuned or
-                         resolved.upper() in self.param_optimizer.tuned)
-            if has_baseline or has_tuned:
-                continue
-            logger.warning(f"[ONBOARD] {base}: no baseline — running backtest+forward-test to "
-                           f"discover strength floors before trading...")
+        """Auto-onboard EVERY traded symbol that lacks a proven baseline/tuned entry:
+        backtest + forward-test on its own history + OsMA-cycle SL sampling, then persist
+        the baseline. Fully automatic (no manual discover_floors step). Idempotent."""
+        for base, adapter in list(self.adapters.items()):
             try:
-                recipe = fd.onboard(resolved)
+                self._ensure_onboarded(base, adapter)
             except Exception as e:
-                logger.info(f"[ONBOARD] {base}: discovery failed ({e}); trades structure-only")
-                continue
-            if recipe:
-                from src.learning.param_optimizer import DEFAULTS
-                params = dict(DEFAULTS); params.update({k: v for k, v in recipe.items()
-                                                        if not k.startswith("_")})
-                self.param_optimizer.tuned[resolved.upper()] = {
-                    "params": params, "score": None,
-                    "source": f"onboarding_discovery (fwd green {recipe['_forward']['green_pct']:.0f}% "
-                              f"PF {recipe['_forward']['pf']:.2f})"}
-                try:
-                    self.param_optimizer._persist()
-                except Exception:
-                    pass
-                logger.warning(f"[ONBOARD] {base}: seeded discovered floors "
-                               f"osma>={recipe['osma_min_long']} dom>={recipe['bulls_min_long']}")
+                logger.debug(f"onboard skip {base}: {e}")
+
+    def _ensure_onboarded(self, base, adapter) -> bool:
+        """Onboard ONE symbol if it has no baseline yet. Prefers DUKASCOPY history (deep,
+        broker-independent — a brand-new symbol always has enough) and falls back to MT5.
+        Runs the FloorDiscovery workflow (floors + forward test + per-symbol OsMA-cycle SL)
+        and persists it as the symbol's baseline. Returns True if newly onboarded."""
+        if self.param_optimizer is None:
+            return False
+        from src.learning.param_optimizer import SYMBOL_BASELINES, DEFAULTS
+        resolved = adapter.resolved_symbol
+        key = base.upper()
+        has_baseline = any(key.startswith(p) for p in SYMBOL_BASELINES)
+        has_tuned = (key in self.param_optimizer.tuned or resolved.upper() in self.param_optimizer.tuned)
+        if has_baseline or has_tuned or key in getattr(self, "_onboard_attempted", set()):
+            return False
+        if not hasattr(self, "_onboard_attempted"):
+            self._onboard_attempted = set()
+        self._onboard_attempted.add(key)
+
+        from src.learning.floor_discovery import FloorDiscovery
+        # DUKASCOPY-FIRST data source (deep history, works for any new symbol); MT5 fallback.
+        try:
+            from src.data_sources.dukascopy import DukascopySource
+            _dk = DukascopySource(use_cache=True)
+            get_rates, get_ticks, src_name = _dk.get_rates, _dk.get_ticks, "dukascopy"
+        except Exception:
+            from src.mt5.data import get_rates, get_ticks
+            src_name = "mt5"
+        logger.warning(f"[ONBOARD] {base}: no baseline — auto backtest+forward-test + OsMA-cycle "
+                       f"SL sampling on {src_name} history before trading...")
+        fd = FloorDiscovery(get_rates, get_ticks)
+        recipe = None
+        _pt = getattr(getattr(adapter, "spec", None), "point", 0.01) or 0.01
+        try:
+            recipe = fd.onboard(base if src_name == "dukascopy" else resolved, point=_pt)
+        except Exception as e:
+            logger.info(f"[ONBOARD] {base}: {src_name} discovery failed ({e})")
+        # fall back to MT5 if Dukascopy produced nothing
+        if not recipe and src_name == "dukascopy":
+            try:
+                from src.mt5.data import get_rates as _gr, get_ticks as _gt
+                recipe = FloorDiscovery(_gr, _gt).onboard(resolved, point=_pt)
+                src_name = "mt5(fallback)"
+            except Exception as e:
+                logger.info(f"[ONBOARD] {base}: mt5 fallback failed ({e})")
+        if not recipe:
+            logger.info(f"[ONBOARD] {base}: discovery produced no recipe; trades structure-only")
+            return False
+        params = dict(DEFAULTS)
+        params.update({k: v for k, v in recipe.items() if not k.startswith("_")})
+        self.param_optimizer.tuned[resolved.upper()] = {
+            "params": params, "score": None,
+            "source": f"onboarding_discovery[{src_name}] (fwd green {recipe['_forward']['green_pct']:.0f}% "
+                      f"PF {recipe['_forward']['pf']:.2f})"}
+        try:
+            self.param_optimizer._persist()
+        except Exception:
+            pass
+        cyc = recipe.get("_osma_cycle_sample")
+        logger.warning(f"[ONBOARD] {base}: baseline SET — floors osma>={recipe['osma_min_long']} "
+                       f"dom>={recipe['bulls_min_long']}"
+                       + (f", SL={recipe.get('hard_sl_points')}pts from {cyc['n_cycles']} OsMA cycles"
+                          if cyc else "") + " (auto, no manual step)")
+        return True
 
     def _load_seeded_signatures(self):
         """Populate _reversal_signatures at startup from whatever the DB already holds
@@ -2254,6 +2282,12 @@ class ScalpEngine:
         # dashboard control: new entries paused / scalping disabled (#19)
         if getattr(self, "_paused", False) or not getattr(self, "_scalping_enabled", True):
             return
+        # AUTO-ONBOARD on first sight: a symbol added while running (e.g. re-enabled) gets
+        # its baseline set by the onboarding workflow before it trades — no manual step.
+        try:
+            self._ensure_onboarded(base, adapter)
+        except Exception as e:
+            logger.debug(f"on-demand onboard skip {base}: {e}")
         # don't open when the market is closed for this symbol
         if not self.sessions.is_open(base):
             return

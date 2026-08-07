@@ -105,12 +105,15 @@ class FloorDiscovery:
                 "green_pct": (green / trades * 100) if trades else 0, "pf": pf,
                 "capture": (statistics.median(caps) * 100) if caps else 0}
 
-    def sample_osma_cycles(self, bars, osma, n_cycles: int = 20) -> Optional[dict]:
+    def sample_osma_cycles(self, bars, osma, n_cycles: int = 20, point: float = 0.01) -> Optional[dict]:
         """Measure, per OsMA zero-cross CYCLE, how far price travels (in POINTS) in the
         cross direction before the OsMA reverses (crosses back through zero). This is the
-        symbol's NATIVE movement scale — BTCUSD will be huge, gold small. From a sample of
-        the most recent `n_cycles` we derive a per-symbol SL that is wide enough to survive
-        the normal adverse dip yet tight enough to cut a true reversal.
+        symbol's NATIVE movement scale — BTCUSD will be huge, gold small, FX tiny. From a
+        sample of the most recent `n_cycles` we derive a per-symbol SL that is wide enough
+        to survive the normal adverse dip yet tight enough to cut a true reversal.
+
+        `point` is the symbol's price increment (0.01 gold/index, 0.1 BTC, 0.00001 FX) so
+        the point counts are correct for ANY symbol scale — never hardcode a scale here.
 
         Returns points-based stats + the recommended hard_sl_points / safety_tp_points.
         SL rule: the median adverse dip within winning cycles is ~small; we set SL at a
@@ -118,7 +121,7 @@ class FloorDiscovery:
         survive. Since bars carry no per-point path, we approximate adverse dip from the
         cycle's low-vs-entry (long) / high-vs-entry (short) using bar extremes.
         """
-        pt = 0.01
+        pt = point if point and point > 0 else 0.01
         close = [b["close"] for b in bars]; high = [b["high"] for b in bars]; low = [b["low"] for b in bars]
         cycles = []  # each: (favourable_pts, adverse_pts) measured entry->reversal
         i = 1
@@ -171,7 +174,7 @@ class FloorDiscovery:
             "safety_tp_points": round(safety_tp, 1),
         }
 
-    def onboard(self, symbol: str) -> Optional[dict]:
+    def onboard(self, symbol: str, point: float = 0.01) -> Optional[dict]:
         """Backtest + forward-test the symbol's own history; return the best floor recipe.
         Split: first 70% = train (search), last 30% = forward-test (validate). Picks the
         floor combo with the best TRAIN score that also holds up in the FORWARD window and
@@ -208,7 +211,7 @@ class FloorDiscovery:
         # PER-SYMBOL SL from OsMA-cycle excursion sampling: how many points a cross runs
         # before it reverses (native scale — BTC huge, gold small). This sets the GS_PROVEN
         # broker SL / safety-TP for THIS symbol, then live tuning refines it.
-        cyc = self.sample_osma_cycles(rates, osma, n_cycles=20)
+        cyc = self.sample_osma_cycles(rates, osma, n_cycles=20, point=point)
         logger.warning(f"[ONBOARD] {symbol}: floors osma>={fo} dom>={fd} | "
                        f"TRAIN {tr['per_day']:.1f}/day green {tr['green_pct']:.0f}% PF {tr['pf']:.2f} | "
                        f"FWD green {ft['green_pct']:.0f}% PF {ft['pf']:.2f}"

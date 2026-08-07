@@ -33,6 +33,10 @@ CORE_RULES = [
     "R8  KNOWN-GOOD IS PRESERVED: the winning baseline config is stored in the learning "
     "RAG + data/winning_baseline.json and the config_checkpointer reverts each symbol to "
     "its best realised-expectancy config, so a bad change is always recoverable.",
+    "R9  AUTOMATIC ONBOARDING: adding a new symbol has NO manual step. On first sight the "
+    "engine auto-runs the onboarding workflow (backtest + forward-test + OsMA-cycle SL "
+    "sampling, Dukascopy-first with MT5 fallback) and persists the per-symbol baseline "
+    "before it trades. Never hand-tune a new symbol's magnitudes.",
 ]
 
 # ── canonical constants other modules should import (not re-hardcode) ─────────
