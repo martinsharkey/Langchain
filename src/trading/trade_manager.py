@@ -261,26 +261,13 @@ class TradeManager:
 
     # ── variant assignment (learning biases this over time) ──
     def assign_variant(self, symbol: str) -> str:
-        # GOLD is PINNED to the proven GoldShark exit (GS_PROVEN): data-derived wide SL +
-        # BE-lock + trailing with the TP removed once trailing arms. Gold has the proven
-        # model (pass5469 + 218 live trades); don't dilute it with the exploratory A/B.
-        # BTC/GER40 keep the weighted A/B until they earn their own proven model.
-        base = (symbol or "").upper().split("-")[0].split(".")[0]
-        if base == "XAUUSD":
-            return "GS_PROVEN"
-        weights = None
-        if self.get_variant_weights:
-            try:
-                weights = self.get_variant_weights(symbol)
-            except Exception:
-                weights = None
-        if weights:
-            # weighted random choice — exploit winners but keep exploring
-            arms = list(weights.keys())
-            w = [max(weights[a], 0.01) for a in arms]
-            return random.choices(arms, weights=w, k=1)[0]
-        # cold start: uniform exploration across all arms
-        return random.choice(VARIANTS)
+        # FIXED RULE (scalability): EVERY symbol uses the ONE proven GoldShark exit model
+        # (GS_PROVEN) — data-derived wide SL + BE-lock + trailing with the TP removed once
+        # trailing arms. No per-symbol split exit variants; one pattern scales to any symbol.
+        # The ONLY complementary exception is BTCUSD's CryptoRTI websocket (whale-wave), which
+        # AUGMENTS entries/confidence via a separate path — it does not change this exit model.
+        # (The other variants remain defined only for historical A/B analysis of past trades.)
+        return "GS_PROVEN"
 
     def register(self, pos, atr_points: float, trend_aligned: bool = False) -> ManagedState:
         variant = self.assign_variant(pos.base_symbol)
