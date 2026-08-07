@@ -284,6 +284,17 @@ class ScalpEngine:
                 except Exception:
                     pass
 
+            # SINGLE VALIDATION GATE: every parameter change must prove (backtest+forward)
+            # it beats the symbol's best-ever result, else it's rejected and the outcome is
+            # recorded to the RAG. Reuses the Dukascopy walk-forward backtest.
+            self.change_validator = None
+            if _duka_backtest is not None:
+                try:
+                    from src.learning.change_validator import ChangeValidator
+                    self.change_validator = ChangeValidator(_duka_backtest, self.knowledge_store)
+                except Exception as e:
+                    logger.debug(f"ChangeValidator unavailable: {e}")
+
             self.researcher = ContinualResearcher(
                 self.experience_db, mql5_knowledge=self.mql5_knowledge,
                 knowledge_store=self.knowledge_store, edge_discovery=self.edge_discovery,
@@ -495,6 +506,14 @@ class ScalpEngine:
             return False
         # Adopt any open positions (incl. manual trades) so the bot manages them.
         self._adopt_existing_positions()
+        # ROLLING CACHE: keep the last ~10 days of Dukascopy ticks warm per active symbol so
+        # every backtest/validation has >=2000 bars (no silent no-op on a thin cache).
+        try:
+            from src.learning.cache_maintainer import RollingCacheMaintainer
+            self._cache_maintainer = RollingCacheMaintainer(list(self.adapters.keys()), days=10)
+            self._cache_maintainer.start()
+        except Exception as e:
+            logger.debug(f"cache maintainer skip: {e}")
         # Close the loop for any trades left 'pending' from prior runs / manual closes.
         self._reconcile_pending_from_db()
         # Arm the reversal-signature exit from ANY data already in the DB (incl. the
@@ -2152,6 +2171,35 @@ class ScalpEngine:
             logger.debug(f"growth report skip: {e}")
             return getattr(self, "_growth_report", {"enabled": True})
 
+    def _gate_entry_strength(self, prior: dict, proposed: dict) -> dict:
+        """Only let a per-symbol entry-strength recipe change go live if it PROVES (via the
+        ChangeValidator backtest+forward) it beats the symbol's best-ever result. Relaxations
+        (lower dom_min/runway_min — i.e. loosening to keep trading) are exempt (safety). A
+        rejected TIGHTENING keeps the prior recipe. Every outcome is recorded to the RAG."""
+        if self.change_validator is None or self.param_optimizer is None:
+            return proposed
+        result = dict(proposed)
+        for sym, sv in (proposed or {}).items():
+            new_rec = (sv or {}).get("recipe") or {}
+            old_rec = (prior.get(sym) or {}).get("recipe") or {}
+            # detect a TIGHTENING (any floor raised vs prior); loosening is safety-exempt
+            tightened = any(float(new_rec.get(k, 0)) > float(old_rec.get(k, 0))
+                            for k in ("dom_min", "runway_min"))
+            if not tightened:
+                continue
+            try:
+                base = self.param_optimizer.current_params(sym)
+                cand = dict(base); cand.update(new_rec)
+                out = self.change_validator.validate(sym, cand, source="entry_strength")
+                if not out.get("passed"):
+                    # not proven better -> keep the prior recipe (try something different)
+                    result[sym] = prior.get(sym, {"recipe": old_rec})
+                    logger.warning(f"[VALIDATE] {sym}: entry-strength tightening REJECTED "
+                                   f"({out.get('reason')}) — kept prior floors")
+            except Exception as e:
+                logger.debug(f"entry-strength gate skip {sym}: {e}")
+        return result
+
     def _report_entry_frequency(self):
         """Surface the entry-vs-frequency balance: per symbol, how many entries fired
         vs the dominant BLOCKING gate. Lets us + the researcher see if the bot is
@@ -2412,8 +2460,14 @@ class ScalpEngine:
                 # strength levels that actually produce reliable entries.
                 if self.entry_strength_learner is not None:
                     try:
-                        self._entry_strength = self.entry_strength_learner.learn_all(
+                        proposed = self.entry_strength_learner.learn_all(
                             list(self.adapters.keys()))
+                        # GATE: any dom_min/runway_min change must PROVE (backtest+forward)
+                        # it beats the symbol's best-ever score before going live; else keep
+                        # the prior recipe. relax_for_starvation stays exempt (safety). Every
+                        # outcome is recorded to the RAG by the validator (no open loop).
+                        self._entry_strength = self._gate_entry_strength(
+                            getattr(self, "_entry_strength", {}) or {}, proposed)
                     except Exception as e:
                         logger.debug(f"entry-strength refresh skip: {e}")
 

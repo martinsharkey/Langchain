@@ -37,7 +37,7 @@ _CANDIDATES = [
 class EntryStrengthLearner:  # name kept for wiring compatibility
     def __init__(self, experience_db, min_sample: int = 40, green_atr: float = 0.3,
                  min_keep_frac: float = 0.15, max_gates: int = 3,
-                 min_trades_per_day: float = 4.0):
+                 min_trades_per_day: float = 4.0, relax_path: str = None):
         self.db = experience_db
         self.min_sample = min_sample
         self.green_atr = green_atr
@@ -56,9 +56,9 @@ class EntryStrengthLearner:  # name kept for wiring compatibility
         # already starved the bot.
         try:
             from src import config
-            self._relax_path = os.path.join(config.DATA_DIR, "entry_relax_caps.json")
+            self._relax_path = relax_path or os.path.join(config.DATA_DIR, "entry_relax_caps.json")
         except Exception:
-            self._relax_path = os.path.join("data", "entry_relax_caps.json")
+            self._relax_path = relax_path or os.path.join("data", "entry_relax_caps.json")
         self._relax_cap = self._load_relax()
 
     def _load_relax(self) -> dict:

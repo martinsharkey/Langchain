@@ -74,6 +74,11 @@ class Backtester:
         from src.learning.edge_weights import focused_rules
         rates = self._get_rates(symbol, timeframe=timeframe, count=bars)
         if not rates or len(rates) < 2000:
+            # DON'T fail silently: a thin cache means the change can't be validated, which
+            # must be visible (else tuning quietly no-ops and nothing is proven).
+            logger.warning(f"[BACKTEST] {symbol} {timeframe}: only {len(rates) if rates else 0} bars "
+                           f"(<2000) — cannot validate; warm the cache for a rolling window.")
+            return None
             return None
         series = compute_indicator_series(rates, params)  # params drive indicators
         rules = focused_rules(symbol) or []

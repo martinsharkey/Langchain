@@ -99,7 +99,8 @@ def test_learner_derives_recipe_that_lifts_entry_success():
         # fresh-accel entries go green; stale ones don't
         for _ in range(25): add(True, True)
         for _ in range(25): add(False, False)
-        learner = EntryStrengthLearner(db, min_sample=30, min_trades_per_day=1.0)
+        learner = EntryStrengthLearner(db, min_sample=30, min_trades_per_day=1.0,
+                                       relax_path=os.path.join(d, "relax.json"))
         r = learner.learn_symbol("XAUUSD")
         assert r is not None and r["improves"] is True, r
         assert r["gated_success"] > r["base_success"], r
