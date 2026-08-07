@@ -182,6 +182,16 @@ class ScalpEngine:
                 sync_project_knowledge(self.knowledge_store)
             except Exception as e:
                 logger.debug(f"knowledge sync skip: {e}")
+            # AUTO-INGEST the datastore at startup so every file already present becomes
+            # part of the researcher's knowledge immediately (then refreshed each daily cycle).
+            try:
+                from src.learning.auto_ingest import DatastoreIngestor
+                _ing = DatastoreIngestor(knowledge_store=self.knowledge_store,
+                                         experience_db=self.experience_db).scan_and_ingest()
+                if _ing.get("ingested"):
+                    logger.info(f"[AUTO-INGEST] startup absorbed {_ing['ingested']} datastore files")
+            except Exception as e:
+                logger.debug(f"startup auto-ingest skip: {e}")
         except Exception as e:
             logger.warning(f"KnowledgeStore unavailable (failures persist to disk only): {e}")
         try:

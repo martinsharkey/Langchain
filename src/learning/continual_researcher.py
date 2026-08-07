@@ -425,7 +425,8 @@ class ContinualResearcher:
             if ev["finding"] and self.ks is not None:
                 self.ks.remember(key=f"gold_evidence_{sym}", kind="finding",
                                  topic=f"evidence {sym}", source="continual_researcher",
-                                 text=(ev["finding"] + " VERDICT: " + (ev["verdict"] or "insufficient evidence")))
+                                 text=(ev["finding"] + " VERDICT: " + (ev["verdict"] or "insufficient evidence")),
+                                 accumulate=True)
         except Exception as e:
             logger.debug(f"gold_evidence finding skip {sym}: {e}")
 
@@ -451,12 +452,26 @@ class ContinualResearcher:
                 flags.append(
                     f"live expectancy {live['expectancy']} NEGATIVE vs optimiser median PF {opt['median_bt_pf']} "
                     f"— likely EXIT capture (proven entry, leaking exits); test GS_PROVEN exit tuning")
-        # current floors below the optimiser robust cluster (too loose) 
-        if cur and opt and opt.get("osma_min_long_range"):
-            lo, hi = opt["osma_min_long_range"]
-            cv = cur.get("osma_min_long")
-            if cv is not None and cv < lo:
-                flags.append(f"osma_min_long {cv} is BELOW optimiser robust range {lo}-{hi} (entries may be too loose)")
+        # current floors below the optimiser robust cluster (too loose) — check all three
+        if cur and opt:
+            for key, rng_key in (("osma_min_long", "osma_min_long_range"),
+                                 ("bulls_min_long", "bulls_min_long_range"),
+                                 ("atr_min", "atr_min_range")):
+                rng = opt.get(rng_key)
+                cv = cur.get(key)
+                if rng and cv is not None:
+                    lo, hi = rng
+                    if cv < lo:
+                        flags.append(f"{key} {cv} BELOW optimiser robust range {lo}-{hi} (too loose)")
+                    elif cv > hi:
+                        flags.append(f"{key} {cv} ABOVE optimiser robust range {lo}-{hi} (too strict)")
+        # MISSING config elements: params the GoldShark evidence uses that live config lacks
+        if cur and opt and opt.get("evidence_params"):
+            expected = {"osma_min_long", "bulls_min_long", "bears_min_long", "atr_min", "atr_max",
+                        "min_ema_slope", "osma_max_short", "hard_sl_points", "trail_points"}
+            missing = [k for k in expected if k in opt["evidence_params"] and cur.get(k) in (None, "")]
+            if missing:
+                flags.append(f"MISSING config elements vs GoldShark evidence: {', '.join(sorted(missing))}")
         return " | ".join(flags) if flags else "live settings consistent with evidence"
 
     def _optimiser_cluster(self, sym: str) -> Optional[dict]:
@@ -513,6 +528,21 @@ class ContinualResearcher:
             "osma_min_long_range": _rng("InpMinOsMALong") or _rng("InpLongOsMAMin"),
             "bulls_min_long_range": _rng("InpMinBullsLong") or _rng("InpLongBullsMin"),
             "atr_min_range": _rng("InpMinATR") or _rng("InpMinAtrValue"),
+            # map the GoldShark Inp* columns present -> our config keys, so the verdict can
+            # flag config elements the evidence uses but our live config is MISSING.
+            "evidence_params": {
+                k for k, cols in {
+                    "osma_min_long": ("InpMinOsMALong", "InpLongOsMAMin"),
+                    "bulls_min_long": ("InpMinBullsLong", "InpLongBullsMin"),
+                    "bears_min_long": ("InpMaxBearsLong", "InpMinBearsLong"),
+                    "atr_min": ("InpMinATR", "InpMinAtrValue"),
+                    "atr_max": ("InpMaxATR",),
+                    "min_ema_slope": ("InpMinEmaSlope",),
+                    "osma_max_short": ("InpMaxOsMAShort",),
+                    "hard_sl_points": ("InpHardStopLossPts",),
+                    "trail_points": ("InpTrailBufferPts",),
+                }.items() if any(c in hdr for c in cols)
+            },
         }
 
     def _evidence_finding(self, sym, cur, opt, duka) -> Optional[str]:
@@ -536,19 +566,38 @@ class ContinualResearcher:
         return " ".join(parts)
 
     # ── 2+3. QUERY mql5 + REASON ──
+    def _recall_prior_findings(self, base_symbol: str, n: int = 5) -> list:
+        """Re-read what the researcher has ALREADY learned about this symbol so each
+        cycle BUILDS on prior findings instead of regenerating them from scratch (the
+        'single pass then forgotten' fix). Returns recent prior finding texts."""
+        if self.ks is None:
+            return []
+        try:
+            hits = self.ks.recall(f"research findings hypotheses {base_symbol} expectancy exits",
+                                   n_results=n)
+            return [h.get("text", "") for h in (hits or []) if h.get("text")]
+        except Exception as e:
+            logger.debug(f"recall prior findings skip {base_symbol}: {e}")
+            return []
+
     def research_symbol(self, base_symbol: str) -> dict:
-        """Review + query mql5 RAG for a better technique; produce a hypothesis."""
+        """Review + query mql5 RAG for a better technique; produce a hypothesis.
+        BUILDS ON PRIOR FINDINGS: recalls what was already learned about this symbol and
+        feeds it into the reasoning so the loop compounds knowledge rather than repeating."""
         review = self.review_symbol(base_symbol)
+        # RE-READ prior findings at the START of the cycle so we build on them.
+        prior = self._recall_prior_findings(base_symbol)
         # Measure our CURRENT live indicator settings against the RICH historic evidence
         # (GoldShark optimiser BT/FT + Dukascopy backtest). Non-fatal; writes a finding.
         evidence = self.gold_evidence(base_symbol)
         hypothesis = None
         knowledge = []
         if self.mql5 is not None and review.get("n", 0) >= 10:
-            # ground the search in the symbol's actual weakness
+            # ground the search in the symbol's actual weakness + what we already tried
+            prior_note = f" Prior findings: {prior[0][:120]}" if prior else ""
             q = (f"improve {base_symbol} trading: win rate {review.get('win_rate')}% "
                  f"expectancy {review.get('expectancy')}, losers exit via "
-                 f"{review.get('dominant_loss_exit')}; better indicator or parameter?")
+                 f"{review.get('dominant_loss_exit')}; better indicator or parameter?{prior_note}")
             try:
                 knowledge = self.mql5.research(q, n_results=3)
             except Exception as e:
@@ -558,14 +607,17 @@ class ContinualResearcher:
                 hypothesis = (f"{base_symbol}: expectancy {review.get('expectancy')} with "
                               f"losers exiting via {review.get('dominant_loss_exit')}. mql5 "
                               f"knowledge suggests: {top['text'][:160]} "
-                              f"(src {top['metadata'].get('title')}). Test via edge sweep + optimizer.")
+                              f"(src {top['metadata'].get('title')}). Test via edge sweep + optimizer."
+                              + (f" [builds on {len(prior)} prior findings]" if prior else ""))
         result = {"review": review, "knowledge": knowledge, "hypothesis": hypothesis,
-                  "evidence": evidence}
+                  "evidence": evidence, "prior_findings": prior}
         if hypothesis and self.ks is not None:
             try:
+                # ACCUMULATE (don't overwrite) so the trail of findings is preserved.
                 self.ks.remember(key=f"research_hypothesis_{base_symbol.upper()}",
                                  kind="note", topic=f"research {base_symbol.upper()}",
-                                 source="continual_researcher", text=hypothesis)
+                                 source="continual_researcher", text=hypothesis,
+                                 accumulate=True)
             except Exception:
                 pass
         return result
@@ -632,6 +684,15 @@ class ContinualResearcher:
             return {"skipped": True, "reason": "already ran today"}
         self._last_run_day = today
         summary = {"day": today, "symbols": {}, "issues_filed": []}
+        # AUTO-INGEST: absorb any NEW/changed files dropped into the datastore into the
+        # researcher's knowledge BEFORE reasoning, so every nugget is known + remembered.
+        try:
+            if not hasattr(self, "_ingestor"):
+                from src.learning.auto_ingest import DatastoreIngestor
+                self._ingestor = DatastoreIngestor(knowledge_store=self.ks, experience_db=self.db)
+            summary["ingest"] = self._ingestor.scan_and_ingest()
+        except Exception as e:
+            logger.debug(f"auto-ingest skip: {e}")
         for sym in symbols:
             r = self.research_symbol(sym)
             # per-symbol indicator-scale profiling (calibrate thresholds per symbol)

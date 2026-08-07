@@ -83,12 +83,20 @@ class KnowledgeStore:
 
     def remember(self, text: str, kind: str = "note", topic: str = "",
                  source: str = "assistant", confidence: float = 1.0,
-                 key: Optional[str] = None) -> str:
+                 key: Optional[str] = None, accumulate: bool = False) -> str:
         """
         Store a piece of knowledge. `key` makes it idempotent (re-remembering the
         same key updates in place). Chroma computes the embedding from `text`.
+
+        accumulate=True: PRESERVE HISTORY — the entry is stored under a timestamped
+        variant of `key` (key#<ts>) so prior findings are NOT overwritten and the
+        researcher can build on the full trail of what it has learned over time.
+        Use this for evolving research findings/hypotheses/evidence (the "single pass
+        then forgotten" fix); use the default idempotent mode for latest-state facts.
         """
         eid = key or hashlib.md5(f"{kind}:{topic}:{text}".encode()).hexdigest()[:16]
+        if accumulate and key:
+            eid = f"{key}#{int(time.time()*1000)}"
         self.collection.upsert(
             ids=[eid],
             documents=[text],
@@ -99,6 +107,7 @@ class KnowledgeStore:
                 "confidence": float(confidence),
                 "created_at": datetime.now(timezone.utc).isoformat(),
                 "ts": time.time(),
+                "base_key": key or "",
             }],
         )
         logger.info(f"knowledge[{kind}] stored ({eid}): {text[:80]}")

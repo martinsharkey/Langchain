@@ -53,6 +53,10 @@ class TradeReflection:
     exited_early: bool = False     # winner cut short (MFE >> captured)
     stopped_then_recovered: bool = False
     entered_late: bool = False
+    # PREVENTIVE analysis (losers): would stronger indicators have blocked this bad entry?
+    preventable: bool = False          # a stricter, evidence-based gate would have skipped it
+    prevent_reasons: list = field(default_factory=list)  # which indicator + how
+    better_entry_offset_min: int = 0   # a better entry existed this many min from actual entry
     notes: list = field(default_factory=list)
 
 
@@ -211,6 +215,67 @@ class TradePostMortem:
             if r.mae_atr >= 1.5 and r.mfe_atr < 0.5:
                 r.entered_late = True
                 r.notes.append(f"immediate {r.mae_atr} ATR adverse move, little favourable — entered late/wrong")
+
+        # ── PREVENTIVE analysis (losers only): would stronger indicators have PREVENTED
+        # this entry, or was there a better entry bar in the window? Reconstructs the
+        # indicator series across before+after and reasons about Bulls/Bears/OsMA/EMA/ATR.
+        if r.outcome == "loss":
+            try:
+                self._preventive_analysis(r, trade, before, after, action, entry_price, atr)
+            except Exception as e:
+                logger.debug(f"preventive analysis skip {trade.get('id')}: {e}")
+        return r
+
+    def _preventive_analysis(self, r, trade, before, after, action, entry_price, atr):
+        """For a LOSING trade, reconstruct indicators around entry and flag whether a
+        stronger evidence-based gate (Bulls/Bears power sign+strength, OsMA alignment,
+        EMA slope, ATR regime) would have SKIPPED the entry, and whether a better entry
+        bar existed within the window. Populates r.preventable / prevent_reasons /
+        better_entry_offset_min. Uses the stored entry indicators_snapshot when present."""
+        import json as _json
+        snap = {}
+        try:
+            snap = _json.loads(trade.get("indicators_snapshot") or "{}")
+        except Exception:
+            snap = {}
+        reasons = []
+        # 1) Bull/Bear power at entry contradicted the trade direction (per R5 semantics:
+        #    long wants bulls positive/rising; short wants bears deepening negative).
+        bulls = snap.get("bulls_power"); bears = snap.get("bears_power")
+        if bulls is not None and bears is not None:
+            if action == "buy" and bulls <= 0:
+                reasons.append(f"bulls_power {bulls:.2f} not positive at a long entry")
+            if action == "sell" and bears >= 0:
+                reasons.append(f"bears_power {bears:.2f} not negative at a short entry")
+        # 2) OsMA not aligned / weak at entry
+        osma = snap.get("osma")
+        if osma is not None:
+            if (action == "buy" and osma <= 0) or (action == "sell" and osma >= 0):
+                reasons.append(f"osma {osma:.3f} not aligned with the {action} at entry")
+        # 3) entry against the reconstructed HTF trend
+        if r.htf_trend in ("bullish", "bearish"):
+            if (action == "buy" and r.htf_trend == "bearish") or \
+               (action == "sell" and r.htf_trend == "bullish"):
+                reasons.append(f"entered {action} against {r.htf_trend} HTF trend")
+        # 4) entry while over-extended (already flagged)
+        if r.entry_extended:
+            reasons.append("entry was already >2 ATR extended (chasing)")
+        # 5) a better entry bar existed later in the 'after' window (price offered a
+        #    materially better price within ~15 bars) -> we entered at a poor moment
+        if after and atr > 0:
+            best_off = 0; best_gain = 0.0
+            for i, b in enumerate(after[:15]):
+                better = (entry_price - b["low"]) if action == "buy" else (b["high"] - entry_price)
+                if better > best_gain:
+                    best_gain = better; best_off = i
+            if best_gain >= 0.5 * atr:
+                r.better_entry_offset_min = best_off
+                reasons.append(f"a better entry (~{best_gain/atr:.1f} ATR) was available "
+                               f"{best_off} bars later")
+        if reasons:
+            r.preventable = True
+            r.prevent_reasons = reasons
+            r.notes.append("PREVENTABLE: " + "; ".join(reasons))
         return r
 
     def _recent_closed(self, limit=40, only_losers=False) -> list[dict]:
@@ -282,6 +347,19 @@ class TradePostMortem:
         if avg_win_mfe and avg_loss_mfe and avg_loss_mfe >= avg_win_mfe * 0.8:
             findings.append(f"Losers reach nearly as much favourable excursion (MFE {avg_loss_mfe} ATR) as winners ({avg_win_mfe}) before failing — exit timing, not entry, is the leak.")
             directives.setdefault("tp_rr", +0.5)
+        # PREVENTABLE losers: entries a stronger indicator gate would have skipped. Aggregate
+        # the reasons so we learn WHICH indicator most often could have blocked bad trades.
+        preventable = [r for r in losers if getattr(r, "preventable", False)]
+        prevent_reason_counts = {}
+        for r in preventable:
+            for reason in r.prevent_reasons:
+                tag = reason.split(" ")[0] + " " + (reason.split(" ")[1] if len(reason.split(" ")) > 1 else "")
+                prevent_reason_counts[tag] = prevent_reason_counts.get(tag, 0) + 1
+        if preventable:
+            top = sorted(prevent_reason_counts.items(), key=lambda x: -x[1])[:3]
+            findings.append(f"{len(preventable)}/{n_loss} losers were PREVENTABLE — a stronger entry "
+                            f"gate would have skipped them. Top signals: {top}.")
+            recs.append("tighten entry strength floors on the indicators that most often flagged preventable losers")
 
         result = {
             "analyzed": len(reflections), "losers": n_loss, "wins": len(wins),
@@ -292,8 +370,26 @@ class TradePostMortem:
             "avg_loss_mae_atr": avg_loss_mae,
             "findings": findings, "recommendations": recs, "directives": directives,
             "symbol": symbol or "ALL",
+            "preventable_losers": len(preventable),
+            "preventable_pct": round(len(preventable) / n_loss * 100, 0) if n_loss else 0,
+            "prevent_reason_counts": prevent_reason_counts,
         }
         self._persist(result)
+        # STORE THE WRONG DECISIONS: one durable record per preventable losing trade so the
+        # bot remembers exactly what could have prevented each bad entry.
+        if self.kb and preventable:
+            for r in preventable:
+                try:
+                    self.kb.store_knowledge(
+                        question=f"Trade {r.trade_id} ({r.symbol} {r.action}) lost — what could have prevented it?",
+                        answer=("; ".join(r.prevent_reasons)
+                                + (f"; better entry {r.better_entry_offset_min} bars later"
+                                   if r.better_entry_offset_min else ""))[:2000],
+                        topic="wrong_decisions", subtopic=r.symbol,
+                        priority=7, confidence=0.7,
+                        tags=["wrong_decision", "preventable", r.symbol, r.action])
+                except Exception:
+                    pass
         logger.info(f"PostMortem [{symbol or 'ALL'}]: {findings if findings else 'no dominant failure mode'}")
         return result
 
