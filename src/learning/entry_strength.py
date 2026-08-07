@@ -164,8 +164,69 @@ class EntryStrengthLearner:  # name kept for wiring compatibility
                 "accel": abs(osma - osma_prev) / atr,
                 "stretch": abs(close - ema) / atr if (close > 0 and ema > 0) else float("nan"),
                 "dom": dom, "runway": runway,
+                # RAW signed indicator magnitudes at entry (for data-driven floor discovery
+                # across ALL separating indicators, not just the 4 above). Side-aware.
+                "action": r["action"],
+                "osma_raw": osma,
+                "macd_raw": float(s.get("macd_line") or 0),
+                "bulls_raw": float(s.get("bulls_power") or 0),
+                "bears_raw": float(s.get("bears_power") or 0),
             })
         return out
+
+    def discover_indicator_floors(self, samples) -> dict:
+        """DATA-DRIVEN: for each entry indicator (osma/macd/bulls/bears), find the strength
+        floor that best SEPARATES winners from losers on THIS symbol's own trades, and emit
+        the confluence-gate keys (osma_min_long/macd_min_long/bulls_min_long/bears_min_long
+        for longs; *_max_short for shorts). This is what lets the learner discover e.g. 'BTC
+        winners need MACD>=55' — the gate already consumes these floors. Only emits a floor
+        when it MEANINGFULLY lifts green-rate on an adequate kept sample.
+
+        Returns a recipe dict of gate keys (long-side floors; short side mirrors sign)."""
+        longs = [s for s in samples if s.get("action") == "buy"]
+        shorts = [s for s in samples if s.get("action") == "sell"]
+        recipe = {}
+        # (raw field, long gate key, short gate key)
+        specs = [("osma_raw", "osma_min_long", "osma_max_short"),
+                 ("macd_raw", "macd_min_long", "macd_max_short"),
+                 ("bulls_raw", "bulls_min_long", "bulls_max_short"),
+                 ("bears_raw", "bears_min_long", "bears_max_short")]
+        for field, long_key, short_key in specs:
+            fl = self._best_floor(longs, field, ">=")
+            if fl is not None:
+                recipe[long_key] = fl
+            fs = self._best_floor(shorts, field, "<=")
+            if fs is not None:
+                recipe[short_key] = fs
+        return recipe
+
+    def _best_floor(self, side_samples, field, op, min_keep_frac: float = 0.25) -> Optional[float]:
+        """Find the threshold on `field` (>= for longs, <= for shorts) that maximises
+        green-rate while keeping >= min_keep_frac of trades; returns None if no threshold
+        beats the base green-rate by >2%. Candidates are the winners' distribution
+        percentiles so the floor sits where winners actually are."""
+        vals = [(s[field], s["green"]) for s in side_samples if s.get(field) is not None and s[field] == s[field]]
+        if len(vals) < self.min_sample:
+            return None
+        base = sum(g for _, g in vals) / len(vals)
+        min_keep = max(20, int(len(vals) * min_keep_frac))
+        wins = sorted(v for v, g in vals if g == 1)
+        if len(wins) < 20:
+            return None
+        # candidate thresholds = winner percentiles (25/40/50/60/75)
+        cands = sorted({wins[min(len(wins) - 1, int(p * len(wins)))] for p in (0.25, 0.4, 0.5, 0.6, 0.75)})
+        best = None
+        for thr in cands:
+            if op == ">=":
+                kept = [(v, g) for v, g in vals if v >= thr]
+            else:
+                kept = [(v, g) for v, g in vals if v <= thr]
+            if len(kept) < min_keep:
+                continue
+            gr = sum(g for _, g in kept) / len(kept)
+            if gr > base + 0.02 and (best is None or gr > best[1]):
+                best = (thr, gr)
+        return round(best[0], 3) if best else None
 
     @staticmethod
     def _passes(rec, gate):
@@ -205,14 +266,26 @@ class EntryStrengthLearner:  # name kept for wiring compatibility
                 # osma strength alone doesn't gate (proven not to separate); we only
                 # carry dom/runway (+ stretch from the greedy pass below if it helps)
                 improves = rec["success"] > a["base_success"] + 0.02
-                final_recipe = self._apply_relax_cap(symbol_prefix, recipe if improves else {})
+                recipe = recipe if improves else {}
+                # DATA-DRIVEN multi-indicator floors: discover which of osma/MACD/bulls/bears
+                # actually separate winners from losers on THIS symbol and add those gate
+                # floors (e.g. BTC's MACD separation). Merged on top of dom/runway.
+                try:
+                    S = self._samples(symbol_prefix)
+                    ind_floors = self.discover_indicator_floors(S)
+                    if ind_floors:
+                        recipe = {**recipe, **ind_floors}
+                except Exception as _e:
+                    logger.debug(f"indicator-floor discovery skip {symbol_prefix}: {_e}")
+                final_recipe = self._apply_relax_cap(symbol_prefix, recipe)
                 return {"recipe": final_recipe,
                         "n": a["n"], "base_success": a["base_success"],
                         "gated_success": rec["success"], "kept": rec["n"],
-                        "per_day": rec["per_day"], "improves": improves,
+                        "per_day": rec["per_day"], "improves": bool(improves or ind_floors),
                         "gates": [f"dom>={rec['dom_min']}" if rec["dom_min"] else "",
-                                  f"runway>={rec['runway_min']}" if rec["runway_min"] else ""],
-                        "source": "frequency_analyzer"}
+                                  f"runway>={rec['runway_min']}" if rec["runway_min"] else ""]
+                                 + [f"{k}={v}" for k, v in (ind_floors or {}).items()],
+                        "source": "frequency_analyzer+indicator_floors"}
         except Exception as e:
             logger.debug(f"frequency analyzer fallback for {symbol_prefix}: {e}")
 
