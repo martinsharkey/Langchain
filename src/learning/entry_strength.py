@@ -17,6 +17,7 @@ Scale-free (all ATR-normalized) so gold and BTC self-calibrate.
 """
 from __future__ import annotations
 import json
+import os
 import sqlite3
 from typing import Optional
 
@@ -51,7 +52,32 @@ class EntryStrengthLearner:  # name kept for wiring compatibility
         # per-cycle re-learn must respect it — so the learner cannot re-raise floors above
         # a level that keeps the bot trading. This is the missing downward pressure that
         # lets the bot LEARN to keep itself trading. {symbol: {"dom_min":x,"runway_min":y}}
-        self._relax_cap = {}
+        # PERSISTED so a restart can't wipe it and let the learner re-raise floors that
+        # already starved the bot.
+        try:
+            from src import config
+            self._relax_path = os.path.join(config.DATA_DIR, "entry_relax_caps.json")
+        except Exception:
+            self._relax_path = os.path.join("data", "entry_relax_caps.json")
+        self._relax_cap = self._load_relax()
+
+    def _load_relax(self) -> dict:
+        try:
+            if os.path.exists(self._relax_path):
+                with open(self._relax_path) as f:
+                    return json.load(f)
+        except Exception:
+            pass
+        return {}
+
+    def _save_relax(self):
+        try:
+            tmp = self._relax_path + ".tmp"
+            with open(tmp, "w") as f:
+                json.dump(self._relax_cap, f)
+            os.replace(tmp, self._relax_path)
+        except Exception:
+            pass
 
     def relax_for_starvation(self, symbol_prefix: str, step: float = 0.5) -> dict:
         """Called when a symbol's LIVE fire-rate collapses: lower its dom_min/runway_min
@@ -62,6 +88,7 @@ class EntryStrengthLearner:  # name kept for wiring compatibility
         cur = {"dom_min": max(0.0, round(cur["dom_min"] - step, 2)),
                "runway_min": max(0.0, round(cur["runway_min"] - step, 2))}
         self._relax_cap[key] = cur
+        self._save_relax()
         logger.warning(f"[ENTRY-QUALITY] {key}: STARVED -> relaxing floor cap to "
                        f"dom<={cur['dom_min']} runway<={cur['runway_min']} (learning to keep trading)")
         return cur
