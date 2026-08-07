@@ -130,18 +130,25 @@ loop, all with unit tests (59 passing):
   manager close/modify now sends REAL orders and logs SIMULATED vs real accurately;
   winners are actively closed, not just left to the broker SL.
 
-## TODO (next session) — mirror these into GitHub Issues
+## TODO — GitHub Issues are the live list (`gh issue list`)
 
-- [ ] #24 graduation criteria (per-symbol edge → size-up gate) — spec ready.
-- [ ] #19/#30 dashboard as control panel (mode/scalping/config/account) + fix the
-      misleading "algo blocked" message; VPS deployment.
-- [ ] Apply the #21 `_account_clause` filter to every stats read (foundation is in).
-- [ ] #22 run the real mql5 Playwright crawl to populate the RAG beyond the seed.
-- [ ] Prove edge on XAUUSD + GER40 + BTCUSD with the new OsMA strategy (accumulate
-      real closed trades under it; watch the #27 checkpointer keep/revert).
-- [ ] Merge `fix/17-11-manage-live-positions` to main once reviewed; push.
-- [ ] `webhook_listener.py` once Danny provides the webhook spec (Q2).
-- [ ] Standalone-app packaging / VPS (remove editor assumptions; #14/#19).
+> Reconciled 2026-08-07. This is a signpost only; the authoritative backlog is GitHub.
+
+Done/closed this session: **#53** (exit leak — broker-SL-at-entry + 2s fast management
+loop), **#14** (standalone packaging — DEPLOY.md + run_bot.bat, no editor deps).
+
+Open, with current status commented on the issues:
+- **#16** prove edge (100+ clean trades, PF≥1.3) — top goal; all the machinery (validation
+  gate, GS_PROVEN exit, per-symbol onboarding SL, evolutionary+cluster tuning, self-correction)
+  is now wired; needs clean trades to accumulate.
+- **#48 / #49 / #51** per-symbol negative-expectancy research threads (BTC / GER40 / XAU) —
+  the researcher now investigates each cycle (preventive post-mortem + evidence + validated tuning).
+- **#50** regime analysis — only 1 clean live month so far; re-run at ≥3 months.
+- **#5** verify pre-close protection on a real session close (code complete; runtime observation).
+- **#19 / #1** VPS live cutover + distributed split (DEPLOY.md documents both; MT5 is Windows-only).
+- **#44 / #15** CryptoRTI whale accumulation + optional Danny enhancements (non-blocking, external).
+
+When starting work: `gh issue list`; open new findings as issues immediately.
 
 ## Danny's issues (CryptoRTI side) — see `cryptorti/martin_qna.md`
 
