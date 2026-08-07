@@ -45,7 +45,8 @@ class ContinualResearcher:
                  edge_discovery=None, repo: str = "martinsharkey/Langchain",
                  pattern_optimizer=None, apply_exit_config=None, excursion_analyzer=None,
                  robust_tester=None, optimizer_reports_dir=None, dukascopy_backtest=None,
-                 current_params_fn=None, apply_tuned_fn=None, onnx_predictor=None):
+                 current_params_fn=None, apply_tuned_fn=None, onnx_predictor=None,
+                 change_validator=None):
         self.db = experience_db
         self.mql5 = mql5_knowledge
         self.ks = knowledge_store
@@ -78,6 +79,7 @@ class ContinualResearcher:
         self.current_params_fn = current_params_fn
         self.apply_tuned_fn = apply_tuned_fn
         self.onnx_predictor = onnx_predictor
+        self.change_validator = change_validator
         self._evidence_cache = {}
         # Single per-symbol EVIDENCE STORE: every BT/FT result (live review, optimiser
         # cluster, Dukascopy backtest) is persisted here so ALL testing data lives in one
@@ -489,10 +491,10 @@ class ContinualResearcher:
         except Exception:
             return None
         import glob
-        # symbol appears in the report Title (e.g. 'GoldShark3-2 XAUUSD ...'); the XMLs
-        # here are all XAUUSD/gold, so only mine gold-family evidence for XAUUSD.
-        if not sym.startswith("XAU"):
-            return None
+        # scan the primary optimiser-reports dir AND the mined MT5-install reports dir; a
+        # report is used only if its columns map to our params (so BTC/GER40 pick up any of
+        # their own exported optimiser XMLs when present, and gracefully get None otherwise —
+        # no hard XAU-only gate).
         # scan the primary optimiser-reports dir AND the mined MT5-install reports dir
         # (exported .opt caches land there) — all evidence, R10.
         dirs = [d, os.path.join(os.path.dirname(d.rstrip("/\\")), "mt5_installs", "reports")]
@@ -501,6 +503,15 @@ class ContinualResearcher:
             if dd and os.path.isdir(dd):
                 bts += [p for p in glob.glob(os.path.join(dd, "*.xml"))
                         if "backtest" in os.path.basename(p).lower()]
+        # only use reports that actually pertain to THIS symbol (filename match), so BTC/GER40
+        # don't get compared against gold's optimiser cluster. Gold aliases: XAU/GOLD.
+        aliases = {"XAUUSD": ("xau", "gold"), "GER40": ("ger40", "de40", "dax", "deuidx"),
+                   "BTCUSD": ("btc",)}.get(sym, (sym.lower(),))
+        sym_bts = [p for p in bts if any(a in os.path.basename(p).lower() for a in aliases)]
+        # gold reports here are unlabeled by symbol historically -> treat unlabeled as gold
+        if sym.startswith("XAU") and not sym_bts:
+            sym_bts = bts
+        bts = sym_bts
         if not bts:
             return None
         # pick the largest backtest report (most passes) for the cluster summary
@@ -696,6 +707,15 @@ class ContinualResearcher:
             logger.debug(f"joint optimise skip {base_symbol}: {e}")
             return {"improved": False, "reason": str(e)[:80]}
         if out and out.get("improved") and self.apply_tuned_fn:
+            # UNIFIED GATE: even though evo has its own walk-forward check, it must also beat
+            # the symbol's BEST-EVER result (ChangeValidator) before going live, so ALL
+            # tuners share one bar and the outcome is recorded to the RAG (no open loop).
+            if self.change_validator is not None:
+                v = self.change_validator.validate(base_symbol, out["params"], source="joint_evo")
+                if not v.get("passed"):
+                    logger.warning(f"[EVO] {base_symbol}: joint config REJECTED by best-ever gate "
+                                   f"({v.get('reason')}) — not applied")
+                    return {"improved": False, "reason": f"best-ever gate: {v.get('reason')}"}
             try:
                 self.apply_tuned_fn(resolved or base_symbol, out["params"],
                                     source=f"joint_evo score {out['score']:.2f} (was {out['base_score']:.2f})")

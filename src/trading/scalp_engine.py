@@ -301,7 +301,8 @@ class ScalpEngine:
                 pattern_optimizer=_patopt, apply_exit_config=self._apply_exit_config,
                 excursion_analyzer=_exc, robust_tester=_robust,
                 dukascopy_backtest=_duka_backtest, current_params_fn=_cur_params,
-                apply_tuned_fn=_apply_tuned, onnx_predictor=getattr(self, "onnx_predictor", None))
+                apply_tuned_fn=_apply_tuned, onnx_predictor=getattr(self, "onnx_predictor", None),
+                change_validator=self.change_validator)
         except Exception as e:
             logger.warning(f"ContinualResearcher unavailable: {e}")
 
@@ -558,9 +559,14 @@ class ScalpEngine:
         from src.learning.param_optimizer import SYMBOL_BASELINES
         resolved = adapter.resolved_symbol
         key = base.upper()
-        has_baseline = any(key.startswith(p) for p in SYMBOL_BASELINES)
+        base_cfg = next((v for p, v in SYMBOL_BASELINES.items() if key.startswith(p)), None)
+        has_baseline = base_cfg is not None
         has_tuned = (key in self.param_optimizer.tuned or resolved.upper() in self.param_optimizer.tuned)
-        if has_baseline or has_tuned:
+        # A pre-seeded symbol still needs its per-symbol OsMA-CYCLE SL derived from its OWN
+        # data (R3) if the baseline lacks it (BTCUSD/GER40 shipped without hard_sl_points and
+        # ran on guessed seed exits). Derive it once even when a baseline exists.
+        needs_cycle_sl = has_baseline and not (base_cfg or {}).get("hard_sl_points")
+        if (has_baseline or has_tuned) and not needs_cycle_sl:
             return False
         if not hasattr(self, "_onboard_threads"):
             self._onboard_threads = {}
@@ -577,18 +583,22 @@ class ScalpEngine:
         except Exception:
             pass
         import threading
-        th = threading.Thread(target=self._run_onboarding, args=(base, adapter),
+        th = threading.Thread(target=self._run_onboarding, args=(base, adapter, needs_cycle_sl),
                               name=f"onboard-{key}", daemon=True)
         self._onboard_threads[key] = th
         th.start()
         logger.warning(f"[ONBOARD] {base}: PATIENT background onboarding STARTED "
-                       f"(Dukascopy primary, MT5 fallback) — will not block trading.")
+                       f"({'SL-only (pre-seeded)' if needs_cycle_sl else 'full'}; "
+                       f"Dukascopy primary, MT5 fallback) — will not block trading.")
         return True
 
-    def _run_onboarding(self, base, adapter):
+    def _run_onboarding(self, base, adapter, sl_only: bool = False):
         """Background worker: patient Dukascopy-primary acquisition + full discovery, then
         MT5 as a SECONDARY validation/fallback. Persists the baseline + tracks progress.
-        Patience over speed: no premature give-up on data acquisition."""
+        Patience over speed: no premature give-up on data acquisition.
+        sl_only: the symbol already has a proven ENTRY baseline (e.g. gold pass5469) but no
+        OsMA-cycle SL — derive ONLY the exit magnitudes from its own data and apply them as
+        a per-symbol exit override, preserving the entry floors (R3 for pre-seeded symbols)."""
         from src.learning.onboarding_tracker import OnboardingTracker
         from src.learning.floor_discovery import FloorDiscovery
         from src.learning.param_optimizer import DEFAULTS
@@ -632,6 +642,22 @@ class ScalpEngine:
         cyc = recipe.get("_osma_cycle_sample") or {}
         tracker.update(key, "sampling_cycles", n_cycles=cyc.get("n_cycles"),
                        hard_sl_points=recipe.get("hard_sl_points"))
+        if sl_only:
+            # keep the proven ENTRY baseline; apply ONLY the data-derived exit magnitudes
+            # as a per-symbol override so this symbol trades its OWN OsMA-cycle SL (R3).
+            exit_keys = ("hard_sl_points", "safety_tp_points", "be_trigger_pts",
+                         "be_lock_pts", "trail_points")
+            ex = {k: recipe[k] for k in exit_keys if k in recipe}
+            if ex:
+                if not hasattr(self, "_exit_override"):
+                    self._exit_override = {}
+                self._exit_override.setdefault(key, {}).update(ex)
+            tracker.update(key, "baseline_set", source=src_used, mode="sl_only",
+                           hard_sl_points=recipe.get("hard_sl_points"),
+                           n_cycles=cyc.get("n_cycles"))
+            logger.warning(f"[ONBOARD] {base}: OsMA-cycle SL derived from own data -> "
+                           f"exit override {ex} (entry baseline preserved)")
+            return
         params = dict(DEFAULTS)
         params.update({k: v for k, v in recipe.items() if not k.startswith("_")})
         self.param_optimizer.tuned[resolved.upper()] = {
@@ -1426,6 +1452,17 @@ class ScalpEngine:
                 for _kk, _vv in _cfg.items():
                     base_p.setdefault(_kk, _vv)
                 break
+        # DATA-DERIVED exit override (OsMA-cycle SL onboarding for pre-seeded symbols) takes
+        # PRECEDENCE over the guessed seed above — BTC/GER40 use their OWN derived be/trail.
+        try:
+            for _k, _ov in (getattr(self, "_exit_override", {}) or {}).items():
+                if base_symbol.upper().startswith(_k):
+                    for _kk in ("be_trigger_pts", "be_lock_pts", "trail_points"):
+                        if _kk in _ov:
+                            base_p[_kk] = _ov[_kk]
+                    break
+        except Exception:
+            pass
         return base_p
 
     def _directional_winrate(self, base_symbol: str) -> dict:
@@ -2290,6 +2327,19 @@ class ScalpEngine:
                     break
         except Exception:
             pass
+        # per-symbol EXIT override (e.g. OsMA-cycle SL derived at onboarding for pre-seeded
+        # BTCUSD/GER40): merge the exit-magnitude keys so the live SL/TP sizing uses the
+        # symbol's OWN derived exits (R3), not the ATR fallback.
+        try:
+            for k, ov in (getattr(self, "_exit_override", {}) or {}).items():
+                if resolved_symbol.upper().startswith(k):
+                    for ek in ("hard_sl_points", "safety_tp_points", "be_trigger_pts",
+                               "be_lock_pts", "trail_points"):
+                        if ek in ov:
+                            params[ek] = ov[ek]
+                    break
+        except Exception:
+            pass
         return params
 
     def _maybe_run_adaptive(self):
@@ -2375,9 +2425,25 @@ class ScalpEngine:
                                 sym, iterations=config.OPTIMIZER_ITERATIONS,
                                 directives=per_symbol_directives.get(sym))
                             if r.get("improved"):
-                                src = "reflection-guided" if r.get("from_reflection") else "directed-search"
-                                logger.info(f"[OPTIMIZER] {sym} improved ({src}): "
-                                            f"min-PF {r['score']} params {r['params']}")
+                                # UNIFIED best-ever gate: even though optimize() walk-forward
+                                # gated internally, it must also beat the symbol's BEST-EVER
+                                # result before we keep it live; else roll back its tuned write.
+                                keep = True
+                                if self.change_validator is not None and r.get("params"):
+                                    v = self.change_validator.validate(sym, r["params"], source="param_optimizer")
+                                    keep = v.get("passed", False)
+                                    if not keep:
+                                        try:
+                                            self.param_optimizer.tuned.pop(sym.upper(), None)
+                                            self.param_optimizer._persist()
+                                        except Exception:
+                                            pass
+                                        logger.warning(f"[OPTIMIZER] {sym}: improvement REJECTED by "
+                                                       f"best-ever gate ({v.get('reason')}) — rolled back")
+                                if keep:
+                                    src = "reflection-guided" if r.get("from_reflection") else "directed-search"
+                                    logger.info(f"[OPTIMIZER] {sym} improved ({src}): "
+                                                f"min-PF {r['score']} params {r['params']}")
                         except Exception as e:
                             logger.debug(f"optimizer {sym} skip: {e}")
 
