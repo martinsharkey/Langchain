@@ -44,7 +44,8 @@ class ContinualResearcher:
     def __init__(self, experience_db, mql5_knowledge=None, knowledge_store=None,
                  edge_discovery=None, repo: str = "martinsharkey/Langchain",
                  pattern_optimizer=None, apply_exit_config=None, excursion_analyzer=None,
-                 robust_tester=None):
+                 robust_tester=None, optimizer_reports_dir=None, dukascopy_backtest=None,
+                 current_params_fn=None):
         self.db = experience_db
         self.mql5 = mql5_knowledge
         self.ks = knowledge_store
@@ -64,6 +65,49 @@ class ContinualResearcher:
         # winning config only if it passes a MAJORITY of random windows.
         self.robust_tester = robust_tester
         self._robust = {}
+        # RICH EVIDENCE (GoldShark optimiser BT/FT reports + Dukascopy backtest of the
+        # CURRENT live settings) so the researcher can measure our indicator settings
+        # against the historic proven data, not just live trades. All optional/non-fatal:
+        #   optimizer_reports_dir: dir of MT5 optimiser SpreadsheetML XMLs (BT/FT).
+        #   dukascopy_backtest: callable(symbol, params) -> dict|None (walk-forward on
+        #                       Dukascopy tick/bar data via the real Backtester).
+        #   current_params_fn: callable(symbol) -> live indicator params dict.
+        self.optimizer_reports_dir = optimizer_reports_dir or os.path.join(
+            "data", "reprodata", "goldshark13", "optimiser_reports")
+        self.dukascopy_backtest = dukascopy_backtest
+        self.current_params_fn = current_params_fn
+        self._evidence_cache = {}
+        # Single per-symbol EVIDENCE STORE: every BT/FT result (live review, optimiser
+        # cluster, Dukascopy backtest) is persisted here so ALL testing data lives in one
+        # place the researcher reads across sessions. data/symbol_evidence.json.
+        try:
+            from src import config
+            self._evidence_path = os.path.join(config.DATA_DIR, "symbol_evidence.json")
+        except Exception:
+            self._evidence_path = os.path.join("data", "symbol_evidence.json")
+
+    def _load_evidence_store(self) -> dict:
+        try:
+            if os.path.exists(self._evidence_path):
+                with open(self._evidence_path) as f:
+                    return json.load(f)
+        except Exception as e:
+            logger.debug(f"evidence store load skip: {e}")
+        return {}
+
+    def _save_evidence(self, sym: str, record: dict):
+        """Persist one symbol's latest evidence record (append to history, keep last 20)."""
+        try:
+            store = self._load_evidence_store()
+            s = store.setdefault(sym.upper(), {"history": []})
+            s["latest"] = record
+            s["history"] = (s.get("history", []) + [record])[-20:]
+            tmp = self._evidence_path + ".tmp"
+            with open(tmp, "w") as f:
+                json.dump(store, f, indent=1)
+            os.replace(tmp, self._evidence_path)
+        except Exception as e:
+            logger.debug(f"evidence store save skip {sym}: {e}")
 
     def lock_in_pattern(self, base_symbol: str, resolved: str = None) -> dict:
         """
@@ -333,10 +377,165 @@ class ContinualResearcher:
                 pass
         return prof
 
+    def gold_evidence(self, base_symbol: str) -> dict:
+        """Measure our CURRENT live indicator settings against the RICH historic
+        evidence: (a) the GoldShark optimiser BACKTEST+FORWARD passes for this symbol
+        and (b) a Dukascopy backtest of the current settings. Writes a finding to the
+        knowledge store so the bot's tuning is informed by all of it. Fully non-fatal
+        and cached per day — never blocks the research cycle."""
+        sym = base_symbol.upper()
+        day = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        if self._evidence_cache.get(sym, {}).get("day") == day:
+            return self._evidence_cache[sym]
+        ev = {"symbol": sym, "day": day, "optimiser": None, "dukascopy": None, "finding": None}
+
+        # current live params (indicator settings we actually trade)
+        cur = None
+        try:
+            if self.current_params_fn:
+                cur = self.current_params_fn(sym)
+        except Exception as e:
+            logger.debug(f"gold_evidence current_params skip {sym}: {e}")
+
+        # (a) GoldShark optimiser BT/FT robust cluster for this symbol
+        try:
+            opt = self._optimiser_cluster(sym)
+            if opt:
+                ev["optimiser"] = opt
+        except Exception as e:
+            logger.debug(f"gold_evidence optimiser skip {sym}: {e}")
+
+        # (b) Dukascopy backtest of the CURRENT settings (real Backtester on tick data)
+        try:
+            if self.dukascopy_backtest and cur:
+                res = self.dukascopy_backtest(sym, cur)
+                if res:
+                    ev["dukascopy"] = {"score": res.get("score"), "pfs": res.get("pfs"),
+                                       "wrs": res.get("wrs"), "n_total": res.get("n_total")}
+        except Exception as e:
+            logger.debug(f"gold_evidence dukascopy skip {sym}: {e}")
+
+        # compare + write a finding + an ACTIONABLE verdict, and persist to the store
+        try:
+            live_review = self.review_symbol(base_symbol)
+            ev["live"] = {"expectancy": live_review.get("expectancy"),
+                          "win_rate": live_review.get("win_rate"), "n": live_review.get("n")}
+            ev["verdict"] = self._evidence_verdict(sym, cur, ev["optimiser"], ev["dukascopy"], ev["live"])
+            ev["finding"] = self._evidence_finding(sym, cur, ev["optimiser"], ev["dukascopy"])
+            if ev["finding"] and self.ks is not None:
+                self.ks.remember(key=f"gold_evidence_{sym}", kind="finding",
+                                 topic=f"evidence {sym}", source="continual_researcher",
+                                 text=(ev["finding"] + " VERDICT: " + (ev["verdict"] or "insufficient evidence")))
+        except Exception as e:
+            logger.debug(f"gold_evidence finding skip {sym}: {e}")
+
+        self._evidence_cache[sym] = ev
+        self._save_evidence(sym, ev)
+        return ev
+
+    def _evidence_verdict(self, sym, cur, opt, duka, live) -> Optional[str]:
+        """Turn the comparison into something USEFUL: a concrete verdict the bot/optimizer
+        can act on. Flags when live under-performs the evidence and points at the lever."""
+        if not (opt or duka):
+            return None
+        flags = []
+        # Dukascopy backtest of current settings weak -> settings don't generalise OOS
+        if duka and duka.get("score") is not None:
+            if duka["score"] < 1.0:
+                flags.append(f"current settings FAIL Dukascopy OOS (minPF {duka['score']}) — entry/exit needs tuning")
+            elif duka["score"] >= 1.3:
+                flags.append(f"current settings ROBUST on Dukascopy (minPF {duka['score']})")
+        # live expectancy negative while optimiser cluster is strongly positive
+        if live and live.get("expectancy") is not None and live.get("n", 0) >= 10:
+            if live["expectancy"] < 0 and opt and opt.get("median_bt_pf", 0) >= 1.3:
+                flags.append(
+                    f"live expectancy {live['expectancy']} NEGATIVE vs optimiser median PF {opt['median_bt_pf']} "
+                    f"— likely EXIT capture (proven entry, leaking exits); test GS13_MFE / exit tuning")
+        # current floors below the optimiser robust cluster (too loose) 
+        if cur and opt and opt.get("osma_min_long_range"):
+            lo, hi = opt["osma_min_long_range"]
+            cv = cur.get("osma_min_long")
+            if cv is not None and cv < lo:
+                flags.append(f"osma_min_long {cv} is BELOW optimiser robust range {lo}-{hi} (entries may be too loose)")
+        return " | ".join(flags) if flags else "live settings consistent with evidence"
+
+    def _optimiser_cluster(self, sym: str) -> Optional[dict]:
+        """Parse the GoldShark optimiser BT (+FT if present) reports for this symbol and
+        return the robust cluster summary: count, median BT PF, and the range of the key
+        indicator floors across the top passes. Cheap streaming parse; skipped if the
+        reports dir or parser is unavailable."""
+        d = self.optimizer_reports_dir
+        if not d or not os.path.isdir(d):
+            return None
+        try:
+            from tools.parse_optimizer_report import parse_report, _f
+        except Exception:
+            return None
+        import glob
+        # symbol appears in the report Title (e.g. 'GoldShark3-2 XAUUSD ...'); the XMLs
+        # here are all XAUUSD/gold, so only mine gold-family evidence for XAUUSD.
+        if not sym.startswith("XAU"):
+            return None
+        bts = [p for p in glob.glob(os.path.join(d, "*.xml"))
+               if "backtest" in os.path.basename(p).lower()]
+        if not bts:
+            return None
+        # pick the largest backtest report (most passes) for the cluster summary
+        bt = max(bts, key=lambda p: os.path.getsize(p))
+        try:
+            hdr, passes = parse_report(bt)
+        except Exception:
+            return None
+        robust = []
+        for r in passes:
+            pf = _f(r, "Profit Factor"); tr = _f(r, "Trades"); pnl = _f(r, "Profit")
+            if pf >= 1.3 and tr >= 30 and pnl > 0:
+                robust.append((pf, r))
+        if not robust:
+            return None
+        robust.sort(key=lambda x: x[0], reverse=True)
+        top = robust[:50]
+        pfs = sorted(pf for pf, _ in top)
+        med_pf = pfs[len(pfs) // 2]
+        def _rng(key):
+            vals = [_f(r, key) for _, r in top if key in r and r.get(key) not in ("", None)]
+            vals = [v for v in vals if v != 0.0]
+            return (round(min(vals), 3), round(max(vals), 3)) if vals else None
+        return {
+            "report": os.path.basename(bt), "robust_passes": len(robust),
+            "median_bt_pf": round(med_pf, 2),
+            "osma_min_long_range": _rng("InpMinOsMALong") or _rng("InpLongOsMAMin"),
+            "bulls_min_long_range": _rng("InpMinBullsLong") or _rng("InpLongBullsMin"),
+            "atr_min_range": _rng("InpMinATR") or _rng("InpMinAtrValue"),
+        }
+
+    def _evidence_finding(self, sym, cur, opt, duka) -> Optional[str]:
+        """Compose a short, durable finding comparing live settings to the evidence."""
+        if not opt and not duka:
+            return None
+        parts = [f"{sym} indicator-setting evidence check:"]
+        if cur:
+            parts.append(
+                f"live osma_min_long={cur.get('osma_min_long')} bulls_min_long={cur.get('bulls_min_long')} "
+                f"atr_min={cur.get('atr_min')} floors_raw={cur.get('floors_raw')}.")
+        if opt:
+            parts.append(
+                f"GoldShark optimiser ({opt['report']}): {opt['robust_passes']} robust passes, "
+                f"median BT PF {opt['median_bt_pf']}, osma_min_long range {opt.get('osma_min_long_range')}, "
+                f"bulls_min_long range {opt.get('bulls_min_long_range')}, atr_min range {opt.get('atr_min_range')}.")
+        if duka:
+            parts.append(
+                f"Dukascopy backtest of CURRENT settings: score(minPF) {duka.get('score')}, "
+                f"PFs {duka.get('pfs')}, WRs {duka.get('wrs')}, n={duka.get('n_total')}.")
+        return " ".join(parts)
+
     # ── 2+3. QUERY mql5 + REASON ──
     def research_symbol(self, base_symbol: str) -> dict:
         """Review + query mql5 RAG for a better technique; produce a hypothesis."""
         review = self.review_symbol(base_symbol)
+        # Measure our CURRENT live indicator settings against the RICH historic evidence
+        # (GoldShark optimiser BT/FT + Dukascopy backtest). Non-fatal; writes a finding.
+        evidence = self.gold_evidence(base_symbol)
         hypothesis = None
         knowledge = []
         if self.mql5 is not None and review.get("n", 0) >= 10:
@@ -354,7 +553,8 @@ class ContinualResearcher:
                               f"losers exiting via {review.get('dominant_loss_exit')}. mql5 "
                               f"knowledge suggests: {top['text'][:160]} "
                               f"(src {top['metadata'].get('title')}). Test via edge sweep + optimizer.")
-        result = {"review": review, "knowledge": knowledge, "hypothesis": hypothesis}
+        result = {"review": review, "knowledge": knowledge, "hypothesis": hypothesis,
+                  "evidence": evidence}
         if hypothesis and self.ks is not None:
             try:
                 self.ks.remember(key=f"research_hypothesis_{base_symbol.upper()}",

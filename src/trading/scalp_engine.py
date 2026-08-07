@@ -236,11 +236,37 @@ class ScalpEngine:
                 _robust = RobustTester(days=40, n_random=8, iters=6)
             except Exception as e:
                 logger.debug(f"RobustTester unavailable: {e}")
+            # Dukascopy backtest of CURRENT settings via the REAL Backtester (injectable
+            # data source) — lets the researcher measure our live indicator settings
+            # against independent Dukascopy tick data, per symbol. Non-fatal.
+            _duka_backtest = None
+            try:
+                from src.data_sources.dukascopy import DukascopySource
+                from src.learning.backtester import Backtester as _BT
+
+                def _duka_backtest(sym, params):
+                    src = DukascopySource(use_cache=True)
+                    bt = _BT(self.registry, rates_fn=src.get_rates, ticks_fn=src.get_ticks)
+                    # M5 keeps it light enough for a research cycle while clearing the
+                    # 2000-bar floor (BTC 24/7 gets ~3000; gold/GER40 ~2200 from the
+                    # cached ~13-day window). Cached per-day in gold_evidence.
+                    return bt.walkforward_focused(sym, params,
+                                                  sl_atr=params.get("sl_atr", 1.0),
+                                                  tp_rr=params.get("tp_rr", 2.0),
+                                                  timeframe="M5", bars=3000, windows=3)
+            except Exception as e:
+                logger.debug(f"Dukascopy backtest wiring unavailable: {e}")
+                _duka_backtest = None
+            # current live indicator settings per symbol (what we actually trade)
+            _cur_params = None
+            if self.param_optimizer is not None:
+                _cur_params = self.param_optimizer.current_params
             self.researcher = ContinualResearcher(
                 self.experience_db, mql5_knowledge=self.mql5_knowledge,
                 knowledge_store=self.knowledge_store, edge_discovery=self.edge_discovery,
                 pattern_optimizer=_patopt, apply_exit_config=self._apply_exit_config,
-                excursion_analyzer=_exc, robust_tester=_robust)
+                excursion_analyzer=_exc, robust_tester=_robust,
+                dukascopy_backtest=_duka_backtest, current_params_fn=_cur_params)
         except Exception as e:
             logger.warning(f"ContinualResearcher unavailable: {e}")
 
