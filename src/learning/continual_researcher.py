@@ -524,27 +524,19 @@ class ContinualResearcher:
             vals = [_f(r, key) for _, r in top if key in r and r.get(key) not in ("", None)]
             vals = [v for v in vals if v != 0.0]
             return (round(min(vals), 3), round(max(vals), 3)) if vals else None
+        from tools.goldshark_columns import GOLDSHARK_COLMAP, col_for
+        def _rng_param(param):
+            c = col_for(param, hdr)
+            return _rng(c) if c else None
         return {
             "report": os.path.basename(bt), "robust_passes": len(robust),
             "median_bt_pf": round(med_pf, 2),
-            "osma_min_long_range": _rng("InpMinOsMALong") or _rng("InpLongOsMAMin"),
-            "bulls_min_long_range": _rng("InpMinBullsLong") or _rng("InpLongBullsMin"),
-            "atr_min_range": _rng("InpMinATR") or _rng("InpMinAtrValue"),
-            # map the GoldShark Inp* columns present -> our config keys, so the verdict can
-            # flag config elements the evidence uses but our live config is MISSING.
-            "evidence_params": {
-                k for k, cols in {
-                    "osma_min_long": ("InpMinOsMALong", "InpLongOsMAMin"),
-                    "bulls_min_long": ("InpMinBullsLong", "InpLongBullsMin"),
-                    "bears_min_long": ("InpMaxBearsLong", "InpMinBearsLong"),
-                    "atr_min": ("InpMinATR", "InpMinAtrValue"),
-                    "atr_max": ("InpMaxATR",),
-                    "min_ema_slope": ("InpMinEmaSlope",),
-                    "osma_max_short": ("InpMaxOsMAShort",),
-                    "hard_sl_points": ("InpHardStopLossPts",),
-                    "trail_points": ("InpTrailBufferPts",),
-                }.items() if any(c in hdr for c in cols)
-            },
+            "osma_min_long_range": _rng_param("osma_min_long"),
+            "bulls_min_long_range": _rng_param("bulls_min_long"),
+            "atr_min_range": _rng_param("atr_min"),
+            # canonical map -> which config elements the evidence uses (so the verdict can
+            # flag ones our live config is MISSING). Single source of truth (no drift).
+            "evidence_params": {p for p in GOLDSHARK_COLMAP if col_for(p, hdr)},
         }
 
     def _evidence_finding(self, sym, cur, opt, duka) -> Optional[str]:

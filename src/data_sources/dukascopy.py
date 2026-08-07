@@ -130,7 +130,7 @@ def _fetch_hour_raw(duka_sym: str, dt_hour: datetime, attempts: int = 6,
             req = urllib.request.Request(url, headers={"User-Agent": _USER_AGENT})
             with urllib.request.urlopen(req, timeout=30) as resp:
                 if resp.status == 200:
-                    raw = resp.read()
+                    raw = resp.read(16 * 1024 * 1024)  # cap network read at 16 MB
                     if use_cache:
                         with open(cache, "wb") as f:
                             f.write(raw)
@@ -158,10 +158,25 @@ def decode_hour(raw: bytes, hour_start_epoch: int, point_scale: int) -> list[tup
     hour_start_epoch = UTC epoch seconds at the start of the hour."""
     if not raw:
         return []
+    # bound the compressed input and the decompressed output: a legit hour of ticks is well
+    # under a few MB, so cap hard to prevent a malicious/corrupt response from being a
+    # decompression-bomb / OOM against the (live) process.
+    _MAX_COMPRESSED = 16 * 1024 * 1024      # 16 MB compressed ceiling
+    _MAX_DECOMPRESSED = 64 * 1024 * 1024    # 64 MB decompressed ceiling
+    if len(raw) > _MAX_COMPRESSED:
+        logger.warning("dukascopy: compressed hour %d bytes exceeds cap — skipping", len(raw))
+        return []
     try:
-        data = lzma.decompress(raw)
-    except lzma.LZMAError as e:
+        dec = lzma.LZMADecompressor()
+        data = dec.decompress(raw, _MAX_DECOMPRESSED)
+        if not dec.eof:
+            logger.warning("dukascopy: decompressed data exceeds %d-byte cap — skipping", _MAX_DECOMPRESSED)
+            return []
+    except (lzma.LZMAError, EOFError) as e:
         logger.debug("dukascopy: LZMA decompress failed: %s", e)
+        return []
+    except MemoryError:
+        logger.warning("dukascopy: MemoryError decompressing hour — skipping")
         return []
     div = float(10 ** point_scale)
     out = []

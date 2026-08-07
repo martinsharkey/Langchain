@@ -103,31 +103,6 @@ class TradeManager:
                 pass
         return {}
 
-    def giveback_fraction(self, st) -> float:
-        """
-        Fraction of peak profit we allow a winner to give back before cutting.
-        Aggressive scalper -> cut fast (small fraction); trend rider -> tolerate more.
-        Learned per symbol; sensible default otherwise.
-        """
-        p = self._personality(st)
-        if "giveback_frac" in p:
-            # never let a learned personality cut winners on tiny pullbacks:
-            # realised data showed the manager was giving back winners into
-            # small losers (only 5 TP hits vs 198 early closes). Floor the
-            # learned value so "let winners run" is the bias, not "scratch fast".
-            return max(float(p["giveback_frac"]), 0.5)
-        style = p.get("style")
-        if style == "aggressive_scalper":
-            return 0.55
-        if style == "trend_rider":
-            return 0.75
-        # neutral default: backtest-tuned (loosening giveback from 0.45 lifted PF)
-        try:
-            from src import config
-            return config.SCALP_GIVEBACK_FRAC
-        except Exception:
-            return 0.6
-
     def giveback_arm_points(self, st) -> float:
         """
         Minimum peak profit (points) before the giveback guard activates.
@@ -147,23 +122,6 @@ class TradeManager:
             mult = 1.5
         # default: ~1.5x the typical move on the entry timeframe (was 0.5x)
         return (st.atr_points or 60) * mult
-
-    def retain_floor_frac(self, st) -> float:
-        """
-        The PROFIT-RETENTION RATCHET floor: the minimum fraction of the peak profit
-        a trade must keep once the ratchet arms. Distinct from (and tighter than)
-        giveback_fraction — this is a hard "don't hand the move back" guard, tuned
-        from the observed leak (gold peaked £5+ then round-tripped). Higher = keep
-        more. Learned per symbol; sensible default otherwise.
-        """
-        p = self._personality(st)
-        if "retain_floor_frac" in p:
-            return min(max(float(p["retain_floor_frac"]), 0.3), 0.9)
-        try:
-            from src import config
-            return config.SCALP_RETAIN_FLOOR_FRAC
-        except Exception:
-            return 0.5
 
     def retain_arm_points(self, st) -> float:
         """
@@ -327,7 +285,12 @@ class TradeManager:
         # Common capital-preservation: if price violently reverses past a hard
         # threshold beyond entry against us, exit (applies to all variants).
         adverse_points = -profit_points
-        violent = st.atr_points and adverse_points > max(st.atr_points * 1.5, 2 * spread_points + 50)
+        # capital-preservation threshold: prefer ATR-scaled, but FALL BACK to a spread/point
+        # floor when atr_points is missing (0/None) so this software failsafe is UNCONDITIONAL
+        # (the broker SL still protects regardless, but never leave the in-code guard off).
+        _viol_thresh = (max(st.atr_points * 1.5, 2 * spread_points + 50) if st.atr_points
+                        else (2 * spread_points + 50))
+        violent = adverse_points > _viol_thresh
         if violent:
             self._log(st, "capital_preservation_exit", price)
             return {"close": f"violent reversal ({adverse_points:.0f}pts adverse)"}
@@ -365,6 +328,7 @@ class TradeManager:
                 be_plus = st.entry + be_lock * point * sgn
                 st.moved_to_be = True
                 st.trail_active = True
+                st.sl = be_plus   # keep in-memory SL consistent with the broker SL
                 self._log(st, "gs_proven_be_lock", be_plus)
                 # remove the safety-TP now that we're trailing (let the runner run)
                 return {"modify_sl": round(be_plus, 6), "remove_tp": True, "_tag": "gs_proven_be"}

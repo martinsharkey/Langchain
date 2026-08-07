@@ -27,6 +27,10 @@ from src.utils.logger import get_logger
 
 logger = get_logger("evo_optimizer")
 
+# module-level seed-model cache (keyed by report-set signature) so we don't re-parse the
+# big GoldShark XMLs + refit the GBR on every optimise() call across symbols/days.
+_SEED_CACHE = {"sig": None, "model": None, "features": None}
+
 
 class EvolutionaryOptimizer:
     def __init__(self, param_space: dict, backtest_fn: Callable,
@@ -64,18 +68,15 @@ class EvolutionaryOptimizer:
         return int(round(v)) if typ is int else round(v, 4)
 
     # ── STAGE 1: seed model from GoldShark passes ─────────────────────────────
-    _COLMAP = {  # GoldShark XML Inp* column -> our param name
-        "InpMinOsMALong": "osma_min_long", "InpMinBullsLong": "bulls_min_long",
-        "InpMaxBearsLong": "bears_min_long", "InpMinATR": "atr_min", "InpMaxATR": "atr_max",
-        "InpMinEmaSlope": "min_ema_slope", "InpMaxOsMAShort": "osma_max_short",
-        "InpMaxMomentumAge": "max_momentum_age", "InpSLATR": "sl_atr", "InpTPRR": "tp_rr",
-    }
+    # Column map is the shared canonical GOLDSHARK_COLMAP (tools/goldshark_columns) so the
+    # seed model and the researcher's verdict never drift. Features are OUR param names.
 
     def _train_seed_model(self, max_rows: int = 20000):
         """Fit params->PF on GoldShark passes so we can rank promising combos. Non-fatal:
         returns False if no reports/parser or too few rows."""
         try:
             from tools.parse_optimizer_report import parse_report, _f
+            from tools.goldshark_columns import GOLDSHARK_COLMAP, col_for, value_for
             from sklearn.ensemble import GradientBoostingRegressor
         except Exception:
             return False
@@ -86,21 +87,27 @@ class EvolutionaryOptimizer:
                 bts += glob.glob(os.path.join(d, "*.xml"))
         if not bts:
             return False
-        feats = [c for c in self._COLMAP]  # order-stable
+        # CACHE: skip the expensive XML parse + GBR fit if the report set is unchanged.
+        sig = tuple(sorted((p, int(os.path.getmtime(p)), os.path.getsize(p)) for p in bts))
+        if _SEED_CACHE["sig"] == sig and _SEED_CACHE["model"] is not None:
+            self._seed_model = _SEED_CACHE["model"]
+            self._seed_features = _SEED_CACHE["features"]
+            return True
+        feats = list(GOLDSHARK_COLMAP.keys())  # OUR param names (order-stable)
         X, y = [], []
         for path in sorted(bts, key=lambda p: -os.path.getsize(p))[:6]:
             try:
                 hdr, passes = parse_report(path)
             except Exception:
                 continue
-            present = [c for c in feats if c in hdr]
+            present = [p for p in feats if col_for(p, hdr)]
             if len(present) < 4:
                 continue
             for r in passes:
                 pf = _f(r, "Profit Factor")
                 if pf <= 0 or _f(r, "Trades") < 20:
                     continue
-                X.append([_f(r, c) for c in feats]); y.append(min(pf, 10.0))
+                X.append([value_for(p, r, _f) for p in feats]); y.append(min(pf, 10.0))
                 if len(X) >= max_rows:
                     break
         if len(X) < 200:
@@ -118,6 +125,7 @@ class EvolutionaryOptimizer:
         model.fit(np.array(X), np.array(y))
         self._seed_model = model
         self._seed_features = feats
+        _SEED_CACHE.update(sig=sig, model=model, features=feats)  # cache for reuse
         # feature importance = which PARAMS most drive PF across all the evidence
         imp = sorted(zip(feats, model.feature_importances_), key=lambda x: -x[1])[:5]
         logger.warning(f"[EVO] seed model trained on {len(X)} GoldShark passes; "
@@ -145,9 +153,10 @@ class EvolutionaryOptimizer:
                 + " ORDER BY id DESC LIMIT 5000", lp).fetchall()
         finally:
             conn.close()
-        # map snapshot indicator-state -> the same feature columns the GoldShark cols map to
-        snap_map = {"InpMinOsMALong": "osma", "InpMinBullsLong": "bulls_power",
-                    "InpMaxBearsLong": "bears_power", "InpMinATR": "atr", "InpMaxATR": "atr"}
+        # map OUR param-name features -> the live entry snapshot keys (indicator STATE at
+        # entry) so live rows populate the same columns the GoldShark passes do.
+        snap_map = {"osma_min_long": "osma", "bulls_min_long": "bulls_power",
+                    "bears_min_long": "bears_power", "atr_min": "atr", "atr_max": "atr"}
         added = 0
         for r in rows:
             try:
@@ -166,13 +175,25 @@ class EvolutionaryOptimizer:
     def _seed_score(self, cand: dict) -> float:
         if self._seed_model is None:
             return 0.0
-        row = [[float(cand.get(self._COLMAP[c], 0.0)) for c in self._seed_features]]
+        # features are OUR param names -> read directly from the candidate
+        row = [[float(cand.get(c, 0.0) or 0.0) for c in self._seed_features]]
         try:
             return float(self._seed_model.predict(np.array(row))[0])
         except Exception:
             return 0.0
 
     # ── STAGE 2: genetic joint search ─────────────────────────────────────────
+    def _carry(self, cand: dict, base_params: dict) -> dict:
+        """Overlay base_params keys that are NOT in PARAM_SPACE onto a candidate so every
+        config is scored under the SAME gating as the incumbent (critical: keeps floors_raw,
+        hard_sl_points, safety_tp_points, be/trail, bal_per_lot — otherwise a raw-gated gold
+        baseline would be compared against ATR-gated candidates: an invalid ranking)."""
+        merged = dict(cand)
+        for k, v in base_params.items():
+            if k not in self.space and k not in merged:
+                merged[k] = v
+        return merged
+
     def optimise(self, symbol: str, base_params: dict, generations: int = 6,
                  pop_size: int = 16, seed_pool: int = 400) -> Optional[dict]:
         """Joint evolutionary search. Returns the best {params,score,res} found that
@@ -184,14 +205,15 @@ class EvolutionaryOptimizer:
             base_score = base_res["score"]
 
         self._train_seed_model()
-        # initial population: base + evidence-seeded top candidates + random
+        # initial population: base + evidence-seeded top candidates + random. Every
+        # candidate carries the base's non-tunable keys (floors_raw etc.) for like-for-like.
         pop = [dict(base_params)]
         if self._seed_model is not None:
             ranked = sorted((self._sample() for _ in range(seed_pool)),
                             key=self._seed_score, reverse=True)
-            pop += ranked[:pop_size - 1]
+            pop += [self._carry(c, base_params) for c in ranked[:pop_size - 1]]
         else:
-            pop += [self._sample() for _ in range(pop_size - 1)]
+            pop += [self._carry(self._sample(), base_params) for _ in range(pop_size - 1)]
 
         def fitness(c):
             r = self.backtest_fn(symbol, c, c.get("sl_atr", 1.0), c.get("tp_rr", 2.0))

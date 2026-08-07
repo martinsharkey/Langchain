@@ -68,6 +68,18 @@ class DatastoreIngestor:
         """Detect new/changed files and ingest them. Returns a summary. Non-fatal."""
         manifest = self._load_manifest()
         seen = manifest.get("files", {})
+        # CHEAP SHORT-CIRCUIT: if the top-level dir mtimes are unchanged since last scan,
+        # skip the full recursive walk of the (large) corpus entirely.
+        try:
+            dir_sig = []
+            for root in self.roots:
+                for dp, _dn, _fn in os.walk(root):
+                    dir_sig.append((dp, int(os.path.getmtime(dp))))
+            dir_sig = tuple(sorted(dir_sig))
+            if manifest.get("dir_sig") == list(map(list, dir_sig)) and seen:
+                return {"new": 0, "ingested": 0, "by_type": {}, "errors": 0, "unchanged": True}
+        except Exception:
+            dir_sig = None
         new_files = []
         for root in self.roots:
             if not root or not os.path.isdir(root):
@@ -94,6 +106,8 @@ class DatastoreIngestor:
                 logger.debug(f"ingest skip {os.path.basename(path)}: {e}")
         manifest["files"] = seen
         manifest["updated"] = datetime.now(timezone.utc).isoformat()
+        if dir_sig is not None:
+            manifest["dir_sig"] = list(map(list, dir_sig))
         self._save_manifest(manifest)
         if summary["ingested"]:
             logger.warning(f"[AUTO-INGEST] absorbed {summary['ingested']} new/changed datastore "
@@ -113,15 +127,19 @@ class DatastoreIngestor:
             self._ingest_text(path, name)
 
     def _ingest_csv(self, path, name):
-        # GoldShark lifecycle telemetry -> trades + signatures (tagged non-live source)
+        # GoldShark lifecycle telemetry -> trades + signatures (tagged non-live source).
+        # The manifest guarantees a given file is only ingested once (unchanged files are
+        # skipped), so we don't double-insert across scans.
         try:
             from src.learning.goldshark_import import GoldSharkImporter
             if self.db is not None and ("lifecycle" in name.lower() or "unified" in name.lower()
                                         or "tradelog" in name.lower()):
                 imp = GoldSharkImporter(self.db)
-                n = imp.ingest(path) if hasattr(imp, "ingest") else None
-                self._remember(f"Ingested GoldShark telemetry CSV {name} ({n} rows) into trades "
-                               f"(tagged non-live).", "note", f"telemetry {name}", name)
+                res = imp.ingest_csv(path)
+                n = res.get("inserted") if isinstance(res, dict) else res
+                if n:
+                    self._remember(f"Ingested GoldShark telemetry CSV {name} ({n} rows) into trades "
+                                   f"(tagged non-live).", "note", f"telemetry {name}", name)
                 return
         except Exception as e:
             logger.debug(f"csv telemetry ingest skip {name}: {e}")
