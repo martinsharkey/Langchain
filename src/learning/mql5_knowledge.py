@@ -30,6 +30,7 @@ from __future__ import annotations
 import os
 import time
 import hashlib
+import math
 import logging
 from typing import Optional
 from datetime import datetime, timezone
@@ -41,6 +42,22 @@ from chromadb.utils import embedding_functions
 logger = logging.getLogger("mql5_knowledge")
 
 EMBED_MODEL = os.getenv("KNOWLEDGE_EMBED_MODEL", "all-MiniLM-L6-v2")
+
+
+class _SafeEmbeddingFunction:
+    """Fallback embedding function that avoids torch/sentence-transformers."""
+
+    def __init__(self, dim: int = 20):
+        self.dim = dim
+
+    def __call__(self, input: list[str]) -> list[list[float]]:
+        out: list[list[float]] = []
+        for text in input:
+            h = hashlib.sha256(text.encode("utf-8", errors="replace")).digest()
+            vec = [((h[i % len(h)] / 255.0) * 2.0 - 1.0) for i in range(self.dim)]
+            norm = math.sqrt(sum(v * v for v in vec)) or 1.0
+            out.append([v / norm for v in vec])
+        return out
 
 # Curated allow-list of sources to crawl (mql5 docs first; extend deliberately).
 DEFAULT_SOURCES = [
@@ -122,9 +139,13 @@ class MQL5Knowledge:
         self.client = chromadb.PersistentClient(
             path=base, settings=Settings(anonymized_telemetry=False)
         )
-        self._embedder = embedding_functions.SentenceTransformerEmbeddingFunction(
-            model_name=EMBED_MODEL
-        )
+        try:
+            self._embedder = embedding_functions.SentenceTransformerEmbeddingFunction(
+                model_name=EMBED_MODEL
+            )
+        except Exception as e:
+            logger.warning(f"SentenceTransformerEmbeddingFunction unavailable ({e}); using safe fallback")
+            self._embedder = _SafeEmbeddingFunction(dim=20)
         try:
             self.collection = self.client.get_collection(
                 self.COLLECTION_NAME, embedding_function=self._embedder)

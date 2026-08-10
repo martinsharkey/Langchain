@@ -65,20 +65,10 @@ class TrackedPosition:
 
 class ScalpEngine:
     def __init__(self):
-        with open(os.path.join(config.DATA_DIR, "trace_engine.log"), "a") as _tf:
-            _tf.write("__init__ start\n"); _tf.flush()
         self.connector = get_connector()
-        with open(os.path.join(config.DATA_DIR, "trace_engine.log"), "a") as _tf:
-            _tf.write("connector done\n"); _tf.flush()
-        self.strategy = XAUUSDStrategy()
-        with open(os.path.join(config.DATA_DIR, "trace_engine.log"), "a") as _tf:
-            _tf.write("strategy done\n"); _tf.flush()
-        self.registry = StrategyRegistry()
-        with open(os.path.join(config.DATA_DIR, "trace_engine.log"), "a") as _tf:
-            _tf.write("registry done\n"); _tf.flush()
+        self.strategy = XAUUSDStrategy()          # indicator calculator (symbol-agnostic math)
+        self.registry = StrategyRegistry()        # 7 real strategies + ensemble
         self.experience_db = ExperienceDatabase()
-        with open(os.path.join(config.DATA_DIR, "trace_engine.log"), "a") as _tf:
-            _tf.write("experience_db done\n"); _tf.flush()
 
         # Register the CryptoRTI whale-signal strategy (BTC bias, status=testing)
         try:
@@ -86,8 +76,6 @@ class ScalpEngine:
             register_cryptorti(self.registry)
         except Exception as e:
             logger.warning(f"CryptoRTI strategy not registered: {e}")
-        with open(os.path.join(config.DATA_DIR, "trace_engine.log"), "a") as _tf:
-            _tf.write("cryptorti strategy done\n"); _tf.flush()
 
         # Register the PRIMARY OsMA 7-indicator confluence strategy (#29), ported
         # from the proven GoldShark EAs. Symbol-agnostic; status=testing until it
@@ -97,8 +85,6 @@ class ScalpEngine:
             register_osma(self.registry)
         except Exception as e:
             logger.warning(f"OsMA_Confluence strategy not registered: {e}")
-        with open(os.path.join(config.DATA_DIR, "trace_engine.log"), "a") as _tf:
-            _tf.write("osma strategy done\n"); _tf.flush()
 
         # one BrokerAdapter per base symbol
         self.adapters: dict[str, BrokerAdapter] = {}
