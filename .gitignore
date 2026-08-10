@@ -1,0 +1,84 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg-info/
+dist/
+build/
+*.egg
+
+# Virtual Environment
+venv/
+.env/
+
+# Environment (keep .env.example in repo for credentials)
+.env
+.env.*
+!.env.example
+
+# ─── SECRETS — never commit ───
+# CryptoRTI credentials + mTLS certificates
+cryptorti/.env.cryptorti
+cryptorti/certs/*.pem
+cryptorti/certs/*.key
+**/*.pem
+**/*.key
+aws_credentials*
+
+# ─── Runtime state / data (machine-local, not source) ───
+data/
+*.db
+*.db-journal
+chromadb_store/
+**/chromadb*/
+bot_status.json
+risk_state.json
+symbol_stats.json
+cryptorti_signals.json
+cryptorti_correlation.json
+session_schedule.json
+KILL_SWITCH
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+logs/
+
+# Trading data
+data/
+*.csv
+*.h5
+
+# Test artifacts
+.pytest_cache/
+.coverage
+htmlcov/
+
+# session DB backups (never commit)
+*.backup_*.db
+
+# ONNX model artifacts (machine-local, rebuilt from the experience DB)
+data/models/
+
+# cached Danny whale events (machine-local)
+data/whale_cache/
+
+# SECRETS - never commit (contain MT5 password + API keys)
+env.txt
+env_out.txt
+*.env.txt
+
+data/learning_log_archive/
+
+data/history_cache/

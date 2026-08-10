@@ -1,0 +1,478 @@
+"""
+ParameterOptimizer — autonomous self-tuning of indicator parameters per symbol.
+
+This is the self-learning the trader wants: the bot proactively looks at a
+symbol, mutates its indicator parameters (EMA period, OsMA fast/slow/signal, RSI
+period, CCI period, and the SL/RR exit), backtests each candidate WALK-FORWARD
+on real history, and KEEPS a mutation only if it genuinely generalizes (PF>=1 in
+every time window) AND beats the current best. Micro-adjustments, tried on the
+symbol, kept when better — hill-climbing on out-of-sample edge.
+
+Tuned params are persisted per symbol (data/tuned_params.json) and applied live
+by the ensemble/focused signal path. Nothing is trusted until it passes the
+walk-forward gate, so the optimizer cannot overfit its way into live trading.
+"""
+
+from __future__ import annotations
+
+import os
+import json
+import random
+from typing import Optional
+from dataclasses import dataclass
+
+from src import config
+from src.utils.logger import get_logger
+
+logger = get_logger("param_optimizer")
+
+TUNED_PATH = os.path.join(config.DATA_DIR, "tuned_params.json")
+
+# Parameter search space: name -> (min, max, step, kind)
+# Ranges WIDENED (#29/#31) to reach the PROVEN GoldShark optimizer cluster that
+# the old ranges could not touch: EMA 13..130 (proven ~13 and up to 113),
+# OsMA fast up to ~66 / slow up to ~120 (proven cluster fast=44 slow=69-117),
+# ATR period 14..82 (was not tunable at all). Without this, auto-tune literally
+# cannot find the region where the confluence strategy tests PF 1.46-1.62.
+PARAM_SPACE = {
+    # AUTHORITATIVE mql5-doc optimization ranges for the 7-indicator confluence.
+    # MACD + OsMA share the same fast/slow/signal bounds.
+    "osma_fast":   (5, 34, 1, int),        # mql5: OsMA/MACD fast (def 12)
+    "osma_slow":   (20, 144, 2, int),      # mql5: OsMA/MACD slow (def 26)
+    "osma_signal": (5, 55, 1, int),        # mql5: OsMA/MACD signal (def 9)
+    "ema_period":  (3, 200, 1, int),       # mql5: EMA (def 14)
+    "atr_period":  (5, 50, 1, int),        # mql5: ATR (def 14)
+    "power_period": (5, 26, 1, int),       # mql5: Bulls/Bears Power (def 13)
+    "rsi_period":  (2, 30, 1, int),        # mql5: RSI (def 14)
+    # confluence strengths (ATR-relative gates) + exit
+    "atr_min":     (0.0, 4.0, 0.5, float),
+    "atr_max":     (0.0, 12.0, 1.0, float),
+    "min_ema_slope": (0.0, 0.5, 0.02, float),
+    "price_stretch_mult": (1.0, 4.0, 0.5, float),
+    "min_confluence": (1, 5, 1, int),
+    # ── SIGNED PER-SIDE STRENGTH FLOORS (ATR-normalized so one wide range fits gold
+    # ~0.5 and BTC ~15+; the confluence scales by ATR). These are THE core signal —
+    # how vigorous buyer/seller activity is. Long floors are minimums (>=), short
+    # floors maximums (<=, negative). Default/step includes 0 = gate OFF. Ranges are
+    # WIDE and signed (reach well beyond +-3 in ATR units). The optimizer + walk-forward
+    # DISCOVER the best per-symbol floors — no hardcoded folklore.
+    "osma_min_long":   (0.0, 3.0, 0.1, float),
+    "osma_max_short":  (-3.0, 0.0, 0.1, float),
+    "macd_min_long":   (0.0, 3.0, 0.1, float),
+    "macd_max_short":  (-3.0, 0.0, 0.1, float),
+    "bulls_min_long":  (0.0, 5.0, 0.1, float),
+    "bears_min_long":  (0.0, 5.0, 0.1, float),   # bears pulled positive in strong uptrend
+    "bears_max_short": (-5.0, 0.0, 0.1, float),
+    "bulls_max_short": (-5.0, 0.0, 0.1, float),
+    "atr_min_rel":     (0.0, 1.5, 0.1, float),   # relative ATR floor (vs median ATR)
+    # RSI exhaustion gate (was hardcoded 72/28) — now tunable so the optimizer can
+    # discover the right overbought/oversold cut per symbol.
+    "rsi_long_max":    (55.0, 100.0, 1.0, float),  # long blocked when RSI >= this (100 = OFF, GoldShark has no RSI)
+    "rsi_short_min":   (0.0, 45.0, 1.0, float),     # short blocked when RSI <= this (0 = OFF)
+    # MACD-lead window (was hardcoded 5) — how many bars back MACD must have started
+    # the fresh cycle that OsMA then confirms. Core to the entry edge.
+    "macd_lead_bars":  (1, 12, 1, int),
+    # fresh-momentum window: enter within this many bars of the OsMA cross (GoldShark
+    # InpMaxMomentumAge). Proven-edge gold ~26; wide range so the optimizer can tune it.
+    "max_momentum_age": (1, 40, 1, int),
+    # OsMA acceleration magnitude |osma_now - osma_prev| / ATR. GoldShark data shows
+    # this is the single strongest predictor found (corr -0.68 with drawdown). ATR-
+    # normalized so one range fits all symbols. 0.0 = disabled (legacy behaviour).
+    "accel_min": (0.0, 1.0, 0.05, float),
+    "sl_atr":      (0.5, 3.0, 0.5, float),
+    "tp_rr":       (0.5, 3.0, 0.5, float),
+}
+
+DEFAULTS = {
+    "osma_fast": 12, "osma_slow": 26, "osma_signal": 9,
+    "ema_period": 14, "atr_period": 14, "power_period": 13, "rsi_period": 14,
+    "atr_min": 0.0, "atr_max": 0.0, "min_ema_slope": 0.02,
+    "price_stretch_mult": 2.0, "min_confluence": 4,
+    # signed strength floors default 0 = gate OFF (sign-only) -> current behaviour
+    "osma_min_long": 0.0, "osma_max_short": 0.0,
+    "macd_min_long": 0.0, "macd_max_short": 0.0,
+    "bulls_min_long": 0.0, "bears_min_long": 0.0,
+    "bears_max_short": 0.0, "bulls_max_short": 0.0, "atr_min_rel": 0.0,
+    "rsi_long_max": 72.0, "rsi_short_min": 28.0, "macd_lead_bars": 5, "max_momentum_age": 5,
+    "accel_min": 0.0, "sl_atr": 2.0, "tp_rr": 1.0,
+}
+
+# PROVEN-EDGE per-symbol baselines mined from real EA optimizer results. The directed
+# optimizer starts here (not from generic DEFAULTS) so it refines a config that ALREADY
+# had a demonstrated edge. GOLD: median of the top-30 robust GoldShark optimizer configs
+# (PF>=1.5, trades>=40, expPayoff>=50, DD<=35; avg PF 5.33, ~2435 trades). Strength
+# floors are ATR-normalized (GoldShark raw value / gold M1 ATR ~2.3). Long floors are
+# minimums (>=), short floors maximums (<=). See WHALE_ANALYSIS + session memory.
+SYMBOL_BASELINES = {
+    "XAUUSD": {
+        # pass5469 PROVEN config (reproduced £100->£273 2.73x, WR 94%, PF 1.48 on tick
+        # data). Floors ATR-normalized (raw / gold ATR ~2.3). osma_slow 26, steep slope.
+        "osma_fast": 12, "osma_slow": 26, "osma_signal": 9, "ema_period": 13,
+        "atr_period": 14, "min_ema_slope": 0.2, "atr_min": 1.4, "atr_max": 4.5,
+        "osma_min_long": 0.87, "bulls_min_long": 0.3, "bears_min_long": 0.0,
+        "osma_max_short": -0.30, "bulls_max_short": 0.0, "bears_max_short": -0.04,
+        "max_momentum_age": 26,
+        "rsi_long_max": 100.0, "rsi_short_min": 0.0,
+        "sl_atr": 0.8, "tp_rr": 2.0, "min_confluence": 3, "accel_min": 0.1,
+    },
+    # BTCUSD + GER40: floors DISCOVERED by independent per-symbol tick backtest
+    # (discover_floors.py) — NOT borrowed from gold. Entry direction is good (66-78%
+    # go green) but exit/frequency balance not yet profitable (PF<1) — these are a
+    # non-zero STARTING baseline for the optimizer to refine, not a proven-profitable
+    # config. ATR-normalized floors so they scale with the symbol's volatility.
+    "BTCUSD": {
+        "osma_fast": 12, "osma_slow": 26, "osma_signal": 9, "ema_period": 13,
+        "atr_period": 14, "min_ema_slope": 0.05, "atr_min": 0.0, "atr_max": 0.0,
+        "osma_min_long": 0.1, "bulls_min_long": 1.5, "bears_min_long": 0.0,
+        "osma_max_short": -0.1, "bulls_max_short": 0.0, "bears_max_short": -1.5,
+        "max_momentum_age": 26, "rsi_long_max": 100.0, "rsi_short_min": 0.0,
+        "sl_atr": 0.8, "tp_rr": 2.0, "min_confluence": 3, "accel_min": 0.0,
+    },
+    "GER40": {
+        "osma_fast": 12, "osma_slow": 26, "osma_signal": 9, "ema_period": 13,
+        "atr_period": 14, "min_ema_slope": 0.05, "atr_min": 0.0, "atr_max": 0.0,
+        "osma_min_long": 0.2, "bulls_min_long": 1.0, "bears_min_long": 0.0,
+        "osma_max_short": -0.2, "bulls_max_short": 0.0, "bears_max_short": -1.0,
+        "max_momentum_age": 26, "rsi_long_max": 100.0, "rsi_short_min": 0.0,
+        "sl_atr": 0.8, "tp_rr": 2.0, "min_confluence": 3, "accel_min": 0.0,
+    },
+}
+
+
+def _clamp(v, lo, hi, kind):
+    v = max(lo, min(hi, v))
+    return int(round(v)) if kind is int else round(v, 2)
+
+
+class ParameterOptimizer:
+    def __init__(self, registry, backtest_fn, mql5_knowledge=None,
+                 is_failed_fn=None, config_fingerprint_fn=None):
+        """
+        registry: StrategyRegistry (for focused pockets + regime).
+        backtest_fn: callable(symbol, params, sl_atr, tp_rr) -> walk-forward result
+          dict {"pfs":[...], "wrs":[...], "n_total":int, "generalizes":bool,
+                "score": float}  (score = min PF across windows, the robust metric).
+        mql5_knowledge: optional MQL5Knowledge (#22/#25) to GROUND the next tuning
+          direction in the docs instead of blind random search.
+        is_failed_fn: optional callable(symbol, params_dict)->bool (#25) so the
+          search AVOIDS directions the #27 checkpointer already marked as failed.
+        config_fingerprint_fn: optional callable(params_dict)->str for logging.
+        """
+        self.registry = registry
+        self.backtest_fn = backtest_fn
+        self.mql5_knowledge = mql5_knowledge
+        self.is_failed_fn = is_failed_fn
+        self.config_fingerprint_fn = config_fingerprint_fn
+        self.tuned = self._load()
+
+    def _load(self) -> dict:
+        try:
+            if os.path.exists(TUNED_PATH):
+                with open(TUNED_PATH) as f:
+                    return json.load(f)
+        except Exception:
+            pass
+        return {}
+
+    def _persist(self):
+        try:
+            os.makedirs(config.DATA_DIR, exist_ok=True)
+            tmp = TUNED_PATH + ".tmp"
+            with open(tmp, "w") as f:
+                json.dump(self.tuned, f, indent=2)
+            os.replace(tmp, TUNED_PATH)
+        except Exception as e:
+            logger.warning(f"tuned params persist failed: {e}")
+
+    # STRUCTURE keys are symbol-AGNOSTIC and safe to share (counts / ATR-relative /
+    # switches): the indicator COMBINATION is universal. These fall back to the gold
+    # baseline for any symbol lacking its own value.
+    _SHARED_STRUCT_KEYS = ("min_confluence", "max_momentum_age", "min_ema_slope",
+                           "rsi_long_max", "rsi_short_min")
+    # MAGNITUDE floors are SYMBOL-SPECIFIC (gold's OsMA/Bulls/Bears levels are NOT
+    # BTC's or GER40's — even ATR-normalized the behaviour differs). These must be
+    # DISCOVERED per symbol by its own backtest; NEVER borrowed from gold. Until a
+    # symbol has its own, they stay 0 = sign-based structure only (no false magnitude
+    # gate). (User correction: the pass5469 .set is XAUUSD-only.)
+    _MAGNITUDE_KEYS = ("osma_min_long", "bulls_min_long", "osma_max_short",
+                       "bears_max_short", "macd_min_long", "macd_max_short",
+                       "bulls_max_short", "bears_min_long")
+
+    def current_params(self, symbol: str) -> dict:
+        key = self._key(symbol)
+        gold = SYMBOL_BASELINES.get("XAUUSD", {})
+        is_gold = key.startswith("XAUUSD")
+        if key in self.tuned and self.tuned[key].get("params"):
+            p = dict(self.tuned[key]["params"])
+            # share only STRUCTURE from the gold baseline; magnitude floors stay
+            # per-symbol (borrowing gold's magnitudes would misfire on BTC/GER40).
+            for fk in self._SHARED_STRUCT_KEYS:
+                if (p.get(fk) in (None, 0, 0.0)) and gold.get(fk) not in (None, 0, 0.0):
+                    p[fk] = gold[fk]
+            if not is_gold:
+                # ensure no BORROWED magnitude floor leaks onto a non-gold symbol
+                for mk in self._MAGNITUDE_KEYS:
+                    if p.get(mk) is None:
+                        p[mk] = 0.0
+            return p
+        # no tuned entry
+        for pref, base in SYMBOL_BASELINES.items():
+            if key.startswith(pref):
+                merged = dict(DEFAULTS); merged.update(base)
+                return merged
+        # non-gold, no baseline: DEFAULTS + shared STRUCTURE only (magnitudes = 0,
+        # i.e. sign/structure gating until this symbol's own floors are backtested).
+        merged = dict(DEFAULTS)
+        for fk in self._SHARED_STRUCT_KEYS:
+            if gold.get(fk) not in (None, 0, 0.0):
+                merged[fk] = gold[fk]
+        for mk in self._MAGNITUDE_KEYS:
+            merged.setdefault(mk, 0.0)
+        return merged
+
+    def _key(self, symbol: str) -> str:
+        return symbol.upper()
+
+    def _directed_candidates(self, base: dict):
+        """DIRECTED, non-random coordinate search over the highest-impact levers, in
+        priority order: signed STRENGTH floors (osma/macd/bulls/bears magnitude) FIRST,
+        then indicator PERIODS, then exit shape. For each parameter we yield candidates
+        stepping it UP and DOWN from the current value (coordinate descent). This is
+        purposeful — every lever is tested each run — not a random lottery. The caller
+        evaluates each against the walk-forward gate and greedily keeps improvements."""
+        STRENGTH = ["osma_min_long", "osma_max_short", "macd_min_long", "macd_max_short",
+                    "bulls_min_long", "bears_min_long", "bears_max_short", "bulls_max_short"]
+        PERIODS = ["osma_fast", "osma_slow", "osma_signal", "ema_period",
+                   "atr_period", "power_period", "rsi_period", "macd_lead_bars",
+                   "max_momentum_age"]
+        SHAPE = ["min_confluence", "min_ema_slope", "atr_min_rel", "atr_min", "atr_max",
+                 "price_stretch_mult", "rsi_long_max", "rsi_short_min", "sl_atr", "tp_rr"]
+        for k in STRENGTH + PERIODS + SHAPE:
+            if k not in PARAM_SPACE:
+                continue
+            lo, hi, step, kind = PARAM_SPACE[k]
+            cur = base.get(k, DEFAULTS.get(k, lo))
+            # step several increments each way so we actually explore the range
+            for mult in (1, 2, 4):
+                for direction in (1, -1):
+                    v = _clamp(cur + direction * step * mult, lo, hi, kind)
+                    if v == cur:
+                        continue
+                    cand = dict(base); cand[k] = v
+                    if cand.get("osma_fast", 12) >= cand.get("osma_slow", 26):
+                        _lo, _hi, _st, _k = PARAM_SPACE["osma_slow"]
+                        cand["osma_slow"] = _clamp(cand["osma_fast"] + 8, _lo, _hi, _k)
+                    yield k, cand
+
+    def _mutate(self, params: dict, n_mutations: int = 2) -> dict:
+        """Randomly nudge a few parameters, BIASED toward the highest-impact levers:
+        the signed STRENGTH floors (osma/macd/bulls/bears magnitude) and the indicator
+        PERIODS. A flat random.sample over ~24 keys almost never explores the 9 strength
+        floors, so they stayed at 0 (sign-only). We now weight the sampling so every
+        candidate is likely to move a strength floor and/or a period — these change the
+        signal itself, which is where the edge lives."""
+        cand = dict(params)
+        strength = [k for k in ("osma_min_long", "osma_max_short", "macd_min_long",
+                                "macd_max_short", "bulls_min_long", "bears_min_long",
+                                "bears_max_short", "bulls_max_short") if k in PARAM_SPACE]
+        periods = [k for k in ("osma_fast", "osma_slow", "osma_signal", "ema_period",
+                               "atr_period", "power_period", "rsi_period") if k in PARAM_SPACE]
+        other = [k for k in PARAM_SPACE if k not in strength and k not in periods]
+        # weighted pool: strength + periods appear more often than the rest
+        weighted = strength * 3 + periods * 2 + other
+        keys = set(random.sample(weighted, k=min(n_mutations + 1, len(weighted))))
+        # guarantee at least one STRENGTH floor is explored when they exist
+        if strength and not (keys & set(strength)):
+            keys.add(random.choice(strength))
+        for k in keys:
+            lo, hi, step, kind = PARAM_SPACE[k]
+            cur = cand.get(k, DEFAULTS[k])
+            direction = random.choice([-1, 1])
+            cand[k] = _clamp(cur + direction * step, lo, hi, kind)
+        # keep ema_fast < ema_slow, osma_fast < osma_slow (sane ordering)
+        if cand["osma_fast"] >= cand["osma_slow"]:
+            _lo, _hi, _st, _k = PARAM_SPACE["osma_slow"]
+            cand["osma_slow"] = _clamp(cand["osma_fast"] + 8, _lo, _hi, _k)  # M1: re-clamp to space
+        return cand
+
+    def _apply_directives(self, params: dict, directives: dict) -> dict:
+        """
+        Build a candidate GUIDED by post-mortem directives (e.g. {'sl_atr': +0.2,
+        'tp_rr': +0.5, 'giveback': +0.15}). Reflection steers the search; the
+        walk-forward gate still decides whether to keep it.
+        """
+        cand = dict(params)
+        for k, delta in (directives or {}).items():
+            if k not in PARAM_SPACE:
+                continue  # e.g. 'entry_extension_filter' handled elsewhere
+            lo, hi, step, kind = PARAM_SPACE[k]
+            cur = cand.get(k, DEFAULTS[k])
+            cand[k] = _clamp(cur + delta, lo, hi, kind)
+        if cand["osma_fast"] >= cand["osma_slow"]:
+            _lo, _hi, _st, _k = PARAM_SPACE["osma_slow"]
+            cand["osma_slow"] = _clamp(cand["osma_fast"] + 8, _lo, _hi, _k)  # M1: re-clamp to space
+        return cand
+
+    def _mql5_guided_candidate(self, symbol: str, params: dict) -> Optional[dict]:
+        """
+        #25 ReAct alternative: instead of a blind random mutation, ask the mql5
+        knowledge RAG for a tuning DIRECTION and nudge the relevant parameter that
+        way. Cheap keyword mapping from the retrieved text to a param delta.
+        Returns a candidate or None (fall back to random mutation).
+        """
+        if self.mql5_knowledge is None:
+            return None
+        try:
+            hits = self.mql5_knowledge.research(
+                f"better indicator parameters to improve {symbol} entry timing and reduce false signals", 2)
+        except Exception:
+            return None
+        if not hits:
+            return None
+        text = " ".join(h.get("text", "").lower() for h in hits)
+        cand = dict(params)
+        moved = False
+        # map doc guidance -> a concrete parameter nudge (grounded, not random)
+        if "faster" in text or "react faster" in text or "earlier" in text:
+            lo, hi, step, kind = PARAM_SPACE["osma_fast"]
+            cand["osma_fast"] = _clamp(cand.get("osma_fast", DEFAULTS["osma_fast"]) - step, lo, hi, kind)
+            moved = True
+        elif "smoother" in text or "fewer" in text or "reduce" in text or "noise" in text:
+            lo, hi, step, kind = PARAM_SPACE["osma_slow"]
+            cand["osma_slow"] = _clamp(cand.get("osma_slow", DEFAULTS["osma_slow"]) + step, lo, hi, kind)
+            moved = True
+        if "volatility" in text or "atr" in text:
+            lo, hi, step, kind = PARAM_SPACE["atr_period"]
+            cand["atr_period"] = _clamp(cand.get("atr_period", DEFAULTS["atr_period"]) - step, lo, hi, kind)
+            moved = True
+        if not moved:
+            return None
+        if cand["osma_fast"] >= cand["osma_slow"]:
+            _lo, _hi, _st, _k = PARAM_SPACE["osma_slow"]
+            cand["osma_slow"] = _clamp(cand["osma_fast"] + 8, _lo, _hi, _k)  # M1: re-clamp to space
+        return cand
+
+    def _is_failed(self, symbol: str, cand: dict) -> bool:
+        """#25: True if this candidate matches a #27 checkpointer failed direction."""
+        if self.is_failed_fn is None:
+            return False
+        try:
+            return bool(self.is_failed_fn(symbol, cand))
+        except Exception:
+            return False
+
+    def optimize(self, symbol: str, iterations: int = 12, candidates_per_iter: int = 1,
+                 directives: dict = None) -> dict:
+        """
+        Hill-climb: start from current best, try mutations, keep any that
+        generalize AND beat the incumbent's score (min-PF across windows).
+
+        If `directives` are supplied (from the post-mortem self-reflection), the
+        FIRST candidate is guided in that direction — so the bot's reflection on
+        its own failures actively steers the tuning, then walk-forward validates.
+        Returns a summary of what changed.
+        """
+        key = self._key(symbol)
+        base = self.current_params(symbol)
+        base_res = self.backtest_fn(symbol, base, base.get("sl_atr", 1.0), base.get("tp_rr", 2.0))
+        if not base_res:
+            return {"symbol": symbol, "status": "no baseline data"}
+        best_params = base
+        best_score = base_res["score"] if base_res.get("generalizes") else -1.0
+        best_res = base_res
+        improved = False
+        tried = 0
+        directive_worked = False
+
+        # candidate list: reflection-guided first, then a #25 mql5-grounded
+        # candidate, then a DIRECTED coordinate search over the high-impact levers
+        # (strength floors -> periods -> exit shape). All skip #27 failed directions.
+        guided = [self._apply_directives(base, directives)] if directives else []
+        mql5_cand = self._mql5_guided_candidate(symbol, best_params)
+        if mql5_cand is not None:
+            guided.append(mql5_cand)
+
+        # 1) evaluate the reflection/mql5-guided candidates first
+        for cand in guided:
+            if self._is_failed(symbol, cand):
+                continue
+            tried += 1
+            res = self.backtest_fn(symbol, cand, cand.get("sl_atr", 1.0), cand.get("tp_rr", 2.0))
+            if res and res.get("generalizes") and res["score"] > best_score + 0.01:
+                best_score = res["score"]; best_params = cand; best_res = res
+                improved = True; directive_worked = True
+
+        # 2) DIRECTED coordinate search — purposeful, not random. Steps each strength
+        # floor / period / exit param up & down; greedily adopts what clears the gate so
+        # the search descends coordinate-by-coordinate from the improving base.
+        # ATTRIBUTION: because we move ONE coordinate at a time, we know WHICH lever
+        # (and by how much expectancy/PF) drove each accepted improvement.
+        attribution = []   # [{param, from, to, score_gain}]
+        budget = max(iterations, 0)
+        for _pname, cand in self._directed_candidates(best_params):
+            if budget <= 0:
+                break
+            if self._is_failed(symbol, cand):
+                continue
+            budget -= 1; tried += 1
+            res = self.backtest_fn(symbol, cand, cand.get("sl_atr", 1.0), cand.get("tp_rr", 2.0))
+            if not res or not res.get("generalizes"):
+                continue
+            # robust objective: maximise the WORST-window PF (min across windows),
+            # tie-break on total R. Only keep if it clears the incumbent.
+            if res["score"] > best_score + 0.01:
+                attribution.append({"param": _pname, "from": best_params.get(_pname),
+                                    "to": cand.get(_pname),
+                                    "score_gain": round(res["score"] - best_score, 3)})
+                best_score = res["score"]; best_params = cand; best_res = res
+                improved = True
+
+        if improved:
+            # rank the levers that actually gave the edge (biggest score gains)
+            attribution.sort(key=lambda a: -a["score_gain"])
+            self.tuned[key] = {
+                "params": best_params,
+                "score": round(best_score, 3),
+                "pfs": best_res.get("pfs"),
+                "wrs": best_res.get("wrs"),
+                "n": best_res.get("n_total"),
+                "attribution": attribution[:5],   # which param changes drove the edge
+                "updated_at": __import__("datetime").datetime.now(__import__("datetime").timezone.utc).isoformat(),
+            }
+            self._persist()
+            edge = attribution[0] if attribution else None
+            logger.info(f"[OPTIMIZER] {symbol}: IMPROVED -> min-PF {best_score:.2f} "
+                        f"(edge lever: {edge['param'] if edge else 'guided'} "
+                        f"{edge['from'] if edge else ''}->{edge['to'] if edge else ''}) "
+                        f"tried {tried}, from_reflection={directive_worked}")
+            # MINE THE SUCCESS into the RAG: which adjustment worked, so it is
+            # semantically recallable for future decisions (symmetric with the
+            # failed-direction memory the checkpointer already records).
+            self._remember_success(symbol, best_params, best_score, attribution, directive_worked)
+            return {"symbol": symbol, "improved": True, "score": best_score,
+                    "params": best_params, "pfs": best_res.get("pfs"), "tried": tried,
+                    "from_reflection": directive_worked, "attribution": attribution[:5]}
+
+        logger.info(f"[OPTIMIZER] {symbol}: no improvement over min-PF {best_score:.2f} (tried {tried})")
+        return {"symbol": symbol, "improved": False, "score": best_score, "tried": tried}
+
+    def _remember_success(self, symbol, params, score, attribution, from_reflection):
+        """Store a live-validated WINNING adjustment in the KnowledgeStore RAG so the
+        bot can recall 'this indicator change gave an edge' when deciding future tunes.
+        Symmetric with the checkpointer's failed-direction memory."""
+        ks = getattr(self, "knowledge_store", None)
+        if ks is None:
+            return
+        try:
+            levers = ", ".join(f"{a['param']} {a['from']}->{a['to']} (+{a['score_gain']}PF)"
+                               for a in attribution[:3]) or ("reflection-guided" if from_reflection else "config")
+            ks.remember(
+                key=f"winning_tune_{symbol.upper()}", kind="finding", topic="param_tuning",
+                text=(f"On {symbol.upper()} a config change PASSED walk-forward to min-PF "
+                      f"{score:.2f}. The lever(s) that gave the edge: {levers}. Prefer "
+                      f"exploring near this direction for {symbol.upper()}."))
+        except Exception:
+            pass
+
+    def status(self) -> dict:
+        return dict(self.tuned)

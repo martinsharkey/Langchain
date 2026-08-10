@@ -1,0 +1,176 @@
+"""
+Entry-quality learner (#entry-signal) — mines the per-symbol ENTRY-QUALITY recipe
+that maximises ENTRY-DIRECTION success (the ~95% edge the GoldShark / EMA_OSMA_ATR
+EAs achieved: the trade went into meaningful profit, i.e. direction was right).
+
+EVIDENCE (full EA telemetry): OsMA/Bulls/Bears STRENGTH magnitude does NOT separate
+winners. What DOES lift entry-direction success is a COMBINATION of freshness +
+not-over-extended + runway:
+  accel_min      OsMA acceleration |osma-osma_prev|/ATR (fresh momentum)
+  max_stretch_atr  |close-EMA|/ATR ceiling (not over-extended)
+  dom_min        dominant power (Bulls long / Bears short)/ATR
+  runway_min     |OsMA| / recent-avg|OsMA| (FinalMultiplier proxy)
+
+The learner greedily selects the gate set that raises entry-success on THIS symbol's
+own closed trades, applied ONLY when it beats the base rate on a meaningful sample.
+Scale-free (all ATR-normalized) so gold and BTC self-calibrate.
+"""
+from __future__ import annotations
+import json
+import sqlite3
+from typing import Optional
+
+from src.utils.logger import get_logger
+
+logger = get_logger("entry_quality")
+
+# candidate gates: (cfg_key, field, op, value)
+_CANDIDATES = [
+    ("accel_min", "accel", ">=", 0.02), ("accel_min", "accel", ">=", 0.05), ("accel_min", "accel", ">=", 0.10),
+    ("dom_min", "dom", ">=", 0.5), ("dom_min", "dom", ">=", 1.0), ("dom_min", "dom", ">=", 1.5),
+    ("max_stretch_atr", "stretch", "<=", 2.0), ("max_stretch_atr", "stretch", "<=", 1.0), ("max_stretch_atr", "stretch", "<=", 0.7),
+    ("runway_min", "runway", ">=", 2.0), ("runway_min", "runway", ">=", 3.0),
+]
+
+
+class EntryStrengthLearner:  # name kept for wiring compatibility
+    def __init__(self, experience_db, min_sample: int = 40, green_atr: float = 0.3,
+                 min_keep_frac: float = 0.15, max_gates: int = 3,
+                 min_trades_per_day: float = 4.0):
+        self.db = experience_db
+        self.min_sample = min_sample
+        self.green_atr = green_atr
+        self.min_keep_frac = min_keep_frac
+        self.max_gates = max_gates
+        # NEVER choke: the tuned strength recipe must still leave at least this many
+        # entries/day for the symbol, else we keep it looser. This is the balance
+        # between entry SUCCESS and stopping trading altogether.
+        self.min_trades_per_day = min_trades_per_day
+
+    def _samples(self, symbol_prefix: str):
+        conn = sqlite3.connect(self.db.db_path)
+        conn.row_factory = sqlite3.Row
+        lw, lp = self.db.learning_window_clause()   # exclude pre-fix era + recency
+        rows = [dict(r) for r in conn.execute(
+            "SELECT action, mfe_points, atr_value, indicators_snapshot FROM trades "
+            "WHERE symbol LIKE ? AND outcome IN ('win','loss','breakeven') "
+            "AND indicators_snapshot IS NOT NULL" + lw + " ORDER BY id DESC LIMIT 1500",
+            tuple([symbol_prefix + "%"] + lp)).fetchall()]
+        conn.close()
+        out = []
+        for r in rows:
+            try:
+                s = json.loads(r["indicators_snapshot"]) if r["indicators_snapshot"] else {}
+            except Exception:
+                continue
+            atr = float(r["atr_value"] or s.get("atr") or 0)
+            mfe = r["mfe_points"]
+            if atr <= 0 or mfe is None:
+                continue
+            close = float(s.get("close") or 0); ema = float(s.get("ema_fast") or s.get("ema") or 0)
+            osma = float(s.get("osma") or 0); osma_prev = float(s.get("osma_prev") or 0)
+            recent = s.get("osma_recent") or []
+            mags = [abs(float(x)) for x in recent if x is not None]
+            runway = (abs(osma) / (sum(mags) / len(mags))) if mags else float("nan")
+            dom = (float(s.get("bulls_power") or 0) if r["action"] == "buy"
+                   else -float(s.get("bears_power") or 0)) / atr
+            out.append({
+                "green": 1 if mfe >= self.green_atr * atr else 0,
+                "accel": abs(osma - osma_prev) / atr,
+                "stretch": abs(close - ema) / atr if (close > 0 and ema > 0) else float("nan"),
+                "dom": dom, "runway": runway,
+            })
+        return out
+
+    @staticmethod
+    def _passes(rec, gate):
+        _, field, op, val = gate
+        x = rec.get(field)
+        if x is None or x != x:   # nan/missing -> permissive
+            return True
+        return x >= val if op == ">=" else x <= val
+
+    def _rate(self, samples, gates):
+        kept = [s for s in samples if all(self._passes(s, g) for g in gates)]
+        if not kept:
+            return 0.0, 0
+        return sum(s["green"] for s in kept) / len(kept), len(kept)
+
+    def learn_symbol(self, symbol_prefix: str) -> Optional[dict]:
+        """Learn the per-symbol strength recipe that MAXIMISES entry-direction success
+        WITHOUT choking trading below min_trades_per_day. Uses the frequency-vs-quality
+        analyzer (which sweeps osma/dom/runway and enforces the trades/day floor) as the
+        primary source; falls back to the greedy gate search on older/other data."""
+        # Primary: frequency-aware, no-choke recommendation from clean live data.
+        try:
+            from src.learning.entry_frequency import EntryFrequencyAnalyzer
+            fa = EntryFrequencyAnalyzer(self.db, green_atr=self.green_atr)
+            a = fa.analyze(symbol_prefix, days=7, min_trades_per_day=self.min_trades_per_day)
+            rec = a.get("recommended")
+            if rec and a.get("n", 0) >= 20:
+                recipe = {}
+                if rec["osma_min"] > 0:
+                    recipe["osma_strength_min"] = rec["osma_min"]   # legacy key still honored? no-op if unused
+                # map to the confluence gate keys
+                recipe = {}
+                if rec["dom_min"] > 0:
+                    recipe["dom_min"] = rec["dom_min"]
+                if rec["runway_min"] > 0:
+                    recipe["runway_min"] = rec["runway_min"]
+                # osma strength alone doesn't gate (proven not to separate); we only
+                # carry dom/runway (+ stretch from the greedy pass below if it helps)
+                improves = rec["success"] > a["base_success"] + 0.02
+                return {"recipe": recipe if improves else {},
+                        "n": a["n"], "base_success": a["base_success"],
+                        "gated_success": rec["success"], "kept": rec["n"],
+                        "per_day": rec["per_day"], "improves": improves,
+                        "gates": [f"dom>={rec['dom_min']}" if rec["dom_min"] else "",
+                                  f"runway>={rec['runway_min']}" if rec["runway_min"] else ""],
+                        "source": "frequency_analyzer"}
+        except Exception as e:
+            logger.debug(f"frequency analyzer fallback for {symbol_prefix}: {e}")
+
+        # Fallback: greedy gate search over the symbol's own trades.
+        S = self._samples(symbol_prefix)
+        if len(S) < self.min_sample:
+            return None
+        base, n = self._rate(S, [])
+        min_keep = max(20, int(n * self.min_keep_frac))
+        chosen, cur = [], base
+        while len(chosen) < self.max_gates:
+            best = None
+            for g in _CANDIDATES:
+                # don't stack two gates on the same key
+                if any(c[0] == g[0] for c in chosen):
+                    continue
+                sr, kept = self._rate(S, chosen + [g])
+                if kept >= min_keep and sr > cur + 0.005 and (best is None or sr > best[1]):
+                    best = (g, sr, kept)
+            if not best:
+                break
+            chosen.append(best[0]); cur = best[1]
+        kept = self._rate(S, chosen)[1]
+        improves = bool(chosen) and cur > base + 0.02
+        recipe = {}
+        if improves:
+            for key, _f, _op, val in chosen:
+                recipe[key] = val
+        return {"recipe": recipe, "n": n, "base_success": round(base, 3),
+                "gated_success": round(cur, 3), "kept": kept, "improves": improves,
+                "gates": [f"{g[1]}{g[2]}{g[3]}" for g in chosen]}
+
+    def learn_all(self, symbol_prefixes) -> dict:
+        out = {}
+        for s in symbol_prefixes:
+            try:
+                r = self.learn_symbol(s)
+                if r:
+                    out[s] = r
+                    pd = r.get("per_day")
+                    pd_str = f", {pd}/day" if pd is not None else ""
+                    logger.info(f"[ENTRY-QUALITY] {s}: {[g for g in r['gates'] if g] or '(base best)'} -> "
+                                f"entry-success {r['base_success']*100:.0f}%->{r['gated_success']*100:.0f}% "
+                                f"(kept {r['kept']}/{r['n']}{pd_str}, improves={r['improves']})")
+            except Exception as e:
+                logger.debug(f"entry-quality learn skip {s}: {e}")
+        return out
