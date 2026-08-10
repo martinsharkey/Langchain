@@ -13,11 +13,14 @@ source of truth for positions; all storage is local/embedded and portable.
 ## Entry point
 
 ```
-app.py LIVE_MICRO
+python app.py [LIVE_MICRO|OBSERVE|PAPER|LIVE]
  ├─ dashboard (:5000)                     dashboard/app.py
  ├─ scalp execution engine                src/trading/scalp_engine.py   ← the core
- ├─ orchestration (best-effort bg)        src/orchestration/*  → enhanced_research_agent
- └─ CryptoRTI whale feed (websocket)      src/cryptorti/*
+ ├─ cryptorti whale feed (websocket)      src/cryptorti/*
+ └─ research scheduler (best-effort)      src/orchestration/*  → enhanced_research_agent
+    NOTE: the orchestrator is started by app.py but is NOT wired into the
+    trading engine. The active research loop is ContinualResearcher inside
+    scalp_engine.py.
 ```
 
 `src/trading/scalp_engine.py` is the process that actually trades: it adopts live
@@ -98,8 +101,9 @@ The legacy full-agent path was deleted: `src/main.py`, `run_trader.py`,
 `src/learning/meta_strategy_agent.py`, and `src/agents/{research,strategy,risk,
 execution,env_setup,base}_agent.py` + the two orphaned duplicates
 (`environment_setup_agent.py`, `risk_management_agent.py`). The live `KnowledgeBase`,
-`enhanced_research_agent`, and `orchestration` were **kept** (still reachable from
-`app.py`).
+`enhanced_research_agent`, and `orchestration` were **kept in the repo** but are
+**not started automatically** by `app.py` — the active research loop is
+`ContinualResearcher` inside `scalp_engine.py`.
 
 ## Doc index
 

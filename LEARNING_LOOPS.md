@@ -20,16 +20,16 @@ indicators barely predict *how far* a trade runs (R²≈0.03), so the leverage i
 
 ## The live cycle (`src/trading/scalp_engine.py`)
 
-`_run_cycle()` (`:664`) each tick:
+`_run_cycle()` (`:858`) each tick:
 
-1. **reconcile closed** (`_reconcile_closed` `:670`) → record outcomes + MFE/MAE.
-2. **manage open positions** (`_manage_open_positions` `:677`).
-3. **adapt** (gated): weight adaptation every 5 cycles (`:684`); every 40 cycles
+1. **reconcile closed** (`_reconcile_closed` `:2707`) → record outcomes + MFE/MAE.
+2. **manage open positions** (`_manage_open_positions` `:1619`).
+3. **adapt** (gated): weight adaptation every 5 cycles (`:883`); every 40 cycles
    run the checkpointer, exit calibration, performance researcher, edge/graduation
-   recompute (`:702-777`).
-4. **background adaptive thread** (`:783`): post-mortem, optimizer, continual
+   recompute (`:929-944`).
+4. **background adaptive thread** (`:978`): post-mortem, optimizer, continual
    researcher, DynamicFixer, ONNX retrain.
-5. **evaluate & trade** per symbol (`_evaluate_and_trade` `:1809`).
+5. **evaluate & trade** per symbol (`_evaluate_and_trade` `:1005`).
 
 ### Entry gating pipeline (`_evaluate_and_trade`, `:1809`)
 ```
@@ -40,8 +40,8 @@ governor pause? → tuned indicator params → FOCUSED pocket (edge overlay) or 
  → place() → record_trade(pending) → track
 ```
 Notable vetoes: RAG hard-veto if historical win-rate < 25% over ≥ 25 similar
-patterns (`:1912-1919`); ONNX veto if `p_win < 0.30` over ≥ 120 samples
-(`:1938-1940`).
+patterns (`:2440`); ONNX veto if `p_win < 0.30` over ≥ 120 samples
+(`:2461-2462`).
 
 ### Reconcile → record (`_reconcile_closed`, `:2135`)
 Fetches the real deal result, recovers the `ManagedState` from live **or the
@@ -49,8 +49,8 @@ tombstone cache** (so manager-closed trades don't lose their excursion), compute
 MFE/MAE/exit-points, then:
 ```python
 update_trade_outcome(trade_id, outcome, profit_loss, exit_price, exit_reason,
-                     mfe_points=_mfe, mae_points=_mae, exit_points=_exit_pts)   # :2181
-vector_store.store_pattern(... outcome ...)                                     # :2191
+                     mfe_points=_mfe, mae_points=_mae, exit_points=_exit_pts)   # :2756
+vector_store.store_pattern(... outcome ...)                                     # :2775
 ```
 
 ---

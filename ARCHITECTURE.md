@@ -5,42 +5,41 @@ positions. All storage is local/embedded and portable (target: standalone app
 outside VS Code). Live task tracking is in **GitHub Issues**.
 
 ```
-                          ┌───────────────────────────────────────────────┐
-                          │                MT5 TERMINAL                     │
-                          │   VT Markets demo · terminal64.exe (GUI)        │
-                          │   ← source of truth for positions/fills →       │
-                          └───────────────▲───────────────┬─────────────────┘
-                                          │ order_send /   │ ticks / rates /
-                                          │ modify / close │ positions_get
-                                          │                ▼
+                           ┌───────────────────────────────────────────────┐
+                           │                MT5 TERMINAL                     │
+                           │   VT Markets demo · terminal64.exe (GUI)        │
+                           │   ← source of truth for positions/fills →       │
+                           └───────────────▲───────────────┬─────────────────┘
+                                           │ order_send /   │ ticks / rates /
+                                           │ modify / close │ positions_get
+                                           │                ▼
 ┌──────────────────────────────────────────────────────────────────────────────┐
 │                     SCALP EXECUTION ENGINE  (the process we run)                │
-│                        python -m src.trading.scalp_engine                      │
+│                        python app.py [LIVE_MICRO|OBSERVE|PAPER]                 │
 │                                                                                │
-│  every cycle:                                                                  │
-│   _adopt_existing_positions()  ── adopts bot+manual open trades on start/cycle │
-│   analyse symbols → Signal(s) → BrokerAdapter (mode: OBSERVE/PAPER/LIVE_MICRO) │
-│   TradeManager.evaluate() → modify_sl (real) / close (⚠ observe-only exit bug) │
-│   HTFContext: blip→widen SL once / reversal→cut                                │
-│   HYBRID_LLM review (throttled) → HOLD/TIGHTEN/EXIT                             │
-└───────┬───────────────────────┬───────────────────────┬───────────────────────┘
-        │                       │                        │
-        ▼                       ▼                        ▼
-┌────────────────┐   ┌────────────────────────┐   ┌──────────────────────────────┐
-│   LLM LAYER    │   │     LEARNING STACK      │   │      CRYPTORTI (whale)        │
-│ litellm_       │   │ experience_db (SQLite)  │   │ s3_client (history, Q&A doc)  │
-│  providers/    │   │ vector_store (Chroma:   │   │ signal_client (mTLS WS feed*) │
-│  provider_     │   │   xauusd_market_patterns)│  │ correlation_miner → table.json│
-│  router.py     │   │ pattern_matcher (RAG)   │   │ whale_rag (Chroma:            │
-│ modify_params  │   │ post_mortem             │   │   whale_wave_patterns)        │
-│  =True (FIXED) │   │ param_optimizer         │   │   ingests 37 profiles +       │
-│ 15+ providers  │   │ symbol_governor         │   │   CONFIRMED 6M→~6-candle case │
-│ + Kilo Gateway │   │ operating_mode          │   │ strategy → BTCUSD bias        │
-└────────────────┘   │ reflection_agent        │   └──────────────────────────────┘
-                     │ knowledge_store (Chroma:│    * WebSocket = authoritative
-                     │   trading_knowledge_rag │      (Danny: event-driven push,
-                     │   local MiniLM, portable)│      no S3 polling — see Q7/Q11)
-                     └────────────────────────┘
+│  app.py starts 3 daemon threads:                                               │
+│   1. dashboard (Flask :5000) — real-data UI                                    │
+│   2. engine (ScalpEngine) — the trading loop                                    │
+│   3. cryptorti (optional) — whale-signal WebSocket feed                         │
+│                                                                                │
+│  engine.initialize() (blocking, ~5-10s):                                       │
+│   - MT5 connect + account resolve                                              │
+│   - resolve BrokerAdapter per symbol (tradable check)                          │
+│   - adopt existing positions + reconcile pending DB rows                       │
+│   - load seeded reversal signatures                                             │
+│   - onboard new symbols (auto-discover strength floors)                        │
+│   - restore growth/capital state                                               │
+│   - init learning stack (registry, experience DB, vector store,                │
+│     pattern matcher, checkpointer, researcher, edge, graduation)               │
+│                                                                                │
+│  every SCALP_CYCLE_SECONDS (default 60s):                                      │
+│   _adopt_existing_positions() → reconcile closed → manage open                 │
+│   → adapt weights → refresh stats → evaluate symbols → trade                   │
+│                                                                                │
+│  between cycles, every SCALP_MANAGE_SECONDS (default 15s):                     │
+│   _fast_manage_until() → reconcile + manage open positions                     │
+│     (ratchet / trail / HTF blip-or-reversal / pre-close)                       │
+└──────────────────────────────────────────────────────────────────────────────┘
 
   LOCAL STORAGE (all under data/, gitignored, machine-local, portable):
     data/chromadb_store/         3 Chroma collections (xauusd / whale / knowledge)
@@ -55,20 +54,21 @@ poll S3 / `dashboard.json` in the hot path. The push should carry the confidence
 payload (Danny to embed — Q7). S3 is for async collaboration (`martin_qna.md`) only.
 
 ## Portability (standalone-app goal)
-- Runtime code depends only on: MT5, chromadb, sentence-transformers (MiniLM),
-  langchain/litellm, boto3. No editor/Kilo dependency in the run path.
-- Embedded ChromaDB (no server) = lightning-fast local lookups, offline after the
-  one-time MiniLM download.
+- Runtime code depends only on: MT5, chromadb, numpy, pandas. No editor/Kilo
+  dependency in the run path.
+- Embedded ChromaDB (no server) = lightning-fast local lookups.
+- Torch/sentence-transformers may be unavailable on some Windows hosts; the bot
+  falls back to a deterministic hash-based embedding function so vector stores
+  still operate without an ML runtime.
 - Fresh clone bootstrap: run the bot once (creates DBs), then
   `python -m src.cryptorti.correlation_miner` → `python -m src.cryptorti.whale_rag`
   to rebuild the whale RAG, and `python -m src.learning.knowledge_store` to seed
   durable knowledge.
 
 ## Known issues (track in GitHub)
-- Manager "rolling winner" EXIT is `OBSERVE close (no real order)` even in
-  LIVE_MICRO — real close orders not sent; winners ride the trailing broker SL.
-- whale_rag / knowledge_store not yet wired into the live engine loop (recall side).
 - Edge unproven: PF ~0.44 over 298 trades (Phase 1). Needs sample + tuning.
+- KnowledgeStore / MQL5Knowledge / vector_store embeddings may fall back to
+  safe hash-based mode if torch DLLs fail to load on Windows.
 
 See `DISTRIBUTED_ARCHITECTURE.md` for the FUTURE multi-box plan (design only; do
 not build until edge proven).
