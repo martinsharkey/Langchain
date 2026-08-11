@@ -2477,6 +2477,29 @@ class ScalpEngine:
         fs = self.registry.get_focused_signal(indicators, tuned)   # pass tuned strength floors
         if fs is not None and fs.action != "hold":
             signal = fs
+        # PYRAMID EXCEPTION: the entry extension guard (max_stretch_atr) must gate only
+        # FRESH leg-1 entries — a pyramid add is, by design, into an extended winning
+        # move. If we already hold a winning same-direction position and the ONLY thing
+        # blocking the signal was over-extension, re-evaluate WITHOUT the stretch ceiling
+        # so the guard never constrains pyramiding. (The pyramid branch below still
+        # enforces breakeven + per-leg profit + multi-TF alignment.)
+        if (getattr(config, "GROWTH_ENABLED", False) and (signal is None or signal.action == "hold")
+                and fs is not None and "over-extended" in (getattr(fs, "reason", "") or "")):
+            _open_same = [p for p in self.open_positions.values() if p.base_symbol == base]
+            if _open_same:
+                try:
+                    tick = adapter.live_tick()
+                    px = tick.bid if _open_same[0].action == "buy" else tick.ask
+                    winning = all((px > p.entry_price) == (p.action == "buy") for p in _open_same)
+                except Exception:
+                    winning = False
+                if winning:
+                    _tuned_np = dict(tuned or {}); _tuned_np["max_stretch_atr"] = 0.0
+                    fs2 = self.registry.get_focused_signal(indicators, _tuned_np)
+                    if fs2 is not None and fs2.action != "hold":
+                        signal = fs2
+                        logger.info(f"[PYRAMID] {base}: stretch guard lifted for add "
+                                    f"(winning open position, still aligned)")
         if signal is None or signal.action == "hold":
             # FREQUENCY self-monitor: categorize WHY we held (which gate), per symbol,
             # so the bot surfaces whether it is starved and by which gate.

@@ -93,7 +93,13 @@ existing `Backtester` (today it models a single position at a time).
 
 ## 4. Safety invariants (non-negotiable)
 1. Entry trigger stays LLM-free and instant.
-2. The deterministic per-tick layer owns: stop-loss, group reversal-cut, drawdown
+2. **The entry extension guard (`max_stretch_atr`) gates FRESH leg-1 entries only.**
+   Forensic on real ticks showed 76% of losers were late entries into
+   already-extended moves — so leg 1 must respect the stretch ceiling. But a
+   pyramid ADD is by definition into an extended winning move, so when a winning
+   same-direction position is already open the signal is re-evaluated with the
+   stretch ceiling lifted. The extension guard therefore reduces late-entry
+   losers WITHOUT constraining pyramiding (`scalp_engine._evaluate_and_trade`).2. The deterministic per-tick layer owns: stop-loss, group reversal-cut, drawdown
    halt. The LLM only *adds* intelligence (hold longer / add a leg / exit sooner).
 3. Nothing runs live (even on demo compounding) until backtest + forward test prove
    the drawdown envelope. Demo proving precedes any real-money account.

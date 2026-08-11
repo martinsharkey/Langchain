@@ -42,6 +42,7 @@ class SymbolSpec:
     max_volume: float
     volume_step: float
     tradable: bool
+    stops_level: float = 0.0   # broker min stop distance (points); SL/TP must respect it
 
 
 @dataclass
@@ -168,6 +169,7 @@ def resolve_symbol(base: str, use_cache: bool = True) -> Optional[SymbolSpec]:
             max_volume=info.volume_max,
             volume_step=info.volume_step,
             tradable=(info.trade_mode == full_mode),
+            stops_level=float(getattr(info, "trade_stops_level", 0) or 0),
         )
         _spec_cache[base] = spec
         logger.info(f"Resolved '{base}' -> '{spec.resolved}' (tradable={spec.tradable}, "
@@ -370,6 +372,30 @@ class BrokerAdapter:
             if not pos:
                 return self._reject("modify", 0.0, f"position {ticket} not found")
             p = pos[0]
+            # Respect the broker's minimum stop distance (freeze/stops level). Sending
+            # an SL closer than trade_stops_level to the current price is rejected with
+            # 10016 Invalid stops. Clamp the SL to the closest LEGAL level instead of
+            # spamming an illegal modify every tick (monitor caught 43 such rejects).
+            sl = float(sl)
+            try:
+                lvl_pts = float(self.spec.stops_level) if self.spec else 0.0
+                point = float(self.spec.point) if self.spec else 0.0
+                if lvl_pts > 0 and point > 0:
+                    min_dist = lvl_pts * point
+                    tick = mt5.symbol_info_tick(p.symbol)
+                    ref = None
+                    if p.type == mt5.POSITION_TYPE_BUY:
+                        ref = tick.bid if tick else p.price_current
+                        # BUY stop sits BELOW price; keep it at least min_dist away
+                        if ref - sl < min_dist:
+                            sl = round(ref - min_dist, self.spec.digits)
+                    else:
+                        ref = tick.ask if tick else p.price_current
+                        # SELL stop sits ABOVE price
+                        if sl - ref < min_dist:
+                            sl = round(ref + min_dist, self.spec.digits)
+            except Exception:
+                pass
             request = {
                 "action": mt5.TRADE_ACTION_SLTP,
                 "symbol": p.symbol,

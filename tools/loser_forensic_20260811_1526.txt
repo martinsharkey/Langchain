@@ -1,0 +1,136 @@
+===== LOSER FORENSIC since 2026-08-11T10:00 — 42 losing trades =====
+#172 BTCUSD buy entry=63839.54 exit=63801.51 pnl=-0.28 reason=sl mfe=0.0 mae=-2332.0
+    ENTRY: entry ok: -55513pts pre-move
+    EXIT : EARLY EXIT: after exit @ 63801.51, price ran 54769pts back our way (loss was 3803pts) -> a wider SL / trail would have saved it
+#170 XAUUSD-ECN sell entry=4388.39 exit=4389.41 pnl=-0.8 reason=sl mfe=152.0 mae=-102.0
+    ENTRY: LATE: price already ran 528pts our way pre-entry (>1.2 ATR)
+    EXIT : EARLY EXIT: after exit @ 4389.41, price ran 176pts back our way (loss was 102pts) -> a wider SL / trail would have saved it
+#169 BTCUSD buy entry=63812.93 exit=63787.13 pnl=-0.19 reason=sl mfe=1510.0 mae=-2538.0
+    ENTRY: entry ok: -60586pts pre-move
+    EXIT : EARLY EXIT: after exit @ 63787.13, price ran 55910pts back our way (loss was 2580pts) -> a wider SL / trail would have saved it
+#168 BTCUSD buy entry=63839.92 exit=63811.45 pnl=-0.21 reason=sl mfe=0.0 mae=-1811.0
+    ENTRY: entry ok: -59935pts pre-move
+    EXIT : EARLY EXIT: after exit @ 63811.45, price ran 54894pts back our way (loss was 2847pts) -> a wider SL / trail would have saved it
+#166 XAUUSD-ECN sell entry=4386.24 exit=4388.29 pnl=-1.56 reason=sl mfe=83.0 mae=-173.0
+    ENTRY: LATE: price already ran 982pts our way pre-entry (>1.2 ATR)
+    EXIT : exit reasonable: only 64pts recovery vs 205pt loss
+#163 XAUUSD-ECN sell entry=4385.75 exit=4385.72 pnl=-0.02 reason=sl mfe=26.0 mae=0.0
+    ENTRY: LATE: price already ran 1121pts our way pre-entry (>1.2 ATR)
+    EXIT : exit reasonable: only -228pts recovery vs 3pt loss
+#162 XAUUSD-ECN sell entry=4385.09 exit=4386.03 pnl=-0.74 reason=sl mfe=141.0 mae=-94.0
+    ENTRY: LATE: price already ran 1167pts our way pre-entry (>1.2 ATR)
+    EXIT : exit reasonable: only -197pts recovery vs 94pt loss
+#161 XAUUSD-ECN sell entry=4383.12 exit=4385.01 pnl=-1.44 reason=sl mfe=83.0 mae=-173.0
+    ENTRY: LATE: price already ran 1322pts our way pre-entry (>1.2 ATR)
+    EXIT : exit reasonable: only -419pts recovery vs 189pt loss
+#154 BTCUSD buy entry=64467.02 exit=64415.93 pnl=-0.38 reason=closed mfe=None mae=None
+    ENTRY: LATE: price already ran 31573pts our way pre-entry (>1.2 ATR)
+    EXIT : exit reasonable: only -28072pts recovery vs 5109pt loss
+#153 XAUUSD-ECN buy entry=4395.27 exit=4392.0 pnl=-2.46 reason=sl mfe=65.0 mae=-192.0
+    ENTRY: LATE: price already ran 2368pts our way pre-entry (>1.2 ATR)
+    EXIT : exit reasonable: only -1872pts recovery vs 327pt loss
+#152 BTCUSD buy entry=64499.11 exit=64460.69 pnl=-0.28 reason=sl mfe=0.0 mae=-3159.0
+    ENTRY: LATE: price already ran 34783pts our way pre-entry (>1.2 ATR)
+    EXIT : exit reasonable: only -32549pts recovery vs 3842pt loss
+#147 XAUUSD-ECN buy entry=4391.58 exit=4391.28 pnl=-0.26 reason=sl mfe=70.0 mae=-31.0
+    ENTRY: LATE: price already ran 2298pts our way pre-entry (>1.2 ATR)
+    EXIT : exit reasonable: only -1824pts recovery vs 30pt loss
+#146 BTCUSD sell entry=64429.36 exit=64458.37 pnl=-0.21 reason=sl mfe=0.0 mae=-2383.0
+    ENTRY: entry ok: -29335pts pre-move
+    EXIT : EARLY EXIT: after exit @ 64458.37, price ran 33006pts back our way (loss was 2901pts) -> a wider SL / trail would have saved it
+#145 XAUUSD-ECN sell entry=4385.24 exit=4386.74 pnl=-1.15 reason=sl mfe=11.0 mae=-112.0
+    ENTRY: entry ok: -1632pts pre-move
+    EXIT : EARLY EXIT: after exit @ 4386.74, price ran 1629pts back our way (loss was 150pts) -> a wider SL / trail would have saved it
+#144 XAUUSD-ECN sell entry=4385.41 exit=4386.94 pnl=-1.17 reason=sl mfe=45.0 mae=-89.0
+    ENTRY: entry ok: -1453pts pre-move
+    EXIT : EARLY EXIT: after exit @ 4386.94, price ran 1654pts back our way (loss was 153pts) -> a wider SL / trail would have saved it
+#143 XAUUSD-ECN sell entry=4384.98 exit=4385.04 pnl=-0.08 reason=tp mfe=91.0 mae=-10.0
+    ENTRY: entry ok: -1447pts pre-move
+    EXIT : EARLY EXIT: after exit @ 4385.04, price ran 1464pts back our way (loss was 6pts) -> a wider SL / trail would have saved it
+#142 BTCUSD buy entry=64444.26 exit=64401.45 pnl=-0.32 reason=sl mfe=0.0 mae=-3288.0
+    ENTRY: LATE: price already ran 30107pts our way pre-entry (>1.2 ATR)
+    EXIT : exit reasonable: only -23531pts recovery vs 4281pt loss
+#141 XAUUSD-ECN buy entry=4387.63 exit=4384.7 pnl=-2.21 reason=sl mfe=28.0 mae=-258.0
+    ENTRY: LATE: price already ran 1548pts our way pre-entry (>1.2 ATR)
+    EXIT : exit reasonable: only -1288pts recovery vs 293pt loss
+#139 XAUUSD-ECN buy entry=4388.58 exit=4387.55 pnl=-0.8 reason=sl mfe=17.0 mae=-69.0
+    ENTRY: LATE: price already ran 1436pts our way pre-entry (>1.2 ATR)
+    EXIT : exit reasonable: only -1615pts recovery vs 103pt loss
+#138 BTCUSD buy entry=64406.15 exit=64380.69 pnl=-0.19 reason=sl mfe=0.0 mae=-2536.0
+    ENTRY: LATE: price already ran 29789pts our way pre-entry (>1.2 ATR)
+    EXIT : exit reasonable: only -23173pts recovery vs 2546pt loss
+#136 XAUUSD-ECN buy entry=4388.84 exit=4388.25 pnl=-0.48 reason=tp mfe=107.0 mae=-57.0
+    ENTRY: LATE: price already ran 1568pts our way pre-entry (>1.2 ATR)
+    EXIT : exit reasonable: only -1447pts recovery vs 59pt loss
+#132 BTCUSD buy entry=64384.25 exit=64358.52 pnl=-0.19 reason=sl mfe=0.0 mae=-1980.0
+    ENTRY: LATE: price already ran 28607pts our way pre-entry (>1.2 ATR)
+    EXIT : exit reasonable: only -20461pts recovery vs 2573pt loss
+#131 XAUUSD-ECN buy entry=4387.14 exit=4387.0 pnl=-0.14 reason=tp mfe=71.0 mae=-15.0
+    ENTRY: LATE: price already ran 1226pts our way pre-entry (>1.2 ATR)
+    EXIT : exit reasonable: only -1123pts recovery vs 14pt loss
+#130 XAUUSD-ECN buy entry=4386.94 exit=4386.16 pnl=-0.62 reason=tp mfe=53.0 mae=-74.0
+    ENTRY: LATE: price already ran 1188pts our way pre-entry (>1.2 ATR)
+    EXIT : exit reasonable: only -947pts recovery vs 78pt loss
+#129 XAUUSD-ECN buy entry=4387.82 exit=4387.02 pnl=-0.63 reason=tp mfe=39.0 mae=-63.0
+    ENTRY: LATE: price already ran 1286pts our way pre-entry (>1.2 ATR)
+    EXIT : exit reasonable: only -1033pts recovery vs 80pt loss
+#126 XAUUSD-ECN buy entry=4387.38 exit=4386.41 pnl=-0.76 reason=tp mfe=54.0 mae=-42.0
+    ENTRY: LATE: price already ran 1218pts our way pre-entry (>1.2 ATR)
+    EXIT : exit reasonable: only -972pts recovery vs 97pt loss
+#125 XAUUSD-ECN buy entry=4387.31 exit=4387.32 pnl=-0.03 reason=tp mfe=117.0 mae=0.0
+    ENTRY: LATE: price already ran 1181pts our way pre-entry (>1.2 ATR)
+    EXIT : exit reasonable: only -1062pts recovery vs 1pt loss
+#124 XAUUSD-ECN buy entry=4388.19 exit=4387.28 pnl=-0.71 reason=tp mfe=29.0 mae=-32.0
+    ENTRY: LATE: price already ran 1360pts our way pre-entry (>1.2 ATR)
+    EXIT : exit reasonable: only -1059pts recovery vs 91pt loss
+#122 XAUUSD-ECN buy entry=4381.37 exit=4380.54 pnl=-0.65 reason=closed mfe=None mae=None
+    ENTRY: LATE: price already ran 2305pts our way pre-entry (>1.2 ATR)
+    EXIT : exit reasonable: only -1888pts recovery vs 83pt loss
+#120 XAUUSD-ECN buy entry=4381.7 exit=4380.85 pnl=-0.67 reason=tp mfe=15.0 mae=-78.0
+    ENTRY: LATE: price already ran 2293pts our way pre-entry (>1.2 ATR)
+    EXIT : exit reasonable: only -1919pts recovery vs 85pt loss
+#118 XAUUSD-ECN sell entry=4377.64 exit=4380.07 pnl=-1.84 reason=sl mfe=6.0 mae=-213.0
+    ENTRY: entry ok: -1714pts pre-move
+    EXIT : EARLY EXIT: after exit @ 4380.07, price ran 2273pts back our way (loss was 243pts) -> a wider SL / trail would have saved it
+#117 XAUUSD-ECN sell entry=4377.71 exit=4377.81 pnl=-0.11 reason=tp mfe=66.0 mae=-12.0
+    ENTRY: entry ok: -1698pts pre-move
+    EXIT : EARLY EXIT: after exit @ 4377.81, price ran 2048pts back our way (loss was 10pts) -> a wider SL / trail would have saved it
+#112 XAUUSD-ECN buy entry=4379.76 exit=4378.24 pnl=-1.17 reason=sl mfe=0.0 mae=-143.0
+    ENTRY: LATE: price already ran 1551pts our way pre-entry (>1.2 ATR)
+    EXIT : exit reasonable: only -1458pts recovery vs 152pt loss
+#111 XAUUSD-ECN buy entry=4379.48 exit=4379.42 pnl=-0.08 reason=tp mfe=69.0 mae=-6.0
+    ENTRY: LATE: price already ran 1497pts our way pre-entry (>1.2 ATR)
+    EXIT : exit reasonable: only -1576pts recovery vs 6pt loss
+#110 XAUUSD-ECN buy entry=4381.07 exit=4379.48 pnl=-1.22 reason=sl mfe=0.0 mae=-154.0
+    ENTRY: LATE: price already ran 1515pts our way pre-entry (>1.2 ATR)
+    EXIT : exit reasonable: only -1582pts recovery vs 159pt loss
+#109 XAUUSD-ECN buy entry=4380.34 exit=4380.22 pnl=-0.13 reason=tp mfe=63.0 mae=-15.0
+    ENTRY: LATE: price already ran 1522pts our way pre-entry (>1.2 ATR)
+    EXIT : exit reasonable: only -1656pts recovery vs 12pt loss
+#108 BTCUSD buy entry=64279.2 exit=64254.68 pnl=-0.18 reason=sl mfe=429.0 mae=-2268.0
+    ENTRY: LATE: price already ran 35550pts our way pre-entry (>1.2 ATR)
+    EXIT : exit reasonable: only -20686pts recovery vs 2452pt loss
+#106 BTCUSD buy entry=64307.81 exit=64282.08 pnl=-0.19 reason=sl mfe=0.0 mae=-2401.0
+    ENTRY: LATE: price already ran 38018pts our way pre-entry (>1.2 ATR)
+    EXIT : exit reasonable: only -28768pts recovery vs 2573pt loss
+#104 XAUUSD-ECN buy entry=4380.11 exit=4379.75 pnl=-0.31 reason=tp mfe=130.0 mae=-34.0
+    ENTRY: LATE: price already ran 2205pts our way pre-entry (>1.2 ATR)
+    EXIT : exit reasonable: only -1479pts recovery vs 36pt loss
+#103 XAUUSD-ECN buy entry=4381.93 exit=4380.43 pnl=-1.15 reason=sl mfe=0.0 mae=-132.0
+    ENTRY: LATE: price already ran 2372pts our way pre-entry (>1.2 ATR)
+    EXIT : exit reasonable: only -1547pts recovery vs 150pt loss
+#100 BTCUSD sell entry=64228.01 exit=64253.5 pnl=-0.19 reason=closed mfe=None mae=None
+    ENTRY: entry ok: -25383pts pre-move
+    EXIT : EARLY EXIT: after exit @ 64253.5, price ran 34335pts back our way (loss was 2549pts) -> a wider SL / trail would have saved it
+#97 XAUUSD-ECN buy entry=4371.67 exit=4371.59 pnl=-0.1 reason=tp mfe=69.0 mae=-8.0
+    ENTRY: LATE: price already ran 760pts our way pre-entry (>1.2 ATR)
+    EXIT : exit reasonable: only -497pts recovery vs 8pt loss
+----- SUMMARY -----
+losers analysed: 42
+(A) LATE ENTRIES (could have waited / entered stronger): 32/42  (76%)
+(B) EARLY EXITS (price recovered >= loss within 5 min after): 11/42  (26%)
+    avg recoverable move after early exits: 22014pts
+INTERPRETATION:
+  High (A) => tighten/optimise entry timing (avoid extended moves).
+  High (B) => the pyramiding-into-runners + wider learned SL/giveback exit
+             (the new supervisor) directly addresses these losers.

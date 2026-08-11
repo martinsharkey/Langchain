@@ -15,6 +15,14 @@ from src.utils.logger import get_logger
 
 logger = get_logger("mt5.data")
 
+# Transient "no data" dropout backoff: MT5 can briefly return no bars for a
+# symbol/timeframe (observed 2026-08-11: 77 errors in ~1s during a momentary
+# feed gap). We throttle the raise+log per (symbol,timeframe) so a transient
+# dropout does not spam the log or hammer the terminal. Recovers automatically.
+import time as _time
+_NODATA_BACKOFF: dict = {}          # (symbol,tf) -> unix_ts until which we skip
+_NODATA_COOLDOWN = 15.0             # seconds
+
 # MT5 Timeframe mapping (fallback values for simulation mode)
 TIMEFRAMES = {
     "M1": mt5.TIMEFRAME_M1 if MT5_AVAILABLE else 1,
@@ -129,13 +137,27 @@ def get_rates(
         raise ConnectionError("MT5 package not available")
     
     tf = TIMEFRAMES.get(timeframe, mt5.TIMEFRAME_H1)
+    _bk_key = (symbol, timeframe)
+    _until = _NODATA_BACKOFF.get(_bk_key)
+    if _until and _time.time() < _until:
+        # in a known transient-dropout window: fail fast & QUIET (no log spam)
+        raise ConnectionError(f"No data for {symbol} {timeframe} (backoff)")
     rates = mt5.copy_rates_from_pos(symbol, tf, 0, count)
-    
+
     if rates is None or len(rates) == 0:
+        # start/extend a short backoff so we don't hammer the terminal or flood logs
+        first_hit = _bk_key not in _NODATA_BACKOFF or _time.time() >= (_NODATA_BACKOFF.get(_bk_key) or 0)
+        _NODATA_BACKOFF[_bk_key] = _time.time() + _NODATA_COOLDOWN
+        if first_hit:
+            logger.warning(f"No data for {symbol} {timeframe} — transient feed gap; "
+                           f"backing off {_NODATA_COOLDOWN:.0f}s (auto-recovers)")
         raise ConnectionError(
             f"No data for {symbol} {timeframe}. "
             f"Check MT5 terminal and market data availability."
         )
+    # good data -> clear any backoff
+    if _bk_key in _NODATA_BACKOFF:
+        _NODATA_BACKOFF.pop(_bk_key, None)
     
     result = []
     for rate in rates:

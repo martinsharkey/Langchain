@@ -1,0 +1,24 @@
+===== INDICATOR FORENSIC since 2026-08-11T00:00 — 209 closed trades =====
+
+--- ENTRY-SIGNAL STRENGTH: winners vs losers (ATR-normalised) ---
+feature        WINNERS                            LOSERS                            
+osma_atr       med=0.228 mean=0.276 n=96          med=0.274 mean=0.315 n=113        
+osma_accel_atr med=0.054 mean=0.066 n=96          med=0.054 mean=0.062 n=113        
+bulls_atr      med=-0.291 mean=-0.048 n=96        med=0.569 mean=0.450 n=113        
+bears_atr      med=-0.932 mean=-0.809 n=96        med=0.032 mean=-0.388 n=113       
+stretch_atr    med=1.393 mean=1.438 n=96          med=1.342 mean=1.433 n=113        
+macd_hist      med=-0.288 mean=-1.277 n=96        med=0.247 mean=-0.407 n=113       
+rsi            med=43.634 mean=44.520 n=96        med=50.811 mean=48.836 n=113      
+
+--- PROFIT CAPTURE (winners: exit_points / MFE) ---
+median capture ratio = 50%  mean = 57%  (1.0 = kept the whole move)
+39/94 winners kept <50% of their favourable move -> exit-timing leak (giving profit back).
+
+--- WHAT THIS SAYS (fakeouts + capture) ---
+  * winners have lower rsi (median gap -7.177 ATR) -> raising the rsi entry floor would filter more fakeouts
+  * winners have lower bears_atr (median gap -0.964 ATR) -> raising the bears_atr entry floor would filter more fakeouts
+  * winners have lower bulls_atr (median gap -0.860 ATR) -> raising the bulls_atr entry floor would filter more fakeouts
+  * winners have lower macd_hist (median gap -0.535 ATR) -> raising the macd_hist entry floor would filter more fakeouts
+  * If capture ratio is low, the leak is EXITS not entries -> wider trail / pyramiding into runners keeps more of the move.
+
+per-symbol win/loss: {'XAUUSD-ECN': {'win': 77, 'loss': 82}, 'BTCUSD': {'win': 19, 'loss': 31}}
