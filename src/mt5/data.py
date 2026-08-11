@@ -20,8 +20,10 @@ logger = get_logger("mt5.data")
 # feed gap). We throttle the raise+log per (symbol,timeframe) so a transient
 # dropout does not spam the log or hammer the terminal. Recovers automatically.
 import time as _time
-_NODATA_BACKOFF: dict = {}          # (symbol,tf) -> unix_ts until which we skip
+_NODATA_BACKOFF: dict = {}          # symbol -> unix_ts until which we skip
 _NODATA_COOLDOWN = 15.0             # seconds
+import threading as _threading
+_NODATA_LOCK = _threading.Lock()
 
 # MT5 Timeframe mapping (fallback values for simulation mode)
 TIMEFRAMES = {
@@ -137,27 +139,26 @@ def get_rates(
         raise ConnectionError("MT5 package not available")
     
     tf = TIMEFRAMES.get(timeframe, mt5.TIMEFRAME_H1)
-    _bk_key = (symbol, timeframe)
-    _until = _NODATA_BACKOFF.get(_bk_key)
+    # Symbol-level backoff: a feed gap usually hits ALL timeframes of a symbol at
+    # once (M1/M5/M15/M30/H1) and many callers query concurrently. Key on the SYMBOL
+    # (not per-tf) and log ONCE per gap episode so a burst can't flood the log.
+    _until = _NODATA_BACKOFF.get(symbol)
     if _until and _time.time() < _until:
-        # in a known transient-dropout window: fail fast & QUIET (no log spam)
-        raise ConnectionError(f"No data for {symbol} {timeframe} (backoff)")
+        raise ConnectionError(f"No data for {symbol} (feed-gap backoff)")
     rates = mt5.copy_rates_from_pos(symbol, tf, 0, count)
 
     if rates is None or len(rates) == 0:
-        # start/extend a short backoff so we don't hammer the terminal or flood logs
-        first_hit = _bk_key not in _NODATA_BACKOFF or _time.time() >= (_NODATA_BACKOFF.get(_bk_key) or 0)
-        _NODATA_BACKOFF[_bk_key] = _time.time() + _NODATA_COOLDOWN
-        if first_hit:
-            logger.warning(f"No data for {symbol} {timeframe} — transient feed gap; "
-                           f"backing off {_NODATA_COOLDOWN:.0f}s (auto-recovers)")
-        raise ConnectionError(
-            f"No data for {symbol} {timeframe}. "
-            f"Check MT5 terminal and market data availability."
-        )
-    # good data -> clear any backoff
-    if _bk_key in _NODATA_BACKOFF:
-        _NODATA_BACKOFF.pop(_bk_key, None)
+        with _NODATA_LOCK:
+            episode_new = not (_NODATA_BACKOFF.get(symbol) and _time.time() < _NODATA_BACKOFF[symbol])
+            _NODATA_BACKOFF[symbol] = _time.time() + _NODATA_COOLDOWN
+            if episode_new:
+                logger.warning(f"No data for {symbol} ({timeframe}) — transient feed gap; "
+                               f"backing off {_NODATA_COOLDOWN:.0f}s across all timeframes "
+                               f"(auto-recovers)")
+        raise ConnectionError(f"No data for {symbol} {timeframe} (transient feed gap)")
+    # good data -> clear any backoff for this symbol
+    if symbol in _NODATA_BACKOFF:
+        _NODATA_BACKOFF.pop(symbol, None)
     
     result = []
     for rate in rates:

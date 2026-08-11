@@ -241,6 +241,37 @@ def evaluate_confluence_bar(ind: dict, cfg=None) -> dict:
         if runway < runway_min:
             return {"action": "hold", "trigger_kind": trigger_kind, "confluence": 0,
                     "reason": f"low runway {runway:.2f} < learned {runway_min:.2f} (FinalMultiplier)"}
+    # ── DIRECTIONAL RSI ENTRY GATE (tunable, default OFF) ──
+    # Forensic (2026-08-11): winners entered at LOWER RSI (buying pullbacks ~44)
+    # than losers (chasing ~51). This is an ENTRY-TIMING gate distinct from the
+    # rsi_long_max/rsi_short_min EXHAUSTION ceilings. Long: don't buy once RSI has
+    # already pushed above rsi_buy_below; Short: don't sell once RSI already below
+    # rsi_sell_above. 0 = OFF. The optimiser DISCOVERS whether/where it helps.
+    _rsi = float(ind.get("rsi") or 50.0)
+    rsi_buy_below = float(c.get("rsi_buy_below", 0.0) or 0.0)
+    rsi_sell_above = float(c.get("rsi_sell_above", 0.0) or 0.0)
+    if direction == "buy" and rsi_buy_below and _rsi > rsi_buy_below:
+        return {"action": "hold", "trigger_kind": trigger_kind, "confluence": 0,
+                "reason": f"rsi {_rsi:.0f} > buy-below {rsi_buy_below:.0f} (chasing, not a pullback)"}
+    if direction == "sell" and rsi_sell_above and _rsi < rsi_sell_above:
+        return {"action": "hold", "trigger_kind": trigger_kind, "confluence": 0,
+                "reason": f"rsi {_rsi:.0f} < sell-above {rsi_sell_above:.0f} (chasing, not a pullback)"}
+    # ── HTF-ALIGNMENT REQUIREMENT (tunable, default OFF) ──
+    # require_htf_align=1 -> only take the entry when the captured htf_alignment
+    # agrees with the trade direction. Default OFF because the fakeout study showed
+    # a blanket HTF gate sacrifices ~as many winners as losers; left tunable so the
+    # optimiser can prove whether a per-symbol HTF requirement nets positive.
+    if int(c.get("require_htf_align", 0) or 0) == 1:
+        _htf = ind.get("htf_alignment")
+        if _htf is not None:
+            try:
+                agree = (float(_htf) > 0) if direction == "buy" else (float(_htf) < 0)
+            except (TypeError, ValueError):
+                _s = str(_htf).lower()
+                agree = ("bull" in _s or "up" in _s) if direction == "buy" else ("bear" in _s or "down" in _s)
+            if not agree:
+                return {"action": "hold", "trigger_kind": trigger_kind, "confluence": 0,
+                        "reason": f"HTF not aligned with {direction} (htf={_htf})"}
     # ── SIGNED PER-SIDE STRENGTH FLOORS (the core signal: how VIGOROUS buyer/seller
     # activity is). Floors are ATR-NORMALIZED (scale-free) so ONE wide PARAM_SPACE range
     # works for gold (~0.5) and BTC (~15+): the stored floor is in ATR units and scaled

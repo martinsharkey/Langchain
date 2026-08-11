@@ -140,6 +140,14 @@ SCALP_GIVEBACK_ARM_ATR = float(os.getenv("SCALP_GIVEBACK_ARM_ATR", "1.5"))
 # protects harder (keep >=50%) so winners still run but can't hand the move back.
 SCALP_RETAIN_FLOOR_FRAC = float(os.getenv("SCALP_RETAIN_FLOOR_FRAC", "0.5"))
 SCALP_RETAIN_ARM_ATR = float(os.getenv("SCALP_RETAIN_ARM_ATR", "0.35"))
+# ── Volatility-scaled trailing breathing room (fixes the #1 post-mortem finding:
+# "STOPPED THEN RECOVERED — SL too tight"). The trailing stop must sit at least
+# this fraction of ATR away from the peak so normal volatility does not wick the
+# trade out before it recovers. Tunable per symbol; the optimiser/walk-forward
+# DISCOVERS the value that best converts recover-after-stop losers into winners.
+SCALP_TRAIL_MIN_ATR = float(os.getenv("SCALP_TRAIL_MIN_ATR", "0.5"))
+# Multiplier applied to the symbol's typical wick when trailing (breathing room).
+SCALP_TRAIL_WICK_MULT = float(os.getenv("SCALP_TRAIL_WICK_MULT", "1.3"))
 # FOCUSED mode: trade only validated high-edge (strategy x regime) pockets
 # instead of the broad ensemble vote. Backtest: PF 1.24 vs 1.04.
 FOCUSED_MODE = os.getenv("FOCUSED_MODE", "true").lower() in ("true", "1", "yes")

@@ -272,6 +272,20 @@ class ScalpEngine:
             except Exception as e:
                 logger.warning(f"LangGraphResearcher unavailable: {e}")
 
+        # LangGraph TRADE SUPERVISOR — intelligent per-open-trade cognitive loop
+        # (observe->recall->reason->decide). Reasons across all indicators + HTF +
+        # experience and returns HOLD/TIGHTEN/EXIT/ADD_LEG/CUT_ALL. Reasoning only;
+        # the engine executes and the deterministic layer still owns safety.
+        self.trade_supervisor = None
+        try:
+            from src.learning.langgraph_trade_supervisor import LangGraphTradeSupervisor
+            from src.core.llm import get_llm, extract_text
+            _recall = (self.knowledge_store.recall
+                       if getattr(self, "knowledge_store", None) is not None else None)
+            self.trade_supervisor = LangGraphTradeSupervisor(get_llm, extract_text, _recall)
+        except Exception as e:
+            logger.warning(f"LangGraphTradeSupervisor unavailable: {e}")
+
         # #25: give the optimizer its ReAct alternatives — mql5-grounded tuning
         # direction + avoid the checkpointer's failed directions (no blind search).
         if self.param_optimizer is not None:
@@ -1914,18 +1928,13 @@ class ScalpEngine:
                 self._llm_trade_review(st, pos, adapter, price, spread_pts)
 
     def _llm_trade_review(self, st, pos, adapter, price, spread_pts):
-        """
-        Periodic LLM review for HYBRID_LLM-managed trades. The LLM sees the trade
-        context and returns HOLD / TIGHTEN / EXIT. This runs at most every few
-        minutes (throttled) so it never slows the fast protective path.
-
-        Degrades honestly: if no LLM is available, it logs that HYBRID_LLM is
-        running rules-only (it does NOT silently pretend to be a different arm).
-        """
-        try:
-            from src.core.llm import get_llm
-        except Exception:
-            logger.info(f"[HYBRID_LLM] #{st.ticket}: LLM unavailable — rules-only review")
+        """Throttled intelligent review for HYBRID_LLM-managed trades, driven by the
+        LangGraph TRADE SUPERVISOR (observe->recall->reason->decide across all
+        indicators + HTF + experience). The supervisor REASONS; this method EXECUTES
+        the decision. Deterministic safety (stop/group-cut/DD-halt) is unaffected.
+        Degrades honestly to rules-only if the supervisor/LLM is unavailable."""
+        if getattr(self, "trade_supervisor", None) is None:
+            logger.info(f"[HYBRID_LLM] #{st.ticket}: supervisor unavailable — rules-only review")
             return
 
         if st.action == "buy":
@@ -1933,10 +1942,6 @@ class ScalpEngine:
         else:
             profit_pts = (st.entry - price) / (adapter.spec.point or 1)
 
-        # ── Rich multi-timeframe + experience context (the intelligent trader view) ──
-        # Reason across ALL indicators/timeframes, grounded in this symbol's history —
-        # per the trade-supervisor design. The LLM ADVISES; the deterministic layer
-        # still owns the stop/group-cut/DD-halt, so this can never harm safety.
         live = {}
         try:
             live = self._live_indicators(st.base_symbol, adapter) or {}
@@ -1946,75 +1951,57 @@ class ScalpEngine:
         try:
             if self.htf is not None:
                 hr = self.htf.read(adapter.resolved_symbol, st.action)
-                htf_txt = (f"HTF alignment (M5/M15/M30/H1): trend={getattr(hr,'trend',None)} "
-                           f"aligned={getattr(hr,'aligned',None)} "
-                           f"momentum_flipped={getattr(hr,'momentum_flipped',None)}")
+                htf_txt = (f"trend={getattr(hr,'trend',None)} aligned={getattr(hr,'aligned',None)} "
+                           f"flipped={getattr(hr,'momentum_flipped',None)}")
         except Exception:
             pass
-        exp_txt = ""
-        try:
-            if self.knowledge_store is not None:
-                hits = self.knowledge_store.recall(
-                    f"{st.base_symbol} runner hold vs exit when OsMA MACD aligned", n_results=1)
-                if hits:
-                    exp_txt = f"Learned: {str(hits[0])[:180]}"
-        except Exception:
-            pass
-        n_legs = len([p for p in self.open_positions.values()
-                      if p.base_symbol == st.base_symbol and p.action == st.action])
+        _same_dir = [p for p in self.open_positions.values()
+                     if p.base_symbol == st.base_symbol and p.action == st.action]
+        n_legs = len(_same_dir)
+        # can the engine even accept an ADD_LEG right now? (pyramiding on + winning)
+        can_add = bool(getattr(config, "GROWTH_ENABLED", False) and n_legs >= 1 and profit_pts > 0)
 
-        prompt = (
-            "You are an intelligent trade supervisor managing an OPEN position. "
-            "Reason across ALL indicators and timeframes, grounded in this symbol's "
-            "experience, then reply with EXACTLY one word: HOLD, TIGHTEN, or EXIT.\n"
-            f"Symbol: {st.symbol}  Side: {st.action}  Legs in this basket: {n_legs}\n"
-            f"Entry: {st.entry}  Price: {price}  Profit(pts): {profit_pts:.0f}  "
-            f"ATR(pts): {st.atr_points:.0f}  Spread(pts): {spread_pts:.0f}  "
-            f"AtBreakeven: {st.moved_to_be}\n"
-            f"OsMA: closed={live.get('osma_closed')} prev={live.get('osma_prev')}  "
-            f"MACD: line={live.get('macd_line')} signal={live.get('macd_signal')}  "
-            f"Bulls={live.get('bulls_power')} Bears={live.get('bears_power')} RSI={live.get('rsi')}\n"
-            f"{htf_txt}\n{exp_txt}\n"
-            "Decide: is momentum STILL confirmed on all fronts (OsMA + MACD aligned, "
-            "dominant power still in our direction, HTF aligned)? If it's still a "
-            "runner, HOLD. If strongly in profit and momentum is fading, TIGHTEN to "
-            "lock in. EXIT only if the move looks exhausted or reversing against us."
-        )
-        try:
-            llm = get_llm(temperature=0.2)
-            resp = llm.invoke(prompt)
-            from src.core.llm import extract_text
-            text = extract_text(resp).upper()
-        except Exception as e:
-            logger.info(f"[HYBRID_LLM] #{st.ticket}: LLM review failed ({e}) — rules-only")
-            return
+        ctx = {
+            "symbol": st.symbol, "base_symbol": st.base_symbol, "action": st.action,
+            "n_legs": n_legs, "profit_pts": profit_pts, "atr_pts": st.atr_points or 0.0,
+            "spread_pts": spread_pts, "at_be": st.moved_to_be,
+            "osma_closed": live.get("osma_closed"), "osma_prev": live.get("osma_prev"),
+            "macd_line": live.get("macd_line"), "macd_signal": live.get("macd_signal"),
+            "bulls": live.get("bulls_power"), "bears": live.get("bears_power"),
+            "rsi": live.get("rsi"), "htf_txt": htf_txt, "can_add_leg": can_add,
+        }
+        out = self.trade_supervisor.decide(ctx)
+        decision = out.get("decision", "HOLD")
+        st.actions.append({"t": time.time(), "action": f"sup_{decision.lower()}", "price": price})
+        logger.info(f"[SUPERVISOR] #{st.ticket} {st.base_symbol}: {decision} "
+                    f"(profit {profit_pts:.0f}pts, legs {n_legs}, {out.get('reason','')})")
 
-        decision = "HOLD"
-        for k in ("EXIT", "TIGHTEN", "HOLD"):
-            if k in text:
-                decision = k
-                break
-        st.actions.append({"t": time.time(), "action": f"llm_{decision.lower()}", "price": price})
-        logger.info(f"[HYBRID_LLM] #{st.ticket}: LLM review -> {decision} (profit {profit_pts:.0f}pts)")
-
-        if decision == "EXIT" and profit_pts > spread_pts:
-            # only act on EXIT when not crystallising a spread-sized loss
-            res = adapter.close(st.ticket)
-            if res.ok and not res.simulated:
-                logger.info(f"[HYBRID_LLM] #{st.ticket}: LLM EXIT ({res.reason})")
-                self.managed.pop(st.ticket, None)
-            elif res.simulated or adapter.mode in ("OBSERVE", "PAPER"):
-                logger.warning(f"[HYBRID_LLM] #{st.ticket}: LLM EXIT wanted but mode="
-                               f"{adapter.mode} — SIMULATED, no real order")
-            else:
-                logger.warning(f"[HYBRID_LLM] #{st.ticket}: LLM EXIT close FAILED ({res.reason})")
+        if decision in ("EXIT", "CUT_ALL"):
+            # CUT_ALL closes every leg of this symbol+direction; EXIT closes this one.
+            targets = _same_dir if decision == "CUT_ALL" else [pos]
+            if decision == "EXIT" and profit_pts <= spread_pts:
+                return  # don't crystallise a spread-sized loss on a single-leg EXIT
+            for p in targets:
+                res = adapter.close(p.ticket)
+                if res.ok and not res.simulated:
+                    logger.info(f"[SUPERVISOR] #{p.ticket}: {decision} closed ({res.reason})")
+                    self.managed.pop(p.ticket, None)
+                elif not (res.simulated or adapter.mode in ("OBSERVE", "PAPER")):
+                    logger.warning(f"[SUPERVISOR] #{p.ticket}: {decision} close FAILED ({res.reason})")
+                    self._maybe_backoff_market_closed(st.base_symbol, res.reason)
         elif decision == "TIGHTEN" and profit_pts > (spread_pts + 20):
             tighten = max((st.atr_points or 60) * 0.3, spread_pts + 10) * adapter.spec.point
             new_sl = (price - tighten) if st.action == "buy" else (price + tighten)
             if self.trade_manager._sl_improves(st, new_sl):
                 st.sl = new_sl
-                adapter.modify_sl(st.ticket, round(new_sl, 6))
-                logger.info(f"[HYBRID_LLM] #{st.ticket}: LLM TIGHTEN -> SL {new_sl:.5f}")
+                adapter.modify_sl(st.ticket, round(new_sl, adapter.spec.digits))
+                logger.info(f"[SUPERVISOR] #{st.ticket}: TIGHTEN -> SL {new_sl:.5f}")
+        elif decision == "ADD_LEG":
+            # The supervisor only ADVISES the add; the deterministic pyramid gate in
+            # _evaluate_and_trade (breakeven + per-leg profit + multi-TF alignment)
+            # still decides the real add on the next evaluation. We just flag intent.
+            st.actions.append({"t": time.time(), "action": "sup_add_leg_intent", "price": price})
+
 
     def _set_trade_variant(self, db_trade_id: int, variant: str):
         import sqlite3

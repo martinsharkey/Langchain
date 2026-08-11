@@ -6,6 +6,7 @@ langchain-community>=0.1.0
 
 # Multi-Provider LLM Router
 litellm>=1.0.0
+langchain-litellm>=0.1.0
 
 # NotebookLM (Gemini Notebook) — unofficial API for grounded research over your notebooks
 notebooklm-py>=0.8.0

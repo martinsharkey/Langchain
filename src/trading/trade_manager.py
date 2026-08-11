@@ -30,6 +30,7 @@ import random
 from dataclasses import dataclass, field
 from typing import Optional
 
+from src import config
 from src.utils.logger import get_logger
 
 logger = get_logger("trade_manager")
@@ -204,12 +205,17 @@ class TradeManager:
         return max(spread_points + wick * 1.2, spread_points + 20)
 
     def _trail_points(self, st, spread_points, wick) -> float:
-        """RESPONSIVE trail distance (pts): wick-sized breathing room, NOT raw ATR
-        (which gave too much back). Default ~1.3x wick — follows closely yet survives
-        normal wicks; learnable per symbol via 'trail_wick_mult'."""
+        """RESPONSIVE trail distance (pts): wick-sized breathing room, floored by a
+        volatility-scaled minimum (SCALP_TRAIL_MIN_ATR x ATR) so normal volatility
+        cannot wick the trade out before it recovers — the #1 post-mortem finding
+        ("STOPPED THEN RECOVERED"). Both the wick multiplier and the ATR floor are
+        tunable (personality override -> config), so the optimiser discovers the
+        breathing room that best converts recover-after-stop losers into winners."""
         p = self._personality(st)
-        mult = float(p.get("trail_wick_mult", 1.3))
-        return max(wick * mult, spread_points + 12)
+        mult = float(p.get("trail_wick_mult", getattr(config, "SCALP_TRAIL_WICK_MULT", 1.3)))
+        min_atr = float(p.get("trail_min_atr", getattr(config, "SCALP_TRAIL_MIN_ATR", 0.5)))
+        atr_floor = (st.atr_points or 0.0) * min_atr
+        return max(wick * mult, atr_floor, spread_points + 12)
 
     def _reversal_tell(self, st, live: dict, signature: dict) -> str:
         """Classify the live momentum state vs the MFE peak snapshot, guided by the

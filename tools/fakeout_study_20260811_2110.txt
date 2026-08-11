@@ -1,0 +1,22 @@
+===== FAKEOUT STUDY since 2026-08-11T00:00 — 110 winners, 138 losers =====
+baseline win-rate: 44%  (110W/138L)
+
+winner-median thresholds: osma_atr>=0.250  dom_atr>=1.716
+(a filter KEEPS a trade only if it meets the threshold / HTF agrees)
+
+(1) POWER (OsMA+dominant power >= winner median)
+    winners kept 39/110 (35%)  losers kept 47/138 (34%)  -> win-rate 45%  (baseline 44%)
+    losers REMOVED: 91  winners sacrificed: 71
+
+(2) HTF alignment agrees with direction
+    winners kept 22/110 (20%)  losers kept 23/138 (17%)  -> win-rate 49%  (baseline 44%)
+    losers REMOVED: 115  winners sacrificed: 88
+
+(3) BOTH power + HTF
+    winners kept 7/110 (6%)  losers kept 9/138 (7%)  -> win-rate 44%  (baseline 44%)
+    losers REMOVED: 129  winners sacrificed: 103
+
+htf_alignment present on 248/248 trades (100%) — if low, HTF result is unreliable.
+
+READ: the filter with the BEST win-rate lift for the FEWEST winners
+sacrificed is the lever to make tunable + prove in the optimiser.
