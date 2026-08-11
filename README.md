@@ -3,7 +3,8 @@
 A self-learning, multi-strategy trading system that connects to a live
 **MetaTrader 5** account (VT Markets flavour), trades on a **demo account** to
 accumulate real outcomes, and learns from them. It ships with a live dashboard
-showing **only real data**.
+showing **only real data**. It features a built-in RAG and **NotebookLM** integration 
+to intelligently analyze its own historical trades.
 
 > Current status: places **real orders on the demo account** in `LIVE_MICRO`
 > mode (0.01 lots), reconciles closed trades against real MT5 deal history, and
@@ -18,7 +19,11 @@ showing **only real data**.
 # 1. Ensure MT5 terminal is running, logged into the demo account,
 #    and the "Algo Trading" button is GREEN (enabled).
 
-# 2. Start everything (dashboard + trading engine) in one command:
+# 2. (Optional) Authenticate your NotebookLM integration so the bot can
+#    read your historical GoldShark notes and strategies:
+#    Double-click setup_notebooklm.bat (Windows) or run `notebooklm login`.
+
+# 3. Start everything (dashboard + trading engine) in one command:
 python app.py OBSERVE       # analyze only, no orders (safe default)
 python app.py PAPER         # simulated fills at live prices
 python app.py LIVE_MICRO    # REAL demo orders, 0.01 lots  â† use this to trade & learn
