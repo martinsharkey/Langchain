@@ -46,7 +46,10 @@ PARAM_SPACE = {
     "rsi_period":  (2, 30, 1, int),        # mql5: RSI (def 14)
     # confluence strengths (ATR-relative gates) + exit
     "atr_min":     (0.0, 4.0, 0.1, float),
-    "atr_max":     (0.0, 12.0, 0.1, float),
+    # Gate 3 (GoldShark): ATR is a MINIMUM kinetic floor only. We deliberately do
+    # NOT expose an atr_max ceiling to the optimizer — capping volatility blocks the
+    # rare "mega-run" outliers that carry the edge (proven by the XGBoost/ablation
+    # study). atr_max stays pinned at 0.0 (= uncapped) in every baseline below.
     "min_ema_slope": (0.0, 0.5, 0.01, float),
     "price_stretch_mult": (1.0, 4.0, 0.1, float),
     "min_confluence": (1, 5, 1, int),
@@ -108,7 +111,7 @@ SYMBOL_BASELINES = {
         # pass5469 PROVEN config (reproduced £100->£273 2.73x, WR 94%, PF 1.48 on tick
         # data). Floors ATR-normalized (raw / gold ATR ~2.3). osma_slow 26, steep slope.
         "osma_fast": 12, "osma_slow": 26, "osma_signal": 9, "ema_period": 13,
-        "atr_period": 14, "min_ema_slope": 0.2, "atr_min": 1.4, "atr_max": 4.5,
+        "atr_period": 14, "min_ema_slope": 0.2, "atr_min": 1.4, "atr_max": 0.0,
         "osma_min_long": 0.87, "bulls_min_long": 0.3, "bears_min_long": 0.0,
         "osma_max_short": -0.30, "bulls_max_short": 0.0, "bears_max_short": -0.04,
         "max_momentum_age": 26,
@@ -204,6 +207,9 @@ class ParameterOptimizer:
         is_gold = key.startswith("XAUUSD")
         if key in self.tuned and self.tuned[key].get("params"):
             p = dict(self.tuned[key]["params"])
+            # Gate 3: never honour a persisted ATR ceiling — volatility is a floor
+            # only. Neutralise any legacy atr_max from older tuned_params.json.
+            p["atr_max"] = 0.0
             # share only STRUCTURE from the gold baseline; magnitude floors stay
             # per-symbol (borrowing gold's magnitudes would misfire on BTC/GER40).
             for fk in self._SHARED_STRUCT_KEYS:
@@ -245,7 +251,7 @@ class ParameterOptimizer:
         PERIODS = ["osma_fast", "osma_slow", "osma_signal", "ema_period",
                    "atr_period", "power_period", "rsi_period", "macd_lead_bars",
                    "max_momentum_age"]
-        SHAPE = ["min_confluence", "min_ema_slope", "atr_min_rel", "atr_min", "atr_max",
+        SHAPE = ["min_confluence", "min_ema_slope", "atr_min_rel", "atr_min",
                  "price_stretch_mult", "rsi_long_max", "rsi_short_min", "sl_atr", "tp_rr"]
         for k in STRENGTH + PERIODS + SHAPE:
             if k not in PARAM_SPACE:

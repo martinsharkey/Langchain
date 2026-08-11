@@ -262,6 +262,16 @@ class ScalpEngine:
         except Exception as e:
             logger.warning(f"ContinualResearcher unavailable: {e}")
 
+        # Formal LangGraph cognitive loop (observe->reason->act->adopt) wrapping the
+        # proven researcher. Non-fatal; falls back to direct researcher calls.
+        self.langgraph_researcher = None
+        if self.researcher is not None:
+            try:
+                from src.learning.langgraph_researcher import LangGraphResearcher
+                self.langgraph_researcher = LangGraphResearcher(self.researcher)
+            except Exception as e:
+                logger.warning(f"LangGraphResearcher unavailable: {e}")
+
         # #25: give the optimizer its ReAct alternatives — mql5-grounded tuning
         # direction + avoid the checkpointer's failed directions (no blind search).
         if self.param_optimizer is not None:
@@ -2047,17 +2057,13 @@ class ScalpEngine:
                 params = dict(self.param_optimizer.current_params(resolved_symbol) or {})
             except Exception:
                 params = {}
-        # learned per-symbol ENTRY-QUALITY recipe (the mined gates that lift entry-
-        # direction success toward the EA's ~95%): accel_min / max_stretch_atr /
-        # dom_min / runway_min. Applied only where the learner proved they help.
-        try:
-            for key, sv in (getattr(self, "_entry_strength", {}) or {}).items():
-                if resolved_symbol.upper().startswith(key.upper()):
-                    for gk, gv in (sv.get("recipe") or {}).items():
-                        params[gk] = gv
-                    break
-        except Exception:
-            pass
+        # ENTRY-QUALITY overlay DISABLED (owner directive 2026-08-11): entries must
+        # be decided PURELY by the GoldShark indicator-threshold confluence
+        # (confluence_signal.py) + the per-symbol tuned floors — NOT reshaped by a
+        # frequency-vs-quality learner that injected obscure gates like runway>=2.0
+        # driven by a min_trades_per_day floor. The learner still RECORDS analysis
+        # for research, but it no longer gates live entries.
+        # (was: merge self._entry_strength recipe -> params)
         # #36b DynamicFixer live ENTRY-extension override -> tighten max_stretch_atr so
         # a diagnosed "entering late / into extended moves" fix actually gates entries.
         try:
@@ -2164,7 +2170,12 @@ class ScalpEngine:
                 # for development-worthy discoveries. Idempotent per UTC day.
                 if self.researcher is not None:
                     try:
-                        summ = self.researcher.daily_cycle(list(self.adapters.keys()))
+                        if self.langgraph_researcher is not None:
+                            # formal observe->reason->act->adopt state graph
+                            self.langgraph_researcher.run_cycle(list(self.adapters.keys()))
+                            summ = {"symbols": list(self.adapters.keys()), "via": "langgraph"}
+                        else:
+                            summ = self.researcher.daily_cycle(list(self.adapters.keys()))
                         if not summ.get("skipped"):
                             logger.info(f"[RESEARCHER] daily cycle: {summ.get('symbols')} "
                                         f"issues_filed={summ.get('issues_filed')}")
@@ -2386,6 +2397,26 @@ class ScalpEngine:
                     _at = indicators.get("atr")
                     logger.info(f"[ENTRY-HOLD] {base}: {_rsn} | osma_closed={_oc} osma_prev={_op} "
                                 f"atr={_at} macd={indicators.get('macd_line')}")
+            except Exception:
+                pass
+            # Rejected-signal telemetry: a valid trigger existed but a GATE blocked it.
+            # We only log gate rejections (strength/ATR/momentum/stretch), NOT "no
+            # cross" (no trigger). This lets the researcher later measure the
+            # hypothetical MFE and answer: whipsaw-saved or mega-run-blocked?
+            try:
+                _rsn2 = (getattr(fs, "reason", "") or "").lower()
+                _gate_hit = next((g for g in ("strength", "atr", "runway", "momentum",
+                                              "stretch", "rsi", "confluence")
+                                  if g in _rsn2), None)
+                if _gate_hit and self.experience_db is not None:
+                    _dirn = "buy" if (indicators.get("osma_closed") or 0) > 0 else "sell"
+                    self.experience_db.record_rejected_signal(
+                        symbol=resolved, base_symbol=base, direction=_dirn,
+                        reject_reason=getattr(fs, "reason", ""), reject_gate=_gate_hit,
+                        price=indicators.get("close"), atr_points=indicators.get("atr"),
+                        indicators={k: indicators.get(k) for k in
+                                    ("osma_closed", "osma_prev", "macd_line",
+                                     "bulls_power", "bears_power", "rsi", "atr")})
             except Exception:
                 pass
             return

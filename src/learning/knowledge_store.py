@@ -31,7 +31,12 @@ from datetime import datetime, timezone
 
 import chromadb
 from chromadb.config import Settings
-from chromadb.utils import embedding_functions
+# NOTE: `from chromadb.utils import embedding_functions` is intentionally NOT done
+# here. That submodule eagerly imports sentence-transformers -> transformers ->
+# torch, whose native c10.dll segfaults on some hosts (and crashes pytest
+# collection when several such modules load in one process). It is imported
+# lazily, only on the real-embedder path, which is skipped when USE_SAFE_EMBEDDER
+# is set. Root-cause fix, not suppression.
 
 logger = logging.getLogger("knowledge_store")
 
@@ -91,6 +96,7 @@ class KnowledgeStore:
         else:
             # Explicit local MiniLM embedder (offline after first download).
             try:
+                from chromadb.utils import embedding_functions  # lazy: pulls torch
                 self._embedder = embedding_functions.SentenceTransformerEmbeddingFunction(
                     model_name=EMBED_MODEL
                 )

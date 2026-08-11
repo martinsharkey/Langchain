@@ -3,6 +3,12 @@
 > This file is the FIRST thing to read in a new chat. It tells you what this
 > project is, what we're building, what's broken, what's next, and the rules.
 
+> ⚠️ **READ `AGENT_ORIENTATION.md` FIRST.** It is the ownership charter for every
+> agentic developer: **all code in this workspace is your responsibility, even
+> what you did not write.** Reuse existing components, never build parallel
+> systems, clean up your scratch files, keep docs truthful, and verify before you
+> commit. This signpost assumes you have read it.
+
 ## GROUND RULE — GitHub is the single source of truth
 
 All issues, features, bugs, and TODOs live in **GitHub Issues** on

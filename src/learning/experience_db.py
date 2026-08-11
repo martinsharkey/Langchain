@@ -120,7 +120,33 @@ class ExperienceDatabase:
                 FOREIGN KEY (trade_id) REFERENCES trades(id)
             )
         """)
-        
+
+        # Rejected-signal telemetry: every time a valid trigger fired but a GATE
+        # blocked the entry, we log WHY + the entry-time price/indicator snapshot.
+        # A follow-up pass measures the hypothetical MFE/MAE from that price so the
+        # researcher can tell a "saved-from-whipsaw" block apart from a
+        # "blocked mega-run" (the exact question the ablation study asks).
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS rejected_signals (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                timestamp TEXT NOT NULL,
+                symbol TEXT NOT NULL,
+                base_symbol TEXT,
+                direction TEXT,
+                reject_reason TEXT,
+                reject_gate TEXT,
+                price REAL,
+                atr_points REAL,
+                indicators TEXT,
+                account_login INTEGER,
+                account_server TEXT,
+                hyp_mfe_points REAL,
+                hyp_mae_points REAL,
+                horizon_bars INTEGER,
+                measured INTEGER DEFAULT 0
+            )
+        """)
+
         conn.commit()
         conn.close()
         
@@ -457,6 +483,55 @@ class ExperienceDatabase:
         
         return trade_id
     
+    def record_rejected_signal(self, symbol, base_symbol, direction, reject_reason,
+                               reject_gate=None, price=None, atr_points=None,
+                               indicators=None, horizon_bars=30):
+        """Log a valid trigger that a GATE blocked, with the entry-time snapshot.
+
+        A later measurement pass fills hyp_mfe_points / hyp_mae_points from the
+        price path after this bar, so the researcher can distinguish a
+        'saved-from-whipsaw' block from a 'blocked mega-run'.
+        """
+        import json as _json
+        from datetime import datetime as _dt
+        acct = getattr(self, "current_account", None) or {}
+        try:
+            conn = sqlite3.connect(self.db_path)
+            cur = conn.cursor()
+            cur.execute("""
+                INSERT INTO rejected_signals
+                  (timestamp, symbol, base_symbol, direction, reject_reason,
+                   reject_gate, price, atr_points, indicators,
+                   account_login, account_server, horizon_bars, measured)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,0)
+            """, (_dt.now().isoformat(), symbol, base_symbol, direction,
+                  str(reject_reason)[:300], reject_gate, price, atr_points,
+                  _json.dumps(indicators or {})[:4000],
+                  acct.get("login"), acct.get("server"), horizon_bars))
+            conn.commit(); conn.close()
+        except Exception as e:
+            logger.debug(f"record_rejected_signal skip: {e}")
+
+    def rejected_summary(self, base_symbol=None, limit=500):
+        """Return measured rejected signals so the researcher can quantify
+        blocked-run pain vs whipsaw-savings per reject reason."""
+        try:
+            conn = sqlite3.connect(self.db_path)
+            cur = conn.cursor()
+            q = ("SELECT reject_reason, direction, hyp_mfe_points, hyp_mae_points "
+                 "FROM rejected_signals WHERE measured=1")
+            params = []
+            if base_symbol:
+                q += " AND base_symbol=?"; params.append(base_symbol)
+            q += " ORDER BY id DESC LIMIT ?"; params.append(limit)
+            cur.execute(q, params)
+            rows = cur.fetchall(); conn.close()
+            return [{"reject_reason": r[0], "direction": r[1],
+                     "hyp_mfe_points": r[2], "hyp_mae_points": r[3]} for r in rows]
+        except Exception as e:
+            logger.debug(f"rejected_summary skip: {e}")
+            return []
+
     def update_trade_outcome(
         self,
         trade_id: int,
@@ -468,19 +543,7 @@ class ExperienceDatabase:
         mae_points: Optional[float] = None,
         exit_points: Optional[float] = None,
     ):
-        """
-        Update a trade's outcome after it closes.
-
-        Args:
-            trade_id: The trade ID to update.
-            outcome: "win", "loss", or "breakeven".
-            profit_loss: Final P&L.
-            exit_price: Exit price.
-            exit_reason: Why the trade was closed.
-            mfe_points: Max favourable excursion (points) reached during the trade.
-            mae_points: Max adverse excursion (points).
-            exit_points: Realised points at exit (for the capture ratio = exit/mfe).
-        """
+        """Update a trade's outcome after it closes."""
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
         

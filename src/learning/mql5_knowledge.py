@@ -37,7 +37,7 @@ from datetime import datetime, timezone
 
 import chromadb
 from chromadb.config import Settings
-from chromadb.utils import embedding_functions
+# embedding_functions imported lazily (pulls torch); see knowledge_store.py note.
 
 logger = logging.getLogger("mql5_knowledge")
 
@@ -150,6 +150,7 @@ class MQL5Knowledge:
             self._embedder = _SafeEmbeddingFunction(dim=20)
         else:
             try:
+                from chromadb.utils import embedding_functions  # lazy: pulls torch
                 self._embedder = embedding_functions.SentenceTransformerEmbeddingFunction(
                     model_name=EMBED_MODEL
                 )
