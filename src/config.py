@@ -207,8 +207,23 @@ GROWTH_INITIAL_CAPITAL = float(os.getenv("GROWTH_INITIAL_CAPITAL", "100.0"))
 GROWTH_EXTRACT_AT = float(os.getenv("GROWTH_EXTRACT_AT", "1000.0"))   # bank the stake here
 GROWTH_BALANCE_PER_LOT = float(os.getenv("GROWTH_BALANCE_PER_LOT", "31.0"))  # pass5469: L31/0.01
 GROWTH_MAX_LOT = float(os.getenv("GROWTH_MAX_LOT", "5.0"))            # broker/sanity ceiling
-GROWTH_PYRAMID_MAX = int(os.getenv("GROWTH_PYRAMID_MAX", "10"))       # add-to-winner legs
+GROWTH_PYRAMID_MAX = int(os.getenv("GROWTH_PYRAMID_MAX", "0"))       # add-to-winner legs; 0 = no cap (rule self-limits)
 GROWTH_DAILY_LOSS_HALT_PCT = float(os.getenv("GROWTH_DAILY_LOSS_HALT_PCT", "30.0"))  # circuit breaker
+
+# ── Intelligent pyramiding basket (see PYRAMID_BASKET_DESIGN.md) ──
+# All ATR-normalised so they self-scale per symbol. These are the STARTING values;
+# the optimiser/walk-forward DISCOVERS and PROVES the real per-symbol figures on
+# real ticks before anything compounds live (proven on demo first). The whole
+# basket feature stays gated by GROWTH_ENABLED (default off) until proven.
+# Leg 1 must be at breakeven AND >= this many ATR in profit before a basket starts:
+PYRAMID_LEG1_TRIGGER_ATR = float(os.getenv("PYRAMID_LEG1_TRIGGER_ATR", "1.0"))
+# Each subsequent leg: newest leg must be >= this many ATR in profit (and at BE):
+PYRAMID_ADD_ATR = float(os.getenv("PYRAMID_ADD_ATR", "1.0"))
+# Aggregate basket drawdown-from-peak ceiling (fraction). If the basket gives back
+# more than this of its peak aggregate profit, the deterministic layer cuts ALL legs.
+# 0 = disabled until the optimiser proves a value.
+PYRAMID_MAX_DD_FRAC = float(os.getenv("PYRAMID_MAX_DD_FRAC", "0.0"))
+
 
 
 def is_live_mode() -> bool:

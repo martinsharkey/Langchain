@@ -1644,10 +1644,81 @@ class ScalpEngine:
                 return True
         return False
 
+    def _manage_baskets(self):
+        """Deterministic group protection for pyramided baskets (>=2 legs, same
+        symbol+direction). Cuts ALL legs together when the higher-timeframe context
+        confirms a REVERSAL, or when the basket's aggregate profit gives back more
+        than PYRAMID_MAX_DD_FRAC of its peak. Owner rule: manage the basket as ONE
+        entity so it finishes in profit; never let a runner reverse into net loss."""
+        if not getattr(config, "GROWTH_ENABLED", False) or not self.open_positions:
+            return
+        # group legs by (base_symbol, action)
+        groups: dict = {}
+        for pos in self.open_positions.values():
+            groups.setdefault((pos.base_symbol, pos.action), []).append(pos)
+
+        dd_frac = float(getattr(config, "PYRAMID_MAX_DD_FRAC", 0.0) or 0.0)
+        self._basket_peak = getattr(self, "_basket_peak", {})
+
+        for (base, action), legs in groups.items():
+            if len(legs) < 2:
+                continue  # not a basket
+            adapter = self.adapters.get(base)
+            if adapter is None or adapter.spec is None:
+                continue
+            try:
+                tick = adapter.live_tick()
+                if tick is None:
+                    continue
+                px = tick.bid if action == "buy" else tick.ask
+                pt = adapter.spec.point or 1
+                agg_pts = sum(((px - p.entry_price) if action == "buy"
+                               else (p.entry_price - px)) / pt for p in legs)
+            except Exception:
+                continue
+
+            cut = False
+            reason = ""
+            # 1) confirmed HTF reversal against the basket direction
+            if self.htf is not None:
+                try:
+                    if self.htf.blip_or_reversal(adapter.resolved_symbol, action) == "reversal":
+                        cut = True; reason = "HTF reversal"
+                except Exception:
+                    pass
+            # 2) aggregate drawdown-from-peak breach (only once basket is net-positive)
+            key = f"{base}:{action}"
+            peak = self._basket_peak.get(key, 0.0)
+            if agg_pts > peak:
+                self._basket_peak[key] = peak = agg_pts
+            if (not cut) and dd_frac > 0 and peak > 0 and agg_pts <= peak * (1.0 - dd_frac):
+                cut = True; reason = f"basket DD {((peak-agg_pts)/peak)*100:.0f}% of peak"
+
+            if cut:
+                logger.info(f"[BASKET-CUT] {base} {action}: closing all {len(legs)} legs "
+                            f"(agg {agg_pts:.0f}pts, peak {peak:.0f}pts) — {reason}")
+                for p in legs:
+                    try:
+                        res = adapter.close(p.ticket)
+                        if res.ok or res.simulated:
+                            self._retire_managed(p.ticket)
+                        else:
+                            self._maybe_backoff_market_closed(base, res.reason)
+                    except Exception as e:
+                        logger.debug(f"basket-cut close {p.ticket} skip: {e}")
+                self._basket_peak.pop(key, None)
+
     def _manage_open_positions(self):
         """Run the trade manager over each open position; execute SL/exit intents."""
         if not self.open_positions:
             return
+        # Basket group-protection FIRST (deterministic, per-tick): cut ALL legs of a
+        # symbol together on a confirmed HTF reversal or an aggregate drawdown breach.
+        # The LLM supervisor never owns this — safety is deterministic.
+        try:
+            self._manage_baskets()
+        except Exception as e:
+            logger.debug(f"basket group-protect skip: {e}")
         for ticket, pos in list(self.open_positions.items()):
             adapter = self.adapters.get(pos.base_symbol)
             if adapter is None or adapter.spec is None:
@@ -1862,15 +1933,52 @@ class ScalpEngine:
         else:
             profit_pts = (st.entry - price) / (adapter.spec.point or 1)
 
+        # ── Rich multi-timeframe + experience context (the intelligent trader view) ──
+        # Reason across ALL indicators/timeframes, grounded in this symbol's history —
+        # per the trade-supervisor design. The LLM ADVISES; the deterministic layer
+        # still owns the stop/group-cut/DD-halt, so this can never harm safety.
+        live = {}
+        try:
+            live = self._live_indicators(st.base_symbol, adapter) or {}
+        except Exception:
+            live = {}
+        htf_txt = ""
+        try:
+            if self.htf is not None:
+                hr = self.htf.read(adapter.resolved_symbol, st.action)
+                htf_txt = (f"HTF alignment (M5/M15/M30/H1): trend={getattr(hr,'trend',None)} "
+                           f"aligned={getattr(hr,'aligned',None)} "
+                           f"momentum_flipped={getattr(hr,'momentum_flipped',None)}")
+        except Exception:
+            pass
+        exp_txt = ""
+        try:
+            if self.knowledge_store is not None:
+                hits = self.knowledge_store.recall(
+                    f"{st.base_symbol} runner hold vs exit when OsMA MACD aligned", n_results=1)
+                if hits:
+                    exp_txt = f"Learned: {str(hits[0])[:180]}"
+        except Exception:
+            pass
+        n_legs = len([p for p in self.open_positions.values()
+                      if p.base_symbol == st.base_symbol and p.action == st.action])
+
         prompt = (
-            "You are a scalp trade-management reviewer. Given the open trade, reply "
-            "with EXACTLY one word: HOLD, TIGHTEN, or EXIT.\n"
-            f"Symbol: {st.symbol}\nSide: {st.action}\nEntry: {st.entry}\n"
-            f"Current price: {price}\nProfit (points): {profit_pts:.0f}\n"
-            f"Spread (points): {spread_pts:.0f}\nATR (points): {st.atr_points:.0f}\n"
-            f"Already at break-even: {st.moved_to_be}\n"
-            "Rules: EXIT only if the move looks exhausted/reversing against us. "
-            "TIGHTEN if strongly in profit and worth locking in. Otherwise HOLD."
+            "You are an intelligent trade supervisor managing an OPEN position. "
+            "Reason across ALL indicators and timeframes, grounded in this symbol's "
+            "experience, then reply with EXACTLY one word: HOLD, TIGHTEN, or EXIT.\n"
+            f"Symbol: {st.symbol}  Side: {st.action}  Legs in this basket: {n_legs}\n"
+            f"Entry: {st.entry}  Price: {price}  Profit(pts): {profit_pts:.0f}  "
+            f"ATR(pts): {st.atr_points:.0f}  Spread(pts): {spread_pts:.0f}  "
+            f"AtBreakeven: {st.moved_to_be}\n"
+            f"OsMA: closed={live.get('osma_closed')} prev={live.get('osma_prev')}  "
+            f"MACD: line={live.get('macd_line')} signal={live.get('macd_signal')}  "
+            f"Bulls={live.get('bulls_power')} Bears={live.get('bears_power')} RSI={live.get('rsi')}\n"
+            f"{htf_txt}\n{exp_txt}\n"
+            "Decide: is momentum STILL confirmed on all fronts (OsMA + MACD aligned, "
+            "dominant power still in our direction, HTF aligned)? If it's still a "
+            "runner, HOLD. If strongly in profit and momentum is fading, TIGHTEN to "
+            "lock in. EXIT only if the move looks exhausted or reversing against us."
         )
         try:
             llm = get_llm(temperature=0.2)
@@ -2632,28 +2740,64 @@ class ScalpEngine:
         # Block a new entry at (nearly) the same price + direction as a still-open
         # position on this symbol, to stop the repeated same-level re-entries seen
         # in the journal (e.g. GER40 6x at 25706.65). Distance measured in ATR.
-        # ── PYRAMIDING (growth engine): add legs to a WINNING same-direction position
-        # up to GROWTH_PYRAMID_MAX while the signal is still valid. This deliberately
-        # bypasses the same-level guard for same-direction adds, but ONLY when the
-        # existing legs are in profit (add to winners, never to losers). Opposite-
-        # direction is still blocked below.
+        # ── PYRAMIDING (intelligent basket, see PYRAMID_BASKET_DESIGN.md) ──
+        # Owner rule: a basket is only STARTED once leg 1 is (a) at breakeven AND
+        # (b) >= PYRAMID_LEG1_TRIGGER_ATR * ATR in profit. Each subsequent leg needs
+        # ALL existing legs in profit, the newest leg at breakeven + >= PYRAMID_ADD_ATR
+        # * ATR in profit, AND multi-timeframe alignment (HTFContext) still confirming
+        # the SAME direction. No arbitrary leg cap (rule self-limits; 0 = uncapped).
+        # Gated by GROWTH_ENABLED — stays OFF until proven on demo via backtest/fwd-test.
         _same_dir = [p for p in self.open_positions.values()
                      if p.base_symbol == base and p.action == signal.action]
         _is_pyramid = False
         if getattr(config, "GROWTH_ENABLED", False) and _same_dir:
-            if len(_same_dir) >= config.GROWTH_PYRAMID_MAX:
-                return   # max legs reached
-            # only add if the aggregate position is in profit (add to winners)
+            _cap = getattr(config, "GROWTH_PYRAMID_MAX", 0) or 0
+            if _cap > 0 and len(_same_dir) >= _cap:
+                return   # optional sanity cap reached (0 = uncapped)
             try:
                 tick = adapter.live_tick()
                 px = tick.bid if signal.action == "buy" else tick.ask
-                winning = all((px > p.entry_price) == (signal.action == "buy") for p in _same_dir)
-            except Exception:
-                winning = False
-            if winning:
+                pt = adapter.spec.point or 1
+                atr_pts = float(indicators.get("atr", 0) or 0) / pt if pt else 0
+                leg1_trig = float(getattr(config, "PYRAMID_LEG1_TRIGGER_ATR", 1.0)) * atr_pts
+                add_trig = float(getattr(config, "PYRAMID_ADD_ATR", 1.0)) * atr_pts
+
+                def _profit_pts(p):
+                    d = (px - p.entry_price) if signal.action == "buy" else (p.entry_price - px)
+                    return d / pt if pt else 0.0
+
+                def _at_breakeven(p):
+                    st = self.managed.get(p.ticket)
+                    return bool(getattr(st, "moved_to_be", False)) if st else False
+
+                # EVERY existing leg must be in profit (never pyramid into a loser)
+                all_profit = all(_profit_pts(p) > 0 for p in _same_dir)
+                # the MOST RECENT leg gates the next add: at breakeven + enough profit
+                newest = max(_same_dir, key=lambda p: getattr(p, "opened_at", 0) or 0)
+                newest_profit = _profit_pts(newest)
+                # leg-1 (basket start) needs the bigger trigger; later legs use add_trig
+                need = leg1_trig if len(_same_dir) == 1 else add_trig
+                gates_ok = (all_profit and _at_breakeven(newest)
+                            and newest_profit >= max(need, 1.0))
+
+                # multi-timeframe alignment must still confirm the SAME direction
+                htf_ok = True
+                if gates_ok and self.htf is not None:
+                    try:
+                        htf_ok = (self.htf.blip_or_reversal(adapter.resolved_symbol,
+                                                            signal.action) != "reversal")
+                    except Exception:
+                        htf_ok = True
+            except Exception as e:
+                logger.debug(f"pyramid gate eval skip {base}: {e}")
+                gates_ok = False; htf_ok = False
+
+            if gates_ok and htf_ok:
                 _is_pyramid = True   # allow this leg; skip the same-level guard
+                logger.info(f"[PYRAMID] {base}: adding leg #{len(_same_dir)+1} "
+                            f"(newest +{newest_profit:.0f}pts, BE ok, HTF aligned)")
             else:
-                return   # existing legs not (all) in profit -> don't pyramid into a loser
+                return   # basket conditions not met -> do not add a leg
 
         # same-level guard (skipped for a valid pyramid add)
         if not _is_pyramid and self._same_level_open(base, signal.action, signal.price,

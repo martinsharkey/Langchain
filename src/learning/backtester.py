@@ -190,6 +190,157 @@ class Backtester:
         return {"pfs": pfs, "wrs": wrs, "n_total": n_total,
                 "generalizes": generalizes, "score": min(pfs) if pfs else -1.0}
 
+    def walkforward_basket(self, symbol, params, sl_atr=1.0, tp_rr=2.0,
+                           leg1_trigger_atr=1.0, add_atr=1.0, max_dd_frac=0.0,
+                           timeframe=config.ENTRY_TIMEFRAME, bars=12000, windows=3,
+                           warmup=210):
+        """Tick-accurate MULTI-LEG basket walk-forward — mirrors the live
+        _manage_baskets + pyramid rule so the backtest proves the SAME behaviour.
+
+        Pyramids into a winning same-direction run: a new leg is added only when the
+        newest open leg is >= (leg1_trigger_atr for leg1 / add_atr thereafter) * ATR
+        in profit (breakeven proxy: profit>0). The whole basket is CUT together on a
+        confirmed opposite signal (reversal) or when aggregate profit gives back
+        max_dd_frac of its peak.
+
+        Returns per-window aggregate PF/R AND the worst-case aggregate basket
+        drawdown (in R), which the optimiser uses to approve/reject an envelope:
+          {pfs, n_total, worst_basket_dd_r, score, generalizes}
+        """
+        from src.strategies.indicators import compute_indicator_series
+        from src.learning.edge_weights import focused_rules
+        rates = get_rates(symbol, timeframe=timeframe, count=bars)
+        if not rates or len(rates) < 2000:
+            return None
+        series = compute_indicator_series(rates, params)
+        rules = focused_rules(symbol) or []
+        if not rules:
+            return None
+        fns = {nm: (self.registry.get(nm).signal_fn, {**self.registry.get(nm).params, **(params or {})})
+               for nm, _ in rules if self.registry.get(nm)}
+        n = len(rates); seg = (n - warmup) // windows
+
+        def _signal(ind):
+            regime = self.registry._detect_market_regime(ind)
+            for nm, regs in rules:
+                if nm not in fns or regime not in regs:
+                    continue
+                try:
+                    s = fns[nm][0](ind, fns[nm][1])
+                except Exception:
+                    continue
+                if s.action in ("buy", "sell"):
+                    return s.action
+            return None
+
+        def _sim(lo, hi):
+            """Aggregate-R basket sim on closed bars (favourable-excursion peak +
+            giveback via ATR). Legs share one direction; opposite signal = reversal."""
+            legs = []            # each: {entry, dir, risk}
+            realised_r = 0.0
+            wins = l = 0
+            peak_agg = 0.0       # peak aggregate open profit in R
+            worst_dd = 0.0       # worst give-back from peak (R)
+            n_baskets = 0
+            for i in range(lo, hi):
+                ind = series[i]
+                if not ind or not ind.get("close"):
+                    continue
+                price = ind["close"]; atr = ind.get("atr") or 0
+                if atr <= 0:
+                    continue
+                action = _signal(ind)
+
+                if legs:
+                    d = legs[0]["dir"]
+                    # aggregate open profit in R (risk = sl_atr*atr per leg)
+                    agg_r = sum(((price - lg["entry"]) if d == "buy"
+                                 else (lg["entry"] - price)) / lg["risk"] for lg in legs)
+                    peak_agg = max(peak_agg, agg_r)
+                    if peak_agg > 0:
+                        worst_dd = max(worst_dd, peak_agg - agg_r)
+                    # reversal (opposite signal) OR aggregate DD breach -> cut ALL
+                    reversal = action is not None and action != d
+                    dd_hit = (max_dd_frac > 0 and peak_agg > 0
+                              and agg_r <= peak_agg * (1.0 - max_dd_frac))
+                    # also close on hard SL: any leg beyond -1R aggregate safety
+                    if reversal or dd_hit or agg_r <= -1.0:
+                        realised_r += agg_r
+                        if agg_r > 0: wins += 1
+                        else: l += 1
+                        legs = []; peak_agg = 0.0
+                        continue
+                    # PYRAMID: add a leg if newest leg profit past the ATR trigger
+                    newest = legs[-1]
+                    np_r = (((price - newest["entry"]) if d == "buy"
+                             else (newest["entry"] - price)) / newest["risk"])
+                    need = (leg1_trigger_atr if len(legs) == 1 else add_atr)
+                    if action == d and np_r >= need:
+                        legs.append({"entry": price, "dir": d, "risk": sl_atr * atr})
+                    continue
+
+                # no open basket: a fresh signal starts leg 1
+                if action in ("buy", "sell"):
+                    legs = [{"entry": price, "dir": action, "risk": sl_atr * atr}]
+                    peak_agg = 0.0; n_baskets += 1
+            tot = wins + l
+            pf = round((wins) / l, 2) if l else (float(wins) if wins else 0.0)
+            return tot, realised_r, worst_dd, n_baskets
+
+        pfs = []; n_total = 0; worst = 0.0
+        for k in range(windows):
+            lo = warmup + k * seg; hi = warmup + (k + 1) * seg if k < windows - 1 else n
+            tot, R, dd, nb = _sim(lo, hi)
+            worst = max(worst, dd)
+            pfs.append(R); n_total += tot
+        return {"pfs": pfs, "n_total": n_total, "worst_basket_dd_r": round(worst, 2),
+                "total_r": round(sum(pfs), 1),
+                "generalizes": all(p > 0 for p in pfs),
+                "score": round(min(pfs), 1) if pfs else -1.0}
+
+    def discover_basket_envelope(self, symbol, params, dd_ceiling_r: float = 3.0,
+                                 timeframe=config.ENTRY_TIMEFRAME):
+        """Sweep the pyramid params and return the PROVEN safe envelope for a symbol.
+
+        Approves a setting ONLY if, across all walk-forward windows, it is
+        profitable (min window R > 0) AND its worst-case aggregate basket drawdown
+        stays within dd_ceiling_r (in R). Returns the best approved envelope or None
+        (meaning: do NOT enable basket compounding for this symbol yet).
+        """
+        leg1_grid = (0.5, 1.0, 1.5, 2.0)
+        add_grid = (0.5, 1.0, 1.5)
+        dd_grid = (0.4, 0.5, 0.6)
+        best = None
+        for leg1 in leg1_grid:
+            for add in add_grid:
+                for dd in dd_grid:
+                    try:
+                        r = self.walkforward_basket(
+                            symbol, params, leg1_trigger_atr=leg1, add_atr=add,
+                            max_dd_frac=dd, timeframe=timeframe)
+                    except Exception as e:
+                        logger.debug(f"basket sweep skip {symbol} {leg1}/{add}/{dd}: {e}")
+                        continue
+                    if not r:
+                        continue
+                    approved = (r.get("generalizes")
+                                and r.get("worst_basket_dd_r", 99) <= dd_ceiling_r
+                                and r.get("total_r", 0) > 0)
+                    if approved:
+                        cand = {"PYRAMID_LEG1_TRIGGER_ATR": leg1, "PYRAMID_ADD_ATR": add,
+                                "PYRAMID_MAX_DD_FRAC": dd, "total_r": r["total_r"],
+                                "worst_dd_r": r["worst_basket_dd_r"], "pfs": r["pfs"]}
+                        if best is None or cand["total_r"] > best["total_r"]:
+                            best = cand
+        if best:
+            logger.info(f"[BASKET-ENVELOPE] {symbol}: PROVEN leg1>={best['PYRAMID_LEG1_TRIGGER_ATR']} "
+                        f"add>={best['PYRAMID_ADD_ATR']} maxDD={best['PYRAMID_MAX_DD_FRAC']} "
+                        f"total_r={best['total_r']} worstDD_r={best['worst_dd_r']}")
+        else:
+            logger.info(f"[BASKET-ENVELOPE] {symbol}: no setting passed the DD ceiling — "
+                        f"basket compounding stays OFF for this symbol")
+        return best
+
     def _load_history(self, symbol: str, timeframe: str, bars: int) -> list[dict]:
         # MT5 copy_rates_from_pos caps around ~ tens of thousands; request in one call.
         rates = get_rates(symbol, timeframe=timeframe, count=bars)
