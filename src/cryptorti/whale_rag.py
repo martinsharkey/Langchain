@@ -46,6 +46,24 @@ from src import config
 
 logger = logging.getLogger("cryptorti.whale_rag")
 
+class _SafeEmbeddingFunction:
+    """Fallback embedding function that avoids torch/sentence-transformers."""
+
+    def __init__(self, dim: int = 4):
+        self.dim = dim
+
+    def name(self) -> str:
+        return "safe_hash_embedder_dim4"
+
+    def __call__(self, input: list[str]) -> list[list[float]]:
+        out: list[list[float]] = []
+        for text in input:
+            h = hashlib.sha256(text.encode("utf-8", errors="replace")).digest()
+            vec = [((h[i % len(h)] / 255.0) * 2.0 - 1.0) for i in range(self.dim)]
+            norm = math.sqrt(sum(v * v for v in vec)) or 1.0
+            out.append([v / norm for v in vec])
+        return out
+
 _SIZE_ORDINAL = {"<1M": 0.1, "1-2M": 0.3, "2-5M": 0.5, "5-10M": 0.75, "10M+": 1.0}
 
 
@@ -78,20 +96,37 @@ class WhalePatternRAG:
     def __init__(self, persist_directory: Optional[str] = None):
         self.persist_dir = persist_directory or self.PERSIST_DIR
         os.makedirs(self.persist_dir, exist_ok=True)
-        self.client = chromadb.PersistentClient(
-            path=self.persist_dir,
-            settings=Settings(anonymized_telemetry=False),
-        )
+        from src.learning.chroma_client import get_shared_chroma_client
+        self.client = get_shared_chroma_client()
+        
+        # Avoid Native Access Violation (c10.dll crash) on Windows by skipping torch entirely
+        _safe_embed = None
+        if os.name == "nt" or os.environ.get("USE_SAFE_EMBEDDER", "1") == "1":
+            _safe_embed = _SafeEmbeddingFunction(dim=4)
+
         try:
-            self.collection = self.client.get_collection(self.COLLECTION_NAME)
-            logger.info(
-                f"Loaded whale pattern store with {self.collection.count()} patterns"
+            self.collection = self.client.get_collection(
+                self.COLLECTION_NAME,
+                embedding_function=_safe_embed
             )
+            logger.info("Loaded whale pattern store")
         except Exception:
-            self.collection = self.client.create_collection(
-                name=self.COLLECTION_NAME,
-                metadata={"description": "CryptoRTI whale-event -> BTCUSD wave patterns"},
-            )
+            try:
+                self.collection = self.client.create_collection(
+                    name=self.COLLECTION_NAME,
+                    embedding_function=_safe_embed,
+                    metadata={"description": "CryptoRTI whale-event -> BTCUSD wave patterns", "hnsw:space": "cosine"},
+                )
+            except Exception:
+                try:
+                    self.client.delete_collection(self.COLLECTION_NAME)
+                except:
+                    pass
+                self.collection = self.client.create_collection(
+                    name=self.COLLECTION_NAME,
+                    embedding_function=_safe_embed,
+                    metadata={"description": "CryptoRTI whale-event -> BTCUSD wave patterns", "hnsw:space": "cosine"},
+                )
             logger.info("Created new whale pattern store")
 
     # ─── Embedding (EVENT IDENTITY only) ──────────────────────

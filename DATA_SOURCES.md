@@ -55,7 +55,20 @@ Open Danny questions: `cryptorti/martin_qna.md`.
   against the same terminal while the engine runs; it clobbers the engine's session
   (symptom: `MT5 not connected / No data for <symbol>`). Restart the engine to recover.
 
-## 4. The bot's own learning stores (generated, machine-local, gitignored)
+## 4. Web Research & MQL5 Documentation (Indicator Tuning)
+
+The bot contains autonomous web-scraping and RAG pipelines designed to ground the `ParameterOptimizer` and `ContinualResearcher` in official documentation, preventing the optimizer from mutating parameters blindly.
+
+| Source Type | Location / Code | Use |
+|---|---|---|
+| **MQL5 Official Docs** | `https://www.mql5.com/en/docs/indicators/*` | Scraped via Playwright (`src/learning/mql5_knowledge.py`). Provides the absolute ground truth for how `iMACD`, `iOsMA`, `iATR`, `iBullsPower`, etc. behave. |
+| **MQL5 Knowledge RAG** | `data/chromadb_store/` (Collection: `external_trading_knowledge`) | RAG vector store queryable by the optimizer. E.g., when the bot asks *"how to make OsMA react faster"*, it retrieves chunked MQL5 documentation. |
+| **Market Data Sources** | `src/data_sources/*` | Includes RSS feeds (`rss_news.py`), `gold_news.py`, `central_banks.py`, `economic_calendar.py`, `geopolitical.py`. Used by the researcher to flag high-volatility regimes or fundamental shifts. |
+
+**How the bot uses MQL5 Knowledge to suggest changes:**
+The `ParameterOptimizer._mql5_guided_candidate()` method directly queries the `mql5_knowledge` vector store. It evaluates its own poor performance, queries the text (e.g. *"better indicator parameters to improve entry timing and reduce false signals"*), parses the semantic response for keywords (like *"faster"*, *"smoother"*, *"volatility"*), and programmatically maps those to targeted parameter steps (like nudging `osma_fast` down or `osma_slow` up).
+
+## 5. The bot's own learning stores (generated, machine-local, gitignored)
 
 | Store | Content |
 |---|---|

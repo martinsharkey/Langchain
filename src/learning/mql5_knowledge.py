@@ -50,6 +50,9 @@ class _SafeEmbeddingFunction:
     def __init__(self, dim: int = 20):
         self.dim = dim
 
+    def name(self) -> str:
+        return "safe_hash_embedder"
+
     def __call__(self, input: list[str]) -> list[list[float]]:
         out: list[list[float]] = []
         for text in input:
@@ -68,6 +71,9 @@ DEFAULT_SOURCES = [
     "https://www.mql5.com/en/docs/indicators/ibearspower",
     "https://www.mql5.com/en/docs/indicators/ima",     # moving average / EMA
     "https://www.mql5.com/en/docs/indicators/irsi",
+    "https://www.incrediblecharts.com/indicators/elder_ray_index.php", # Elder-Ray context
+    "https://www.babypips.com/learn/forex/summary-common-chart-indicators", # Divergence / visual signals
+    "https://www.tradingview.com/pine-script-reference/v6/", # Custom logic construction
 ]
 
 # Built-in seed knowledge so the researcher can reason on day one (before any
@@ -136,26 +142,41 @@ class MQL5Knowledge:
         base = persist_directory or os.path.join(_resolve_data_dir(), "chromadb_store")
         os.makedirs(base, exist_ok=True)
         self.persist_dir = base
-        self.client = chromadb.PersistentClient(
-            path=base, settings=Settings(anonymized_telemetry=False)
-        )
-        try:
-            self._embedder = embedding_functions.SentenceTransformerEmbeddingFunction(
-                model_name=EMBED_MODEL
-            )
-        except Exception as e:
-            logger.warning(f"SentenceTransformerEmbeddingFunction unavailable ({e}); using safe fallback")
+        from src.learning.chroma_client import get_shared_chroma_client
+        self.client = get_shared_chroma_client()
+        # Avoid Native Access Violation (c10.dll crash) on Windows by skipping torch entirely
+        if os.name == "nt" or os.environ.get("USE_SAFE_EMBEDDER", "1") == "1":
+            logger.warning("Windows host detected: using safe hash embedder to avoid torch/c10.dll native crash.")
             self._embedder = _SafeEmbeddingFunction(dim=20)
+        else:
+            try:
+                self._embedder = embedding_functions.SentenceTransformerEmbeddingFunction(
+                    model_name=EMBED_MODEL
+                )
+            except Exception as e:
+                logger.warning(f"SentenceTransformerEmbeddingFunction unavailable ({e}); using safe fallback")
+                self._embedder = _SafeEmbeddingFunction(dim=20)
         try:
-            self.collection = self.client.get_collection(
-                self.COLLECTION_NAME, embedding_function=self._embedder)
-        except Exception:
-            self.collection = self.client.create_collection(
+            self.collection = self.client.get_or_create_collection(
                 name=self.COLLECTION_NAME, embedding_function=self._embedder,
-                metadata={"description": "External trading/indicator knowledge (mql5 docs etc.)"})
-        if seed and self.collection.count() == 0:
-            self._seed()
-        logger.info(f"MQL5Knowledge ready ({self.collection.count()} chunks) at {base}")
+                metadata={"description": "External trading/indicator knowledge (mql5 docs etc.)"}
+            )
+        except Exception:
+            try:
+                self.client.delete_collection(self.COLLECTION_NAME)
+            except Exception:
+                pass
+            self.collection = self.client.get_or_create_collection(
+                name=self.COLLECTION_NAME, embedding_function=self._embedder,
+                metadata={"description": "External trading/indicator knowledge (mql5 docs etc.)"}
+            )
+        if seed:
+            try:
+                if self.collection.count() == 0:
+                    self._seed()
+            except Exception:
+                pass
+        logger.info(f"MQL5Knowledge ready at {base}")
 
     def _seed(self):
         for key, title, text in SEED_KNOWLEDGE:
@@ -209,6 +230,48 @@ class MQL5Knowledge:
         return self.collection.count()
 
     # ── optional crawler (Playwright/Chromium) — non-fatal if unavailable ──
+    def search_and_crawl(self, query: str, num_links: int = 2) -> dict:
+        """Search DuckDuckGo via Chromium and crawl the top trusted links."""
+        try:
+            from playwright.sync_api import sync_playwright
+        except Exception as e:
+            return {"error": "playwright not installed"}
+        
+        urls_to_crawl = []
+        with sync_playwright() as pw:
+            browser = pw.chromium.launch(headless=True)
+            page = browser.new_page()
+            try:
+                import urllib.parse
+                safe_query = urllib.parse.quote(query)
+                page.goto(f"https://html.duckduckgo.com/html/?q={safe_query}", timeout=30000)
+                links = page.query_selector_all("a.result__snippet")
+                for link in links[:num_links]:
+                    href = link.get_attribute("href")
+                    if href and "http" in href:
+                        if "uddg=" in href:
+                            href = urllib.parse.unquote(href.split("uddg=")[1].split("&")[0])
+                        urls_to_crawl.append(href)
+            except Exception as e:
+                logger.warning(f"search skip {query}: {e}")
+            browser.close()
+            
+        if urls_to_crawl:
+            self._append_to_data_sources(urls_to_crawl)
+            return self.crawl_and_index(urls=urls_to_crawl)
+        return {"crawled": 0}
+
+    def _append_to_data_sources(self, urls: list[str]):
+        """Store newly discovered sources in DATA_SOURCES.md for github tracking."""
+        try:
+            ds_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "DATA_SOURCES.md")
+            if os.path.exists(ds_path):
+                with open(ds_path, "a") as f:
+                    for url in set(urls):
+                        f.write(f"\n- Auto-discovered (via Chromium Search): {url}")
+        except Exception:
+            pass
+
     def crawl_and_index(self, urls: Optional[list[str]] = None, rate_limit_s: float = 2.0) -> dict:
         """
         Crawl the allow-listed URLs with Playwright/Chromium (headless), extract

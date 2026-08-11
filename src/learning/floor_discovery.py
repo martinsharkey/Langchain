@@ -18,8 +18,8 @@ from src.utils.logger import get_logger
 
 logger = get_logger("floor_discovery")
 
-_OSMA_GRID = (0.0, 0.1, 0.2, 0.3, 0.5)
-_DOM_GRID = (0.0, 0.5, 1.0, 1.5)
+_OSMA_GRID = (0.0, 0.05, 0.1, 0.15, 0.2)
+_DOM_GRID = (0.0, 0.1, 0.2, 0.3, 0.5)
 
 
 def _ema(vals, p):

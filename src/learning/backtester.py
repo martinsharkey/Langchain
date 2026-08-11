@@ -21,6 +21,7 @@ from __future__ import annotations
 from dataclasses import dataclass, asdict
 from typing import Optional, Callable
 
+from src import config
 from src.mt5.data import get_rates
 from src.strategies.indicators import compute_indicator_series
 from src.utils.logger import get_logger
@@ -51,7 +52,7 @@ class Backtester:
         self.registry = registry
 
     def walkforward_focused(self, symbol, params, sl_atr=1.0, tp_rr=2.0,
-                            giveback=0.55, arm=0.5, timeframe="M15",
+                            giveback=0.55, arm=0.5, timeframe=config.ENTRY_TIMEFRAME,
                             bars=12000, windows=3, warmup=210):
         """
         Walk-forward backtest of the symbol's FOCUSED pockets with a GIVEN
@@ -359,7 +360,7 @@ class Backtester:
         res = self.run_combo(symbol, strategy_names, **kw)
         if res is None:
             return BacktestResult(label="+".join(strategy_names), symbol=symbol,
-                                  timeframe=kw.get("timeframe", "M15"), bars_tested=0,
+                                  timeframe=kw.get("timeframe", config.ENTRY_TIMEFRAME), bars_tested=0,
                                   trades=0, wins=0, losses=0, win_rate=0, profit_factor=0,
                                   total_r=0, avg_bars_held=0, max_drawdown_r=0,
                                   passed=False, note="no data")

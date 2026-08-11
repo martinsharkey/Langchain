@@ -45,10 +45,10 @@ PARAM_SPACE = {
     "power_period": (5, 26, 1, int),       # mql5: Bulls/Bears Power (def 13)
     "rsi_period":  (2, 30, 1, int),        # mql5: RSI (def 14)
     # confluence strengths (ATR-relative gates) + exit
-    "atr_min":     (0.0, 4.0, 0.5, float),
-    "atr_max":     (0.0, 12.0, 1.0, float),
-    "min_ema_slope": (0.0, 0.5, 0.02, float),
-    "price_stretch_mult": (1.0, 4.0, 0.5, float),
+    "atr_min":     (0.0, 4.0, 0.1, float),
+    "atr_max":     (0.0, 12.0, 0.1, float),
+    "min_ema_slope": (0.0, 0.5, 0.01, float),
+    "price_stretch_mult": (1.0, 4.0, 0.1, float),
     "min_confluence": (1, 5, 1, int),
     # ── SIGNED PER-SIDE STRENGTH FLOORS (ATR-normalized so one wide range fits gold
     # ~0.5 and BTC ~15+; the confluence scales by ATR). These are THE core signal —
@@ -56,15 +56,15 @@ PARAM_SPACE = {
     # floors maximums (<=, negative). Default/step includes 0 = gate OFF. Ranges are
     # WIDE and signed (reach well beyond +-3 in ATR units). The optimizer + walk-forward
     # DISCOVER the best per-symbol floors — no hardcoded folklore.
-    "osma_min_long":   (0.0, 3.0, 0.1, float),
-    "osma_max_short":  (-3.0, 0.0, 0.1, float),
-    "macd_min_long":   (0.0, 3.0, 0.1, float),
-    "macd_max_short":  (-3.0, 0.0, 0.1, float),
-    "bulls_min_long":  (0.0, 5.0, 0.1, float),
-    "bears_min_long":  (0.0, 5.0, 0.1, float),   # bears pulled positive in strong uptrend
-    "bears_max_short": (-5.0, 0.0, 0.1, float),
-    "bulls_max_short": (-5.0, 0.0, 0.1, float),
-    "atr_min_rel":     (0.0, 1.5, 0.1, float),   # relative ATR floor (vs median ATR)
+    "osma_min_long":   (0.0, 3.0, 0.01, float),
+    "osma_max_short":  (-3.0, 0.0, 0.01, float),
+    "macd_min_long":   (0.0, 3.0, 0.01, float),
+    "macd_max_short":  (-3.0, 0.0, 0.01, float),
+    "bulls_min_long":  (0.0, 5.0, 0.01, float),
+    "bears_min_long":  (0.0, 5.0, 0.01, float),   # bears pulled positive in strong uptrend
+    "bears_max_short": (-5.0, 0.0, 0.01, float),
+    "bulls_max_short": (-5.0, 0.0, 0.01, float),
+    "atr_min_rel":     (0.0, 1.5, 0.01, float),   # relative ATR floor (vs median ATR)
     # RSI exhaustion gate (was hardcoded 72/28) — now tunable so the optimizer can
     # discover the right overbought/oversold cut per symbol.
     "rsi_long_max":    (55.0, 100.0, 1.0, float),  # long blocked when RSI >= this (100 = OFF, GoldShark has no RSI)
@@ -78,9 +78,9 @@ PARAM_SPACE = {
     # OsMA acceleration magnitude |osma_now - osma_prev| / ATR. GoldShark data shows
     # this is the single strongest predictor found (corr -0.68 with drawdown). ATR-
     # normalized so one range fits all symbols. 0.0 = disabled (legacy behaviour).
-    "accel_min": (0.0, 1.0, 0.05, float),
-    "sl_atr":      (0.5, 3.0, 0.5, float),
-    "tp_rr":       (0.5, 3.0, 0.5, float),
+    "accel_min": (0.0, 1.0, 0.01, float),
+    "sl_atr":      (0.5, 3.0, 0.1, float),
+    "tp_rr":       (0.5, 3.0, 0.1, float),
 }
 
 DEFAULTS = {

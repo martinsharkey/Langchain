@@ -44,9 +44,10 @@ class ContinualResearcher:
     def __init__(self, experience_db, mql5_knowledge=None, knowledge_store=None,
                  edge_discovery=None, repo: str = "martinsharkey/Langchain",
                  pattern_optimizer=None, apply_exit_config=None, excursion_analyzer=None,
-                 robust_tester=None):
+                 robust_tester=None, gs_knowledge=None):
         self.db = experience_db
         self.mql5 = mql5_knowledge
+        self.gs_knowledge = gs_knowledge
         self.ks = knowledge_store
         self.edge_discovery = edge_discovery
         self.repo = repo
@@ -328,21 +329,87 @@ class ContinualResearcher:
         review = self.review_symbol(base_symbol)
         hypothesis = None
         knowledge = []
+        
+        # We invoke the LLM to think like the Quantitative Architect
+        llm_response_text = ""
+        try:
+            from src.core.llm import get_analytical_llm
+            from litellm import completion
+            
+            # Formulate the prompt enforcing the required domain knowledge
+            messages = [
+                {"role": "system", "content": "You are the Quantitative Algorithmic Trading Architect. Output strict mathematical evaluations of indicators (OsMA, MACD, Bulls/Bears Power, ATR, EMA). Never give generic advice."},
+                {"role": "user", "content": f"""
+Reviewing {base_symbol}.
+Performance over {review.get('n', 0)} trades: Win rate {review.get('win_rate', 0)}%, Expectancy {review.get('expectancy', 0)}.
+Losers frequently exit via: {review.get('dominant_loss_exit', 'N/A')}.
+Worst strategy pocket: {review.get('worst_strategy', 'N/A')}.
+
+Constraints & Rules for your response:
+1. Explain the technical details of the relevant indicators (OsMA, MACD, Bulls/Bears Power, ATR, EMA) in combination.
+2. Explain WHY we are making specific micro-adjustments (e.g., 0.01/0.1 steps instead of 1.0 jumps) and HOW that impacts trading.
+3. Diagnose the failed trades based on combinations of indicator strengths.
+4. INCORPORATE DOMAIN KNOWLEDGE: The combination we use is proven; signal value and strength dictate entry success. For Gold (XAUUSD), a long OsMA is strong around 1.0, but sometimes 2.0. Bulls power around 2.0 is good for longs, etc.
+5. If we need external documentation, output exactly ONE search query wrapped in <search></search> tags (e.g. <search>OsMA zero cross strategy</search>).
+6. Provide a concise, mathematical hypothesis to guide the ParameterOptimizer.
+"""}
+            ]
+            
+            try:
+                # Assuming get_analytical_llm returns a LiteLLM-compatible model string or wrapper
+                model_str = get_analytical_llm()
+                response = completion(model=model_str, messages=messages)
+                llm_response_text = response.choices[0].message.content
+            except Exception as e:
+                logger.warning(f"LLM failure during research_symbol: {e}")
+                llm_response_text = ""
+        except Exception as e:
+            logger.debug(f"LLM imports missing in continual_researcher: {e}")
+
+        # Extract search query if present
+        import re
+        search_query = None
+        match = re.search(r'<search>(.*?)</search>', llm_response_text, re.IGNORECASE)
+        if match:
+            search_query = match.group(1).strip()
+            
+        # Use Chromium search if we found a query
+        if search_query and self.mql5 is not None:
+            try:
+                if hasattr(self.mql5, 'search_and_crawl'):
+                    self.mql5.search_and_crawl(search_query)
+            except Exception as e:
+                logger.debug(f"Chromium search failed: {e}")
+
         if self.mql5 is not None and review.get("n", 0) >= 10:
             # ground the search in the symbol's actual weakness
-            q = (f"improve {base_symbol} trading: win rate {review.get('win_rate')}% "
+            q = search_query if search_query else (f"improve {base_symbol} trading: win rate {review.get('win_rate')}% "
                  f"expectancy {review.get('expectancy')}, losers exit via "
                  f"{review.get('dominant_loss_exit')}; better indicator or parameter?")
             try:
-                knowledge = self.mql5.research(q, n_results=3)
+                # FIRST: search the dedicated GoldShark offline notebook
+                if self.gs_knowledge is not None:
+                    knowledge = self.gs_knowledge.research(q, n_results=3)
+                
+                # SECOND: if nothing found, fallback to public MQL5 docs / crawled web data
+                if not knowledge:
+                    knowledge = self.mql5.research(q, n_results=3)
             except Exception as e:
-                logger.debug(f"mql5 research skip {base_symbol}: {e}")
+                logger.debug(f"research skip {base_symbol}: {e}")
             if knowledge:
                 top = knowledge[0]
+                
+                # Combine LLM insight with RAG
                 hypothesis = (f"{base_symbol}: expectancy {review.get('expectancy')} with "
-                              f"losers exiting via {review.get('dominant_loss_exit')}. mql5 "
+                              f"losers exiting via {review.get('dominant_loss_exit')}. "
+                              f"Architect Note: {llm_response_text[:300]}... "
                               f"knowledge suggests: {top['text'][:160]} "
-                              f"(src {top['metadata'].get('title')}). Test via edge sweep + optimizer.")
+                              f"(src {top['metadata'].get('filename', top['metadata'].get('title'))}). Test via edge sweep + optimizer.")
+        
+        # Fallback if no knowledge hit
+        if not hypothesis and llm_response_text:
+            hypothesis = f"{base_symbol}: Quantitative Architect Hypothesis: {llm_response_text[:400]}... Test via edge sweep + optimizer."
+
         result = {"review": review, "knowledge": knowledge, "hypothesis": hypothesis}
         if hypothesis and self.ks is not None:
             try:

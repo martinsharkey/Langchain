@@ -3,6 +3,19 @@
 > Auto-generated digest of what the self-learning loop changed and why.
 > Most-recent-first. Reporting only — never gates a live decision (#45.1).
 
+- **2026-08-11 06:27** [EXIT-LOCK] `BTCUSD` exit set sl_atr 1.87 tp_rr 0.97 -- why: robust -- metric: recent expectancy -0.0659 (n=17)
+- **2026-08-11 06:22** [EXIT-LOCK] `BTCUSD` exit set sl_atr 1.74 tp_rr 0.95 -- why: excursion -- metric: recent expectancy -0.08 (n=16)
+- **2026-08-11 06:11** [EXIT-LOCK] `BTCUSD` exit set sl_atr 1.75 tp_rr 0.94 -- why: excursion -- metric: recent expectancy -0.0643 (n=14)
+- **2026-08-10 21:47** [EXIT-LOCK] `USDCAD` exit set sl_atr 1.71 tp_rr 0.67 -- why: excursion -- metric: recent expectancy 0.0 (n=0)
+- **2026-08-10 21:33** [EXIT-LOCK] `AUDUSD` exit set sl_atr 1.73 tp_rr 0.62 -- why: excursion -- metric: recent expectancy 0.0 (n=0)
+- **2026-08-10 21:31** [EXIT-LOCK] `EURUSD` exit set sl_atr 1.5 tp_rr 0.69 -- why: excursion -- metric: recent expectancy 0.0 (n=0)
+- **2026-08-10 21:31** [EXIT-LOCK] `ETHUSD` exit set sl_atr 1.29 tp_rr 0.89 -- why: robust -- metric: recent expectancy 0.0 (n=0)
+- **2026-08-10 21:15** [EXIT-LOCK] `ETHUSD` exit set sl_atr 1.58 tp_rr 0.78 -- why: excursion -- metric: recent expectancy 0.0 (n=0)
+- **2026-08-10 21:15** [EXIT-LOCK] `BTCUSD` exit set sl_atr 1.88 tp_rr 0.91 -- why: robust -- metric: recent expectancy -0.1525 (n=4)
+- **2026-08-10 21:12** [EXIT-LOCK] `BTCUSD` exit set sl_atr 1.76 tp_rr 0.81 -- why: excursion -- metric: recent expectancy -0.1525 (n=4)
+- **2026-08-10 14:55** [EXIT-LOCK] `ETHUSD` exit set sl_atr 1.57 tp_rr 0.8 -- why: excursion -- metric: recent expectancy 0.0 (n=0)
+- **2026-08-10 14:55** [EXIT-LOCK] `BTCUSD` exit set sl_atr 1.83 tp_rr 0.94 -- why: robust -- metric: recent expectancy -0.19 (n=1)
+- **2026-08-10 14:49** [EXIT-LOCK] `BTCUSD` exit set sl_atr 1.67 tp_rr 0.87 -- why: excursion -- metric: recent expectancy -0.19 (n=1)
 - **2026-08-09 21:29** [EXIT-LOCK] `USDCAD` exit set sl_atr 1.53 tp_rr 0.71 -- why: excursion -- metric: recent expectancy 0.0 (n=0)
 - **2026-08-09 21:20** [EXIT-LOCK] `AUDUSD` exit set sl_atr 1.69 tp_rr 0.62 -- why: excursion -- metric: recent expectancy 0.0 (n=0)
 - **2026-08-09 21:10** [EXIT-LOCK] `EURUSD` exit set sl_atr 1.57 tp_rr 0.71 -- why: excursion -- metric: recent expectancy 0.0 (n=0)

@@ -80,7 +80,7 @@ MT5_SERVER = os.getenv("MT5_SERVER", "")
 # ─── Trading Parameters ─────────────────────────────────────
 SYMBOL = "XAUUSD"         # Base/primary symbol (broker suffix resolved at runtime)
 TIMEFRAME = "H1"          # Primary timeframe for analysis
-ENTRY_TIMEFRAME = "M15"   # Timeframe for entry signals
+ENTRY_TIMEFRAME = os.getenv("ENTRY_TIMEFRAME", "M1")   # Timeframe for entry signals (M1 is required for GoldShark confluence)
 RISK_PERCENT = float(os.getenv("XAUUSD_RISK_PERCENT", "1.0"))
 MAX_POSITION_SIZE = float(os.getenv("XAUUSD_MAX_POSITION_SIZE", "0.1"))
 MIN_RISK_REWARD_RATIO = 2.0

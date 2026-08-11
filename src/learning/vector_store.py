@@ -43,6 +43,9 @@ class _SafeEmbeddingFunction:
     def __init__(self, dim: int = 20):
         self.dim = dim
 
+    def name(self) -> str:
+        return "safe_hash_embedder"
+
     def __call__(self, input: list[str]) -> list[list[float]]:
         out: list[list[float]] = []
         for text in input:
@@ -124,10 +127,8 @@ class PatternVectorStore:
         self.persist_dir = persist_directory or self.PERSIST_DIR
         os.makedirs(self.persist_dir, exist_ok=True)
         
-        self.client = chromadb.PersistentClient(
-            path=self.persist_dir,
-            settings=Settings(anonymized_telemetry=False),
-        )
+        from src.learning.chroma_client import get_shared_chroma_client
+        self.client = get_shared_chroma_client()
         
         # Get or create the collection
         _safe_embed = _SafeEmbeddingFunction(dim=20)
@@ -137,8 +138,7 @@ class PatternVectorStore:
                 embedding_function=_safe_embed,
                 metadata={"description": "XAUUSD market patterns for RAG-based trading", "hnsw:space": "cosine"},
             )
-            count = self.collection.count()
-            logger.info(f"Loaded existing pattern store with {count} patterns")
+            logger.info(f"Loaded existing pattern store")
         except Exception:
             try:
                 self.collection = self.client.create_collection(

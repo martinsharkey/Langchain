@@ -85,6 +85,51 @@ def start_cryptorti_best_effort():
         return None
 
 
+def start_knowledge_ingestion():
+    """Run automated document ingestion pipeline (RAG update) in a non-blocking thread."""
+    def _run():
+        import time
+        time.sleep(10) # Delay to prevent import lock / circular import collision with MT5/numpy
+        try:
+            # Check last refresh to only run once a week
+            import json
+            import os
+            from src import config
+            from src.utils.logger import get_logger
+            logger = get_logger("app")
+            
+            status_path = os.path.join(config.DATA_DIR, "knowledge_refresh_status.json")
+            needs_refresh = True
+            if os.path.exists(status_path):
+                try:
+                    with open(status_path, "r") as f:
+                        data = json.load(f)
+                    if time.time() - data.get("last_refresh", 0) < 604800: # 7 days
+                        needs_refresh = False
+                except Exception:
+                    pass
+            
+            if needs_refresh:
+                logger.info("Starting automated knowledge ingestion pipeline...")
+                from src.learning.mql5_knowledge import MQL5Knowledge
+                kb = MQL5Knowledge()
+                res = kb.crawl_and_index()
+                if not res.get("skipped"):
+                    with open(status_path, "w") as f:
+                        json.dump({"last_refresh": time.time(), "details": res}, f)
+                    logger.info(f"Knowledge ingestion complete: {res}")
+        except Exception as e:
+            from src.utils.logger import get_logger
+            logger = get_logger("app")
+            logger.warning(f"Automated knowledge ingestion failed: {e}")
+
+    import threading
+    from src.utils.logger import console
+    t = threading.Thread(target=_run, daemon=True, name="knowledge_ingestion")
+    t.start()
+    console.print("  [green]Automated Knowledge ingestion scheduled[/green]")
+    return t
+
 def main():
     mode = os.environ.get("TRADING_MODE", config.TRADING_MODE)
     console.print("\n" + "=" * 66, style="bold cyan")
@@ -102,7 +147,11 @@ def main():
     # 2) CryptoRTI live whale-signal feed (best effort, non-fatal)
     start_cryptorti_best_effort()
 
-    # 3) trading engine
+    # 3) Automated document ingestion pipeline (RAG update)
+    # DISABLED TEMPORARILY to prevent ChromaDB Native Access Violation (Rust lock contention)
+    # start_knowledge_ingestion()
+
+    # 4) trading engine
     start_engine()
     console.print(f"  [green]Trading engine started[/green] (mode={mode})\n")
 

@@ -47,6 +47,9 @@ class _SafeEmbeddingFunction:
     def __init__(self, dim: int = 20):
         self.dim = dim
 
+    def name(self) -> str:
+        return "safe_hash_embedder"
+
     def __call__(self, input: list[str]) -> list[list[float]]:
         import math, hashlib
         out: list[list[float]] = []
@@ -79,28 +82,38 @@ class KnowledgeStore:
         base = persist_directory or os.path.join(_resolve_data_dir(), "chromadb_store")
         os.makedirs(base, exist_ok=True)
         self.persist_dir = base
-        self.client = chromadb.PersistentClient(
-            path=base, settings=Settings(anonymized_telemetry=False)
-        )
-        # Explicit local MiniLM embedder (offline after first download).
-        try:
-            self._embedder = embedding_functions.SentenceTransformerEmbeddingFunction(
-                model_name=EMBED_MODEL
-            )
-        except Exception as e:
-            logger.warning(f"SentenceTransformerEmbeddingFunction unavailable ({e}); using safe fallback")
+        from src.learning.chroma_client import get_shared_chroma_client
+        self.client = get_shared_chroma_client()
+        # Avoid Native Access Violation (c10.dll crash) on Windows by skipping torch entirely
+        if os.name == "nt" or os.environ.get("USE_SAFE_EMBEDDER", "1") == "1":
+            logger.warning("Windows host detected: using safe hash embedder to avoid torch/c10.dll native crash.")
             self._embedder = _SafeEmbeddingFunction(dim=20)
+        else:
+            # Explicit local MiniLM embedder (offline after first download).
+            try:
+                self._embedder = embedding_functions.SentenceTransformerEmbeddingFunction(
+                    model_name=EMBED_MODEL
+                )
+            except Exception as e:
+                logger.warning(f"SentenceTransformerEmbeddingFunction unavailable ({e}); using safe fallback")
+                self._embedder = _SafeEmbeddingFunction(dim=20)
         try:
-            self.collection = self.client.get_collection(
-                self.COLLECTION_NAME, embedding_function=self._embedder
-            )
-        except Exception:
-            self.collection = self.client.create_collection(
+            self.collection = self.client.get_or_create_collection(
                 name=self.COLLECTION_NAME,
                 embedding_function=self._embedder,
-                metadata={"description": "Durable trading knowledge: findings, corrections, decisions"},
+                metadata={"description": "Durable trading knowledge: findings, corrections, decisions"}
             )
-        logger.info(f"KnowledgeStore ready ({self.collection.count()} entries) at {base}")
+        except Exception:
+            try:
+                self.client.delete_collection(self.COLLECTION_NAME)
+            except Exception:
+                pass
+            self.collection = self.client.get_or_create_collection(
+                name=self.COLLECTION_NAME,
+                embedding_function=self._embedder,
+                metadata={"description": "Durable trading knowledge: findings, corrections, decisions"}
+            )
+        logger.info(f"KnowledgeStore ready at {base}")
 
     def remember(self, text: str, kind: str = "note", topic: str = "",
                  source: str = "assistant", confidence: float = 1.0,
