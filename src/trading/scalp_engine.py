@@ -208,7 +208,7 @@ class ScalpEngine:
         # mql5 knowledge RAG (#22) + edge discovery (#31) + continual researcher (#32).
         # All optional/non-fatal; they make the learning loop continually improve.
         self.mql5_knowledge = None
-        self.notebooklm = None
+        self.gs_knowledge = None
         self.edge_discovery = None
         self.researcher = None
         try:
@@ -217,10 +217,10 @@ class ScalpEngine:
         except Exception as e:
             logger.warning(f"MQL5Knowledge unavailable: {e}")
         try:
-            from src.learning.notebooklm_integration import RemoteNotebookLM
-            self.notebooklm = RemoteNotebookLM()
+            from src.learning.goldshark_knowledge import GoldSharkKnowledge
+            self.gs_knowledge = GoldSharkKnowledge()
         except Exception as e:
-            logger.warning(f"RemoteNotebookLM unavailable: {e}")
+            logger.warning(f"GoldSharkKnowledge unavailable: {e}")
         try:
             from src.learning.edge_discovery import EdgeDiscovery
             from src.learning.backtester import Backtester
@@ -246,7 +246,7 @@ class ScalpEngine:
                 self.experience_db, mql5_knowledge=self.mql5_knowledge,
                 knowledge_store=self.knowledge_store, edge_discovery=self.edge_discovery,
                 pattern_optimizer=_patopt, apply_exit_config=self._apply_exit_config,
-                excursion_analyzer=_exc, robust_tester=_robust, notebooklm=self.notebooklm)
+                excursion_analyzer=_exc, robust_tester=_robust, gs_knowledge=self.gs_knowledge)
         except Exception as e:
             logger.warning(f"ContinualResearcher unavailable: {e}")
 

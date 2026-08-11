@@ -44,10 +44,10 @@ class ContinualResearcher:
     def __init__(self, experience_db, mql5_knowledge=None, knowledge_store=None,
                  edge_discovery=None, repo: str = "martinsharkey/Langchain",
                  pattern_optimizer=None, apply_exit_config=None, excursion_analyzer=None,
-                 robust_tester=None, notebooklm=None):
+                 robust_tester=None, gs_knowledge=None):
         self.db = experience_db
         self.mql5 = mql5_knowledge
-        self.notebooklm = notebooklm
+        self.gs_knowledge = gs_knowledge
         self.ks = knowledge_store
         self.edge_discovery = edge_discovery
         self.repo = repo
@@ -387,8 +387,11 @@ Constraints & Rules for your response:
                  f"expectancy {review.get('expectancy')}, losers exit via "
                  f"{review.get('dominant_loss_exit')}; better indicator or parameter?")
             try:
-                if self.notebooklm is not None:
-                    knowledge = self.notebooklm.research(q, n_results=3)
+                # FIRST: Ask the local GoldShark notebook if available
+                if self.gs_knowledge is not None:
+                    knowledge = self.gs_knowledge.research(q, n_results=3)
+                
+                # SECOND: Fallback to the public MQL5 docs / crawled web data
                 if not knowledge:
                     knowledge = self.mql5.research(q, n_results=3)
             except Exception as e:
