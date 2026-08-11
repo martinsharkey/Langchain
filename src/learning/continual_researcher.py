@@ -44,10 +44,10 @@ class ContinualResearcher:
     def __init__(self, experience_db, mql5_knowledge=None, knowledge_store=None,
                  edge_discovery=None, repo: str = "martinsharkey/Langchain",
                  pattern_optimizer=None, apply_exit_config=None, excursion_analyzer=None,
-                 robust_tester=None, gs_knowledge=None):
+                 robust_tester=None, notebooklm=None):
         self.db = experience_db
         self.mql5 = mql5_knowledge
-        self.gs_knowledge = gs_knowledge
+        self.notebooklm = notebooklm
         self.ks = knowledge_store
         self.edge_discovery = edge_discovery
         self.repo = repo
@@ -387,11 +387,8 @@ Constraints & Rules for your response:
                  f"expectancy {review.get('expectancy')}, losers exit via "
                  f"{review.get('dominant_loss_exit')}; better indicator or parameter?")
             try:
-                # FIRST: search the dedicated GoldShark offline notebook
-                if self.gs_knowledge is not None:
-                    knowledge = self.gs_knowledge.research(q, n_results=3)
-                
-                # SECOND: if nothing found, fallback to public MQL5 docs / crawled web data
+                if self.notebooklm is not None:
+                    knowledge = self.notebooklm.research(q, n_results=3)
                 if not knowledge:
                     knowledge = self.mql5.research(q, n_results=3)
             except Exception as e:
@@ -404,7 +401,7 @@ Constraints & Rules for your response:
                               f"losers exiting via {review.get('dominant_loss_exit')}. "
                               f"Architect Note: {llm_response_text[:300]}... "
                               f"knowledge suggests: {top['text'][:160]} "
-                              f"(src {top['metadata'].get('filename', top['metadata'].get('title'))}). Test via edge sweep + optimizer.")
+                              f"(src {top['metadata'].get('filename', top['metadata'].get('title', 'Unknown'))}). Test via edge sweep + optimizer.")
         
         # Fallback if no knowledge hit
         if not hypothesis and llm_response_text:
