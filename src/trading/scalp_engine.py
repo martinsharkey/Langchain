@@ -209,6 +209,7 @@ class ScalpEngine:
         # All optional/non-fatal; they make the learning loop continually improve.
         self.mql5_knowledge = None
         self.gs_knowledge = None
+        self.notebooklm = None
         self.edge_discovery = None
         self.researcher = None
         try:
@@ -221,6 +222,16 @@ class ScalpEngine:
             self.gs_knowledge = GoldSharkKnowledge()
         except Exception as e:
             logger.warning(f"GoldSharkKnowledge unavailable: {e}")
+        try:
+            from src.learning.notebooklm_provider import get_notebooklm
+            _nlm = get_notebooklm()
+            if _nlm.is_configured():
+                self.notebooklm = _nlm
+                logger.info("NotebookLM provider configured (master-token) — researcher will query it first")
+            else:
+                logger.info("NotebookLM provider present but not configured (set NOTEBOOKLM_MASTER_TOKEN) — using local RAG")
+        except Exception as e:
+            logger.warning(f"NotebookLM provider unavailable: {e}")
         try:
             from src.learning.edge_discovery import EdgeDiscovery
             from src.learning.backtester import Backtester
@@ -246,7 +257,8 @@ class ScalpEngine:
                 self.experience_db, mql5_knowledge=self.mql5_knowledge,
                 knowledge_store=self.knowledge_store, edge_discovery=self.edge_discovery,
                 pattern_optimizer=_patopt, apply_exit_config=self._apply_exit_config,
-                excursion_analyzer=_exc, robust_tester=_robust, gs_knowledge=self.gs_knowledge)
+                excursion_analyzer=_exc, robust_tester=_robust, gs_knowledge=self.gs_knowledge,
+                notebooklm=self.notebooklm)
         except Exception as e:
             logger.warning(f"ContinualResearcher unavailable: {e}")
 
