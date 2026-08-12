@@ -256,6 +256,38 @@ def evaluate_confluence_bar(ind: dict, cfg=None) -> dict:
     if direction == "sell" and rsi_sell_above and _rsi < rsi_sell_above:
         return {"action": "hold", "trigger_kind": trigger_kind, "confluence": 0,
                 "reason": f"rsi {_rsi:.0f} < sell-above {rsi_sell_above:.0f} (chasing, not a pullback)"}
+    # ── POWER TUG-OF-WAR (rate-of-change, tunable, default OFF) — the owner's core
+    # edge. For a LONG we want BULLS RISING and BEARS RISING toward zero over the
+    # last few bars, EVEN IF bulls are still negative (e.g. -4.5->-2.3->0.1->1.8).
+    # This is a TRAJECTORY (slope) gate, not a level gate — it accepts a valid climb
+    # the level floors would wrongly reject. ATR-normalised. bulls_slope_min /
+    # bears_slope_min are per-bar rise required over the recent window (0 = OFF).
+    bulls_slope_min = float(c.get("bulls_slope_min", 0.0) or 0.0)
+    bears_slope_min = float(c.get("bears_slope_min", 0.0) or 0.0)
+    if (bulls_slope_min or bears_slope_min) and atr > 0:
+        def _slope(series_key):
+            arr = ind.get(series_key) or []
+            arr = [float(x) for x in arr if x is not None][-4:]
+            if len(arr) < 2:
+                return None
+            return (arr[-1] - arr[0]) / (len(arr) - 1) / atr   # avg per-bar rise, ATR-norm
+        b_sl = _slope("bulls_recent"); be_sl = _slope("bears_recent")
+        if direction == "buy":
+            # bulls must be RISING; bears must be RISING toward zero (both slopes up)
+            if bulls_slope_min and (b_sl is None or b_sl < bulls_slope_min):
+                return {"action": "hold", "trigger_kind": trigger_kind, "confluence": 0,
+                        "reason": f"bulls not climbing {b_sl} < slope_min {bulls_slope_min}"}
+            if bears_slope_min and (be_sl is None or be_sl < bears_slope_min):
+                return {"action": "hold", "trigger_kind": trigger_kind, "confluence": 0,
+                        "reason": f"bears not recovering toward zero {be_sl} < {bears_slope_min}"}
+        else:
+            # short: both powers must be FALLING (slopes down) => negative slope
+            if bulls_slope_min and (b_sl is None or b_sl > -bulls_slope_min):
+                return {"action": "hold", "trigger_kind": trigger_kind, "confluence": 0,
+                        "reason": f"bulls not fading {b_sl} > -{bulls_slope_min}"}
+            if bears_slope_min and (be_sl is None or be_sl > -bears_slope_min):
+                return {"action": "hold", "trigger_kind": trigger_kind, "confluence": 0,
+                        "reason": f"bears not strengthening {be_sl} > -{bears_slope_min}"}
     # ── HTF-ALIGNMENT REQUIREMENT (tunable, default OFF) ──
     # require_htf_align=1 -> only take the entry when the captured htf_alignment
     # agrees with the trade direction. Default OFF because the fakeout study showed

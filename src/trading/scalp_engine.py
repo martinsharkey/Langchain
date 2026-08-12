@@ -1339,13 +1339,40 @@ class ScalpEngine:
         if out:
             self._dir_winrate_cache = out
 
+    def _entry_wide_window(self, resolved_symbol: str, n: int = 200) -> dict:
+        """ENTRY-ONLY: capture long (n-bar) tails of OsMA/Bulls/Bears/MACD + the
+        entry bar timestamp, so the adaptive-lookback study can reconstruct ANY N
+        per trade later. Never raises; returns {} on failure. Not on the tick loop."""
+        try:
+            from src.mt5.data import get_rates as _gr
+            from src.strategies.indicators import (ohlcv_to_dataframe, osma as _osma,
+                                                   macd as _macd, bulls_power as _bp,
+                                                   bears_power as _bep)
+            rates = _gr(resolved_symbol, timeframe=config.ENTRY_TIMEFRAME, count=n + 60)
+            if not rates or len(rates) < 40:
+                return {}
+            df = ohlcv_to_dataframe(rates)
+            close = df["close"]
+            osma_s = list(_osma(close, 12, 26, 9))[-n:]
+            macd_s = list(_macd(close, 12, 26, 9)[0])[-n:]
+            bulls_s = list(_bp(df, 13))[-n:]
+            bears_s = list(_bep(df, 13))[-n:]
+            return {
+                "entry_bar_ts": int(rates[-1].get("timestamp", 0)),
+                "wide_osma": [round(float(x), 5) for x in osma_s],
+                "wide_macd": [round(float(x), 5) for x in macd_s],
+                "wide_bulls": [round(float(x), 5) for x in bulls_s],
+                "wide_bears": [round(float(x), 5) for x in bears_s],
+            }
+        except Exception:
+            return {}
+
     def _live_indicators(self, base_symbol: str, adapter) -> dict:
         """
         Lightweight recent-bar indicators for a symbol (bulls/bears/osma etc.),
         used by the momentum-exhaustion exit (#29). Cached per cycle so managing
         several positions doesn't recompute. Returns {} on any failure.
         """
-        cache = getattr(self, "_live_ind_cache", None)
         if cache is None:
             cache = {}
             self._live_ind_cache = cache
@@ -2856,6 +2883,18 @@ class ScalpEngine:
             return
 
         # record as pending in experience DB
+        # ENTRY-ONLY wide-window capture for the adaptive-lookback study: store long
+        # (up to 200-bar) tails of OsMA/Bulls/Bears/MACD + the entry bar timestamp so
+        # we can later reconstruct ANY lookback N (5..200) per trade and let the DATA
+        # pick the best-N per symbol (owner's adaptive-window requirement). This runs
+        # once per ENTRY only (not the live tick loop), so it adds no hot-path cost.
+        try:
+            _wide = self._entry_wide_window(resolved)
+            if _wide:
+                indicators = dict(indicators)
+                indicators.update(_wide)
+        except Exception as e:
+            logger.debug(f"wide-window capture skip {base}: {e}")
         trade_signal = {
             "symbol": resolved,
             "action": signal.action,

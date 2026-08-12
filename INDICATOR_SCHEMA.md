@@ -96,3 +96,56 @@ The bot today tunes *thresholds* (levels) heavily but does not model the
 
 **Next action:** implement the 4 missing dynamics as tunable gates, add tests,
 prove per-symbol in the walk-forward, and only then decide if ML adds anything.
+
+---
+
+## 4. OWNER'S REAL EDGE — the momentum DYNAMICS (2026-08-12, verbatim intent)
+
+The owner's proven MT5 EAs traded **dynamics (rate-of-change), not levels**. These
+are the concepts that MUST become tunable and be honoured live:
+
+### 4a. Timing mode — anticipation / "fizzle" vs confirmation
+Enter relative to the OsMA zero-cross at one of three points, TUNABLE per symbol:
+- **anticipation** — just BEFORE the cross (OsMA approaching zero + accelerating).
+- **at cross** — the confirmed zero-cross.
+- **after a full new candle** — most confirmed, but on **M1 the cycle is almost
+  over by the close**, so spread+slippage eat the edge. This is WHY anticipation
+  matters on fast timeframes — the confirmed close is too late.
+Existing hooks: `allow_anticipated`, `osma_anticipate_atr`, `trigger_kind`.
+
+### 4b. MACD / OsMA acceleration ("fizzle" detector)
+Look at whether MACD/OsMA is **accelerating or decelerating** into the cross, not
+just its sign/level. Accelerating momentum into the zero line = a real move;
+decelerating = a fizzle to avoid. Existing hook: `accel_min` (|osma-osma_prev|/ATR)
+— but this is a single-step magnitude, NOT a multi-bar acceleration/deceleration
+trend. **Enhance to a trajectory.**
+
+### 4c. Bulls/Bears POWER TUG-OF-WAR (the core, currently MISSING)
+The decisive signal is the **trajectory of power across recent bars**, not its
+level. For a LONG:
+- Bears rising OUT of deeply negative toward zero (e.g. -2.1 -> -0.3), AND
+- Bulls climbing hard, EVEN IF STILL NEGATIVE
+  (e.g. -4.5 -> -2.3 -> 0.1 -> 1.8 -> 3.8).
+A valid long can show bulls still negative but climbing steeply — the level gate
+would WRONGLY reject it; the RATE-OF-CHANGE gate accepts it. This is exactly why
+the fakeout study (static levels) failed to separate winners. **Requires capturing
+`bulls_recent` / `bears_recent` series (not just last value) + slope gates.**
+
+### 4d. OsMA candle threshold vs the M1 timing trap
+A tunable OsMA magnitude before entry (e.g. >= 0.5 long / <= -0.5 short) — but on
+M1 waiting for that closed value means the cycle is nearly done. So the threshold
+must be balanced against anticipation/acceleration (4a/4b) rather than used alone.
+
+### Build plan (tunable, default-off, optimiser-proven, per symbol)
+1. Capture `bulls_recent` / `bears_recent` / `macd_recent` series in
+   `compute_full_indicators` (like `osma_recent`).
+2. Add tunable gates in `confluence_signal.py`:
+   - `bulls_slope_min` / `bears_slope_min` — required rate-of-change of power over
+     the last N bars (the tug-of-war), sign-aware, ATR-normalised.
+   - `accel_bars` — multi-bar OsMA/MACD acceleration (extend `accel_min`).
+   - power-trajectory works EVEN WHEN power level is still negative (climbing).
+3. Exit: `osma_hook_exit` (OsMA[1] < OsMA[2] fading) + `power_flip_exit`
+   (bulls<0 long / bears>0 short) as tunable hard exits.
+4. Split `power_period` into `bulls_period` / `bears_period` (optional).
+5. Add tests; prove each per symbol in walk-forward; enable only if it beats
+   baseline out-of-sample.

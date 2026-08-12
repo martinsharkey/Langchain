@@ -456,6 +456,11 @@ def compute_full_indicators(data: list[dict], params: Optional[dict] = None) -> 
         "osma_closed": _nth_last(osma_s, 2, 0.0),
         "osma_prev": _nth_last(osma_s, 3, 0.0),
         "osma_recent": _tail_list(osma_s, 6),
+        # power/MACD TRAJECTORY (tug-of-war): recent series so the confluence can
+        # evaluate rate-of-change, not just the last level (owner's core edge).
+        "bulls_recent": _tail_list(bulls_s, 6),
+        "bears_recent": _tail_list(bears_s, 6),
+        "macd_recent": _tail_list(macd_line, 6),
         "ema_prev": _nth_last(ema_fast_s, 3, ema_fast_v),
         "atr_prev": _nth_last(atr_s, 3, atr_v),
         "support_levels": support, "resistance_levels": resistance,

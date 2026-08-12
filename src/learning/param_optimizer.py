@@ -81,8 +81,12 @@ PARAM_SPACE = {
     # OsMA acceleration magnitude |osma_now - osma_prev| / ATR. GoldShark data shows
     # this is the single strongest predictor found (corr -0.68 with drawdown). ATR-
     # normalized so one range fits all symbols. 0.0 = disabled (legacy behaviour).
-    "accel_min": (0.0, 1.0, 0.01, float),
-    "sl_atr":      (0.5, 3.0, 0.1, float),
+    "accel_min": (0.0, 1.0, 0.01, float),    "sl_atr":      (0.5, 3.0, 0.1, float),
+    # POWER TUG-OF-WAR trajectory (owner edge): required per-bar rise of Bulls/Bears
+    # power over the recent window, ATR-normalised. 0 = OFF. Accepts a climbing power
+    # even while still negative (level floors can't). Optimiser discovers per symbol.
+    "bulls_slope_min": (0.0, 2.0, 0.05, float),
+    "bears_slope_min": (0.0, 2.0, 0.05, float),
     "tp_rr":       (0.5, 3.0, 0.1, float),
 }
 

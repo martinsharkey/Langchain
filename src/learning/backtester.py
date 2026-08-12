@@ -53,7 +53,7 @@ class Backtester:
 
     def walkforward_focused(self, symbol, params, sl_atr=1.0, tp_rr=2.0,
                             giveback=0.55, arm=0.5, timeframe=config.ENTRY_TIMEFRAME,
-                            bars=12000, windows=3, warmup=210):
+                            bars=12000, windows=3, warmup=210, trail_min_atr=0.0):
         """
         Walk-forward backtest of the symbol's FOCUSED pockets with a GIVEN
         indicator param set + realistic manager exits (giveback of peak).
@@ -102,7 +102,13 @@ class Backtester:
 
         def _resolve_open(ot, i, price, giveback):
             """Return realised R if the trade closes in bar i, else None. Uses ticks
-            (correct intrabar sequence + spread) when available; else bar high/low."""
+            (correct intrabar sequence + spread) when available; else bar high/low.
+
+            Honors the volatility-scaled trail FLOOR: a giveback-close only fires if
+            the retrace from peak also exceeds trail_min_atr*ATR (ot['trail_floor']),
+            mirroring the live SCALP_TRAIL_MIN_ATR so the backtest proves the same
+            behaviour ('stopped then recovered' fix)."""
+            tf_floor = ot.get("trail_floor", 0.0)
             ticks = tick_by_bar[i] if tick_by_bar else None
             if ticks:
                 d = ot["dir"]
@@ -112,30 +118,30 @@ class Backtester:
                         ot["peak"] = max(ot["peak"], px)
                         if px <= ot["sl"]: return -1.0
                         if px >= ot["tp"]: return ot["rr"]
-                        fav = ot["peak"] - ot["entry"]
-                        if fav >= ot["arm"] and (ot["peak"] - px) >= giveback * fav:
+                        fav = ot["peak"] - ot["entry"]; retr = ot["peak"] - px
+                        if fav >= ot["arm"] and retr >= giveback * fav and retr >= tf_floor:
                             return (px - ot["entry"]) / ot["risk"]
                     else:
                         ot["peak"] = min(ot["peak"], px)
                         if px >= ot["sl"]: return -1.0
                         if px <= ot["tp"]: return ot["rr"]
-                        fav = ot["entry"] - ot["peak"]
-                        if fav >= ot["arm"] and (px - ot["peak"]) >= giveback * fav:
+                        fav = ot["entry"] - ot["peak"]; retr = px - ot["peak"]
+                        if fav >= ot["arm"] and retr >= giveback * fav and retr >= tf_floor:
                             return (ot["entry"] - px) / ot["risk"]
                 return None
             # bar fallback
             hib, lob = rates[i]["high"], rates[i]["low"]
             if ot["dir"] == "buy":
-                ot["peak"] = max(ot["peak"], hib); fav = ot["peak"] - ot["entry"]
+                ot["peak"] = max(ot["peak"], hib); fav = ot["peak"] - ot["entry"]; retr = ot["peak"] - price
                 if lob <= ot["sl"]: return -1.0
                 if hib >= ot["tp"]: return ot["rr"]
-                if fav >= ot["arm"] and (ot["peak"] - price) >= giveback * fav:
+                if fav >= ot["arm"] and retr >= giveback * fav and retr >= tf_floor:
                     return (price - ot["entry"]) / ot["risk"]
             else:
-                ot["peak"] = min(ot["peak"], lob); fav = ot["entry"] - ot["peak"]
+                ot["peak"] = min(ot["peak"], lob); fav = ot["entry"] - ot["peak"]; retr = price - ot["peak"]
                 if hib >= ot["sl"]: return -1.0
                 if lob <= ot["tp"]: return ot["rr"]
-                if fav >= ot["arm"] and (price - ot["peak"]) >= giveback * fav:
+                if fav >= ot["arm"] and retr >= giveback * fav and retr >= tf_floor:
                     return (ot["entry"] - price) / ot["risk"]
             return None
 
@@ -173,7 +179,8 @@ class Backtester:
                 sl = price - risk if action == "buy" else price + risk
                 tp = price + tpd if action == "buy" else price - tpd
                 ot = {"dir": action, "entry": price, "sl": sl, "tp": tp, "risk": risk,
-                      "rr": tp_rr, "peak": price, "arm": arm * atr}
+                      "rr": tp_rr, "peak": price, "arm": arm * atr,
+                      "trail_floor": trail_min_atr * atr}
             tot = w + l
             pf = round(gw / gl, 2) if gl > 0 else (gw if gw else 0.0)
             return tot, (round(w / tot * 100, 1) if tot else 0), pf, round(gw - gl, 1)
