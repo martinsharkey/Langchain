@@ -2917,6 +2917,19 @@ class ScalpEngine:
                 indicators.update(_wide)
         except Exception as e:
             logger.debug(f"wide-window capture skip {base}: {e}")
+        # LIQUIDITY CONTEXT: tag every entry with session + hour so the optimiser/ML
+        # can find SESSION/HOUR-CONDITIONAL edge (e.g. ATR helps in Asia, hurts in NY).
+        try:
+            import time as _t
+            from src.trading.market_clock import classify as _mc
+            ctx = _mc(_t.time())
+            indicators = dict(indicators)
+            indicators["session"] = ctx["session"]
+            indicators["hour_utc"] = ctx["hour_utc"]
+            indicators["liquidity"] = ctx["liquidity"]
+            indicators["session_overlap"] = 1 if ctx["overlap"] else 0
+        except Exception as e:
+            logger.debug(f"session-tag skip {base}: {e}")
         trade_signal = {
             "symbol": resolved,
             "action": signal.action,

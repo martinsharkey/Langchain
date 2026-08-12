@@ -82,6 +82,11 @@ PARAM_SPACE = {
     # this is the single strongest predictor found (corr -0.68 with drawdown). ATR-
     # normalized so one range fits all symbols. 0.0 = disabled (legacy behaviour).
     "accel_min": (0.0, 1.0, 0.01, float),    "sl_atr":      (0.5, 3.0, 0.1, float),
+    # COMBINATORIAL GATE TOGGLES (0/1): let the optimiser turn each indicator gate
+    # OFF/ON to find the edge in a SUBSET of indicators (MT5-optimiser style). 1=on
+    # (default = current behaviour). The combinatorial search flips these.
+    "use_osma": (0, 1, 1, int), "use_macd": (0, 1, 1, int),
+    "use_bulls": (0, 1, 1, int), "use_bears": (0, 1, 1, int),
     # POWER TUG-OF-WAR trajectory (owner edge): required per-bar rise of Bulls/Bears
     # power over the recent window, ATR-normalised. 0 = OFF. Accepts a climbing power
     # even while still negative (level floors can't). Optimiser discovers per symbol.
@@ -371,6 +376,34 @@ class ParameterOptimizer:
         except Exception:
             return False
 
+    def combinatorial_search(self, symbol: str, base: dict = None) -> dict:
+        """MT5-optimiser-style COMBINATORIAL search: (1) grid-sweep the strength/ATR
+        floors to their proven values, then (2) test turning each indicator gate
+        OFF/ON to discover whether the edge lives in a SUBSET of indicators (e.g.
+        OsMA+ATR only, RSI off). Greedy: keep any toggle/value that improves the
+        walk-forward min-PF. Returns the best per-symbol combination + score.
+
+        This is the core of 'find the edge in other ways' — not just tuning the
+        fixed 7-indicator AND-gate but discovering which indicators to use at all."""
+        # 1) full-range floor sweep (reach the proven cluster)
+        gs = self.grid_sweep(symbol, base=base, coarse=True)
+        best = dict(gs["params"]); best_score = gs["score"]
+        # 2) gate on/off toggles — try disabling each gate; keep if it helps
+        TOGGLES = ["use_osma", "use_macd", "use_bulls", "use_bears"]
+        toggled = {}
+        for k in TOGGLES:
+            if k not in PARAM_SPACE:
+                continue
+            cur = best.get(k, 1)
+            cand = dict(best); cand[k] = 0 if cur else 1   # flip
+            if self._is_failed(symbol, cand):
+                continue
+            res = self.backtest_fn(symbol, cand, cand.get("sl_atr", 1.0), cand.get("tp_rr", 2.0))
+            if res and res.get("generalizes") and res["score"] > best_score + 0.01:
+                best = cand; best_score = res["score"]; toggled[k] = cand[k]
+        return {"symbol": symbol, "swept": gs.get("swept", {}), "toggled": toggled,
+                "score": best_score, "params": best}
+
     def grid_sweep(self, symbol: str, base: dict = None,
                    sweep_keys=None, coarse=True) -> dict:
         """FULL-RANGE grid sweep that reproduces the MT5 Strategy-Tester optimiser:
@@ -457,8 +490,8 @@ class ParameterOptimizer:
         # tight directed-search path (and its unit tests) are unchanged.
         try:
             if directives and directives.get("grid_sweep"):
-                gs = self.grid_sweep(symbol, base=best_params, coarse=True)
-                if gs.get("swept"):
+                gs = self.combinatorial_search(symbol, base=best_params)
+                if gs.get("swept") or gs.get("toggled"):
                     guided.append(gs["params"])
         except Exception:
             pass

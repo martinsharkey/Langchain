@@ -329,8 +329,14 @@ def evaluate_confluence_bar(ind: dict, cfg=None) -> dict:
             ("bulls", bulls_v, _floor("bulls_max_short"), "<="),
         ]
     for nm, val, floor, op in gates:
+        # COMBINATORIAL TOGGLE: an indicator gate can be turned OFF entirely via
+        # use_<nm>=0 (default ON) so the optimiser can test SUBSETS of indicators
+        # (MT5-optimiser style: disable a filter, keep others, see if the edge lives
+        # in a different combination). floor==0 also means off (sign-only).
+        if int(c.get(f"use_{nm}", 1) or 0) == 0:
+            continue   # gate disabled by the combinatorial search
         if floor == 0.0:
-            continue   # gate off
+            continue   # gate off (no floor)
         if (op == ">=" and val < floor) or (op == "<=" and val > floor):
             return {"action": "hold", "trigger_kind": trigger_kind, "confluence": 0,
                     "reason": f"{nm} strength {val:.3f} fails {op}{floor:.3f} floor"}
