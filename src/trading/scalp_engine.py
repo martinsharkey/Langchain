@@ -2287,12 +2287,20 @@ class ScalpEngine:
 
                 # AUTONOMOUS PARAMETER TUNING guided by reflection, gated by walk-forward.
                 if self.param_optimizer is not None and config.OPTIMIZER_ENABLED:
+                    # Periodically run the FULL-RANGE grid sweep (reproduces the MT5
+                    # optimiser) so the search can REACH the proven high-floor cluster
+                    # (e.g. osma_min_long ~1.4, bulls ~2.0, atr_min ~1.4) instead of
+                    # only nudging +/-0.04 around a stuck value. Heavier, so cadence-gated.
+                    _grid = (self.cycle % getattr(config, "OPTIMIZER_GRID_SWEEP_CYCLES", 240) == 13)
                     for base, adapter in self.adapters.items():
                         sym = adapter.resolved_symbol
                         try:
+                            _dirs = dict(per_symbol_directives.get(sym) or {})
+                            if _grid:
+                                _dirs["grid_sweep"] = True
                             r = self.param_optimizer.optimize(
                                 sym, iterations=config.OPTIMIZER_ITERATIONS,
-                                directives=per_symbol_directives.get(sym))
+                                directives=_dirs)
                             if r.get("improved"):
                                 src = "reflection-guided" if r.get("from_reflection") else "directed-search"
                                 logger.info(f"[OPTIMIZER] {sym} improved ({src}): "

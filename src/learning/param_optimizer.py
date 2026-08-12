@@ -371,6 +371,55 @@ class ParameterOptimizer:
         except Exception:
             return False
 
+    def grid_sweep(self, symbol: str, base: dict = None,
+                   sweep_keys=None, coarse=True) -> dict:
+        """FULL-RANGE grid sweep that reproduces the MT5 Strategy-Tester optimiser:
+        for each strength/ATR floor, test values across its WHOLE range (not just
+        +/-0.04 around the current value) and keep the PF-maximising value per key.
+
+        This fixes the core defect the owner identified: the directed coordinate
+        search only nudged floors by 0.01-0.04 from wherever they currently sat, so
+        with floors stuck near 0 it could NEVER discover the proven cluster
+        (osma_min_long ~1.4-1.5, bulls ~2.0, atr_min ~1.4 => PF>5 in the real XMLs).
+        A grid sweep visits the whole range and lands on that edge.
+
+        coarse=True does a 0.1-step first pass (fast); the caller can refine the
+        winner with the existing 0.01 directed search. Greedy per-key coordinate
+        pass anchored on the best-so-far, evaluated on walk-forward (min-PF)."""
+        base = dict(base or self.current_params(symbol))
+        # the floors that actually carry the entry edge (per the XML evidence)
+        sweep_keys = sweep_keys or ["osma_min_long", "bulls_min_long", "bears_min_long",
+                                    "osma_max_short", "bulls_max_short", "bears_max_short",
+                                    "atr_min", "min_ema_slope"]
+        best = dict(base)
+        base_res = self.backtest_fn(symbol, best, best.get("sl_atr", 1.0), best.get("tp_rr", 2.0))
+        best_score = base_res["score"] if (base_res and base_res.get("generalizes")) else -1.0
+        swept = {}
+        for k in sweep_keys:
+            if k not in PARAM_SPACE:
+                continue
+            lo, hi, step, kind = PARAM_SPACE[k]
+            grid_step = 0.1 if (coarse and kind is float) else step
+            # build the full-range grid (inclusive)
+            vals = []
+            v = lo
+            while v <= hi + 1e-9:
+                vals.append(round(v, 4)); v += grid_step
+            best_v = best.get(k, lo); best_v_score = best_score
+            for val in vals:
+                cand = dict(best); cand[k] = val
+                if cand.get("osma_fast", 12) >= cand.get("osma_slow", 26):
+                    continue
+                if self._is_failed(symbol, cand):
+                    continue
+                res = self.backtest_fn(symbol, cand, cand.get("sl_atr", 1.0), cand.get("tp_rr", 2.0))
+                if res and res.get("generalizes") and res["score"] > best_v_score + 0.01:
+                    best_v_score = res["score"]; best_v = val
+            if best_v != best.get(k):
+                best[k] = best_v; best_score = best_v_score
+                swept[k] = best_v
+        return {"symbol": symbol, "swept": swept, "score": best_score, "params": best}
+
     def optimize(self, symbol: str, iterations: int = 12, candidates_per_iter: int = 1,
                  directives: dict = None) -> dict:
         """
@@ -401,6 +450,18 @@ class ParameterOptimizer:
         mql5_cand = self._mql5_guided_candidate(symbol, best_params)
         if mql5_cand is not None:
             guided.append(mql5_cand)
+        # #NEW: FULL-RANGE grid sweep (reproduces MT5 optimiser) so the search can
+        # actually REACH the proven high-floor cluster instead of only nudging +/-0.04
+        # around a stuck-at-zero value. Opt-in via directives {'grid_sweep': True} or
+        # the periodic scheduler; skips #27 failed directions. Off by default so the
+        # tight directed-search path (and its unit tests) are unchanged.
+        try:
+            if directives and directives.get("grid_sweep"):
+                gs = self.grid_sweep(symbol, base=best_params, coarse=True)
+                if gs.get("swept"):
+                    guided.append(gs["params"])
+        except Exception:
+            pass
 
         # 1) evaluate the reflection/mql5-guided candidates first
         for cand in guided:
