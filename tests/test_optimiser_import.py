@@ -29,6 +29,7 @@ _XML = """<?xml version="1.0"?>
  <Cell><Data ss:Type="String">Equity DD %</Data></Cell>
  <Cell><Data ss:Type="String">Trades</Data></Cell>
  <Cell><Data ss:Type="String">InpOsMAFast</Data></Cell>
+ <Cell><Data ss:Type="String">InpOsMASlow</Data></Cell>
  <Cell><Data ss:Type="String">InpLongOsMAMin</Data></Cell>
 </Row>
 <Row>
@@ -43,6 +44,7 @@ _XML = """<?xml version="1.0"?>
  <Cell><Data ss:Type="Number">12</Data></Cell>
  <Cell><Data ss:Type="Number">80</Data></Cell>
  <Cell><Data ss:Type="Number">12</Data></Cell>
+ <Cell><Data ss:Type="Number">26</Data></Cell>
  <Cell><Data ss:Type="Number">1.2</Data></Cell>
 </Row>
 <Row>
@@ -57,6 +59,7 @@ _XML = """<?xml version="1.0"?>
  <Cell><Data ss:Type="Number">40</Data></Cell>
  <Cell><Data ss:Type="Number">30</Data></Cell>
  <Cell><Data ss:Type="Number">14</Data></Cell>
+ <Cell><Data ss:Type="Number">28</Data></Cell>
  <Cell><Data ss:Type="Number">0.5</Data></Cell>
 </Row>
 </Table></Worksheet></Workbook>
@@ -92,3 +95,43 @@ def test_optimiser_min_trades_filter():
     # pass1 Trades=80, pass2 Trades=30; min_trades=50 keeps only pass1
     r = ingest_optimiser_xml(_write_xml(), db, min_trades=50)
     assert r["parsed"] == 1, f"min_trades filter should drop low-sample passes: {r}"
+
+
+# A foreign EA (e.g. Quantum Bitcoin, BTCUSD/H1) has a DIFFERENT parameter schema
+# and must NOT be merged into GoldShark per-symbol learning.
+_FOREIGN_XML = """<?xml version="1.0"?>
+<Workbook xmlns="urn:schemas-microsoft-com:office:spreadsheet"
+ xmlns:ss="urn:schemas-microsoft-com:office:spreadsheet"
+ xmlns:o="urn:schemas-microsoft-com:office:office">
+<DocumentProperties xmlns="urn:schemas-microsoft-com:office:office">
+<Title>Quantum Bitcoin EA BTCUSD,H1 2026.05.01-2026.05.23</Title></DocumentProperties>
+<Worksheet ss:Name="Report"><Table>
+<Row>
+ <Cell><Data ss:Type="String">Pass</Data></Cell>
+ <Cell><Data ss:Type="String">Profit Factor</Data></Cell>
+ <Cell><Data ss:Type="String">Trades</Data></Cell>
+ <Cell><Data ss:Type="String">InpQuantumThreshold</Data></Cell>
+ <Cell><Data ss:Type="String">InpGridStep</Data></Cell>
+</Row>
+<Row>
+ <Cell><Data ss:Type="Number">1</Data></Cell>
+ <Cell><Data ss:Type="Number">2.1</Data></Cell>
+ <Cell><Data ss:Type="Number">120</Data></Cell>
+ <Cell><Data ss:Type="Number">0.7</Data></Cell>
+ <Cell><Data ss:Type="Number">50</Data></Cell>
+</Row>
+</Table></Worksheet></Workbook>
+"""
+
+
+def test_foreign_strategy_schema_is_rejected():
+    """Quantum-Bitcoin-style report (different Inp* schema) must NOT be ingested
+    into GoldShark learning — provenance guard."""
+    db = _db()
+    p = os.path.join(tempfile.mkdtemp(), "ReportOptimizer-QB.xml")
+    with open(p, "w", encoding="utf-8") as f:
+        f.write(_FOREIGN_XML)
+    r = ingest_optimiser_xml(p, db, min_trades=10)
+    assert r["recorded"] == 0, "foreign-schema EA must not merge into GoldShark ledger"
+    assert r.get("skipped") == "foreign-strategy-schema"
+    assert db.adjustment_history(symbol="BTCUSD") == []

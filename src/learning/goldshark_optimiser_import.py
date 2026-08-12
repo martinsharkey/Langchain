@@ -79,6 +79,18 @@ def ingest_optimiser_xml(path, experience_db, min_trades=10, min_pf=1.0):
         if header is None:
             if cells and cells[0] == "Pass":
                 header = cells
+                # STRATEGY GUARD (owner note 2026-08-12): only ingest reports whose
+                # parameter schema is GoldShark's (has our mapped Inp* columns). A
+                # DIFFERENT EA (e.g. Quantum Bitcoin, BTCUSD/H1) has a different
+                # schema and must NOT be merged into our per-symbol learning as if
+                # it were the same strategy. Refuse mismatched schemas.
+                matched = sum(1 for inp in _PARAM_MAP if inp in header)
+                if matched < 3:
+                    logger.warning(f"optimiser XML {os.path.basename(path)}: schema "
+                                   f"does not match GoldShark ({matched} mapped Inp* "
+                                   f"cols) — SKIPPING (foreign EA, not merged)")
+                    return {"symbol": symbol, "parsed": 0, "recorded": 0,
+                            "skipped": "foreign-strategy-schema"}
             continue
         if not cells or cells[0] is None:
             continue

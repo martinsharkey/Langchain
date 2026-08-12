@@ -149,3 +149,17 @@ must be balanced against anticipation/acceleration (4a/4b) rather than used alon
 4. Split `power_period` into `bulls_period` / `bears_period` (optional).
 5. Add tests; prove each per symbol in walk-forward; enable only if it beats
    baseline out-of-sample.
+
+## Strategy provenance (owner-confirmed 2026-08-12) — DO NOT CONFLATE
+
+- **GoldShark** = OUR strategy. OsMA 7-indicator confluence. **XAUUSD, M1.**
+  All GoldShark optimiser XMLs / telemetry / .set files belong to this edge.
+- **Quantum Bitcoin (QB)** = a SEPARATE EA by a DIFFERENT developer.
+  **BTCUSD, H1.** NOT GoldShark. Different parameter schema (Inp* names differ).
+  Interesting as a BTCUSD reference ONLY — its parameters must NEVER be merged
+  into GoldShark/BTCUSD confluence tuning or the adjustment_ledger as if they were
+  the same strategy (would poison per-symbol learning). If ever ingested, tag it
+  strategy="quantum_bitcoin" and keep it isolated from GoldShark rows.
+
+Practical rule for the optimiser-XML ingester: map/keep only same-strategy,
+same-symbol, same-timeframe data together. QB (BTCUSD/H1) is its own lane.
