@@ -160,6 +160,9 @@ ML_AUTHORITY_MIN_BACKTESTS = int(os.getenv("ML_AUTHORITY_MIN_BACKTESTS", "3"))
 ML_AUTHORITY_MIN_OOS = float(os.getenv("ML_AUTHORITY_MIN_OOS", "0.55"))  # ROC-AUC bar
 ML_MIN_TRAIN_SAMPLES = int(os.getenv("ML_MIN_TRAIN_SAMPLES", "80"))
 ML_NIGHTLY_HOUR = int(os.getenv("ML_NIGHTLY_HOUR", "2"))   # local hour to run the scan
+# CryptoRTI: S3 is a ONE-OFF training seed (manual); the live SIGNAL is primary.
+CRYPTORTI_MAX_DAYS = int(os.getenv("CRYPTORTI_MAX_DAYS", "40"))   # seed size guard (~per series)
+CRYPTORTI_LIVE_MIN = int(os.getenv("CRYPTORTI_LIVE_MIN", "100"))  # min live outcomes before live-retrain
 # FOCUSED mode: trade only validated high-edge (strategy x regime) pockets
 # instead of the broad ensemble vote. Backtest: PF 1.24 vs 1.04.
 FOCUSED_MODE = os.getenv("FOCUSED_MODE", "true").lower() in ("true", "1", "yes")

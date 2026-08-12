@@ -158,18 +158,20 @@ def start_ml_nightly():
                     syms = [s.strip() for s in os.getenv("TRADING_SYMBOLS", "XAUUSD,BTCUSD").split(",") if s.strip()]
                     res = MLPatternEngine(db).run_nightly(syms)
                     log.info(f"[ML-NIGHTLY] scan complete: {res}")
-                    # CryptoRTI v5 feature model (BTCUSD) — bounded, cached, gated.
+                    # NOTE: Danny's S3 feature data is a ONE-OFF training seed, run
+                    # MANUALLY via `python -m scripts.seed_cryptorti_model` — NOT here.
+                    # The nightly path augments the model from OUR accumulated live
+                    # CryptoRTI signal outcomes only (never re-pulls the large S3 bucket).
                     try:
                         from src.cryptorti.feature_model import CryptoRTIFeatureModel
-                        cres = CryptoRTIFeatureModel(db).train()
-                        # re-run the authority gate so a proven model can go live
+                        cres = CryptoRTIFeatureModel(db).retrain_from_live_outcomes()
                         db.promote_ml_patterns(
                             int(getattr(config, "ML_AUTHORITY_MIN_SAMPLES", 200)),
                             int(getattr(config, "ML_AUTHORITY_MIN_BACKTESTS", 3)),
                             float(getattr(config, "ML_AUTHORITY_MIN_OOS", 0.55)))
-                        log.info(f"[ML-NIGHTLY] cryptorti model: {cres}")
+                        log.info(f"[ML-NIGHTLY] cryptorti live-retrain: {cres}")
                     except Exception as e:
-                        log.warning(f"[ML-NIGHTLY] cryptorti model skipped: {e}")
+                        log.warning(f"[ML-NIGHTLY] cryptorti live-retrain skipped: {e}")
             except Exception as e:
                 try:
                     from src.utils.logger import get_logger

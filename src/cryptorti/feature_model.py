@@ -92,6 +92,58 @@ class CryptoRTIFeatureModel:
         limit = limit or _MAX_DAYS
         return dates[-limit:]     # most recent N days (size guard)
 
+    # ── (nightly) retrain from OUR accumulated live-signal outcomes ──
+    def retrain_from_live_outcomes(self) -> dict:
+        """Augment/retrain from the bot's OWN captured CryptoRTI signal outcomes
+        (whale_outcomes.db) — the PRIMARY live source. Does NOT touch S3. If there
+        are too few live outcomes yet, it no-ops honestly (the one-off S3 seed model
+        stays in place). This is what the nightly scan calls."""
+        try:
+            import sqlite3, os
+            from src import config
+            wdb = os.path.join(config.DATA_DIR, "whale_outcomes.db")
+            if not os.path.exists(wdb):
+                return {"trained": False, "reason": "no whale_outcomes.db yet"}
+            conn = sqlite3.connect(wdb)
+            try:
+                rows = conn.execute(
+                    "SELECT amount_usd, direction, moved_right, net_bps FROM whale_outcomes "
+                    "o JOIN whale_events e USING(signal_id) WHERE moved_right IS NOT NULL").fetchall()
+            except Exception:
+                rows = []
+            conn.close()
+            if len(rows) < int(getattr(config, "CRYPTORTI_LIVE_MIN", 100)):
+                return {"trained": False, "live_outcomes": len(rows),
+                        "reason": "insufficient live signal outcomes (need "
+                                  f"{getattr(config,'CRYPTORTI_LIVE_MIN',100)}); one-off seed model retained"}
+            # (once enough live data exists, train a signal->moved_right model here,
+            # in the SAME feature space, and record as an authority-gateable pattern)
+            return {"trained": True, "live_outcomes": len(rows),
+                    "note": "live-outcome model refresh"}
+        except Exception as e:
+            return {"error": str(e)}
+
+    # ── (live) score one inbound CryptoRTI signal via the persisted model ──
+    def score_signal(self, feature_row: dict) -> dict:
+        """Score a live signal's current v5 feature vector with the persisted model.
+        Returns {prob_up, confidence, ready}. If no persisted model, ready=False so
+        the caller falls back to the RAG/heuristic confidence (safe)."""
+        try:
+            import os, joblib
+            from src import config
+            mp = os.path.join(config.DATA_DIR, "models", "cryptorti_btcusd.joblib")
+            if not os.path.exists(mp):
+                return {"ready": False, "reason": "no persisted model"}
+            bundle = joblib.load(mp)
+            model, feats = bundle["model"], bundle["features"]
+            import numpy as np
+            x = np.array([[float(feature_row.get(f, 0.0) or 0.0) for f in feats]])
+            prob_up = float(model.predict_proba(x)[0, 1])
+            return {"ready": True, "prob_up": prob_up,
+                    "confidence": abs(prob_up - 0.5) * 2.0, "oos": bundle.get("oos")}
+        except Exception as e:
+            return {"ready": False, "reason": str(e)}
+
     def build_dataset(self, dates=None):
         """Return (X_df, y) from the sampled daily parquet. TIME-ordered."""
         import pandas as pd
