@@ -102,9 +102,37 @@ class WhaleWavePredictor:
 
         conf = round(max(0.0, min(conf, 1.0)), 3)
         action = "sell" if (direction or "sell").lower().startswith("s") else "buy"
+        # AUTHORITATIVE CryptoRTI model blend (gated): only if the trained v5
+        # feature model exists AND has earned authority (via the ML authority gate)
+        # do we blend its OOS-weighted prior into the confidence. Otherwise conf is
+        # unchanged (safe default). Never re-scans S3 live — uses the persisted model.
+        model_conf = self._authoritative_model_confidence()
+        if model_conf is not None:
+            conf = round(max(0.0, min(0.5 * conf + 0.5 * model_conf, 1.0)), 3)
         reason = (f"whale wave: {source} match sim={similarity:.2f} hit_rate={hit_rate:.0f}% "
                   f"~{n_large:.0f} chunks lag~{lag:.0f}m peak~{peak_bps:.0f}bps -> conf {conf}")
         return {"confidence": conf, "action": action, "n_chunks": n_large,
                 "lag_min": lag, "peak_bps": peak_bps, "hit_rate": hit_rate,
                 "similarity": similarity, "source": source, "samples": samples,
                 "reason": reason}
+
+    def _authoritative_model_confidence(self):
+        """Return the CryptoRTI model's OOS score as a prior IN [0,1] only if the
+        model is trained AND authoritative for BTCUSD; else None (no influence)."""
+        try:
+            import os, joblib
+            from src import config
+            from src.learning.experience_db import ExperienceDatabase
+            db = ExperienceDatabase()
+            auth = [p for p in db.authoritative_patterns("BTCUSD")
+                    if str(p.get("pattern_key", "")).startswith("cryptorti_")]
+            if not auth:
+                return None   # model exists but hasn't earned authority -> ignore
+            mp = os.path.join(config.DATA_DIR, "models", "cryptorti_btcusd.joblib")
+            if not os.path.exists(mp):
+                return None
+            oos = max((p.get("oos_score") or 0.0) for p in auth)
+            # use OOS-AUC as a confidence prior (0.5=random -> 0 influence upward)
+            return max(0.0, min((oos - 0.5) * 2.0, 1.0))
+        except Exception:
+            return None
