@@ -78,3 +78,45 @@
       decide whether to retire it.
 - [ ] Tune scalp SL/TP so gold trades don't close at breakeven too quickly.
 - [ ] `strategy_registry.update_weights_from_performance` dataclass-as-dict bug (Phase 2).
+
+## ML Authority Pipeline (2026-08-12) — owner-requested
+
+Goal: accumulate backtest/forward-test proof per parameter adjustment, let an ML
+engine (XGBoost) mine it nightly, but a discovered pattern only becomes an
+AUTHORITATIVE (usable-live) source once it proves enough samples/tests.
+
+- [ ] Append-only ADJUSTMENT LEDGER (DB table `adjustment_ledger`): every param
+      change + backtest_pf + fwd_pf + fwd_green + exp_before/after + adopted/reverted,
+      per symbol. Wired into ConfigCheckpointer / ParameterOptimizer.
+- [ ] Nightly XGBoost pattern engine (`src/learning/ml_pattern_engine.py`): scans
+      the ledger + trades + rejected_signals per symbol; emits candidate
+      patterns/thresholds with a support count (#backtests/#fwd-tests/#samples).
+- [ ] AUTHORITY GATE: a pattern is `provisional` until support >=
+      ML_AUTHORITY_MIN_SAMPLES and >= ML_AUTHORITY_MIN_TESTS and OOS score gate;
+      only `authoritative` patterns are fed live. Config-driven, per symbol.
+- [ ] Nightly scheduler trigger (portable, non-blocking daemon) to run the scan.
+- [ ] Tests: ledger append; gate below/above threshold; engine produces+gates.
+- [ ] requirements: xgboost; docs updated.
+
+## ML Authority Pipeline — IMPLEMENTED (2026-08-12)
+
+Fully wired, integrated, automated, and tested (162 passing). How it works:
+
+- `adjustment_ledger` (append-only DB table) — every checkpointer adopt/revert is
+  recorded with expectancy proof, per symbol. `record_adjustment` /
+  `adjustment_history`. Wired in `scalp_engine` at the checkpointer decision point.
+- `ml_patterns` (DB table) + XGBoost engine `src/learning/ml_pattern_engine.py` —
+  nightly per-symbol classifier (winner vs loser) with OOS ROC-AUC; records top
+  feature-importance patterns with SUPPORT (samples + backtests) + OOS score.
+- AUTHORITY GATE `promote_ml_patterns(min_samples, min_backtests, min_oos)` — a
+  pattern is 'provisional' (ignored live) until it proves support; only
+  'authoritative' patterns are exposed via `authoritative_patterns()`. Config:
+  ML_AUTHORITY_MIN_SAMPLES / ML_AUTHORITY_MIN_BACKTESTS / ML_AUTHORITY_MIN_OOS.
+- Nightly trigger: `app.start_ml_nightly()` daemon runs the scan at ML_NIGHTLY_HOUR
+  (non-blocking, portable). Enabled by ML_ENABLED.
+- Tests: `tests/test_ml_authority_pipeline.py` (6) — ledger append/per-symbol,
+  gate below/above threshold, OOS-block, downgrade.
+
+Next (data-gated): once each symbol accumulates >= ML_AUTHORITY_MIN_SAMPLES real
+trades + >= ML_AUTHORITY_MIN_BACKTESTS ledger entries, authoritative patterns will
+appear and can feed the confluence/optimiser as a trusted per-symbol source.

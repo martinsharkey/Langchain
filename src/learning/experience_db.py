@@ -23,6 +23,14 @@ from datetime import datetime, timedelta
 logger = logging.getLogger("learning.experience_db")
 
 
+def _flt(v):
+    """Safe float or None (for nullable ledger/ML columns)."""
+    try:
+        return None if v is None else float(v)
+    except (TypeError, ValueError):
+        return None
+
+
 class ExperienceDatabase:
     """
     SQLite-backed experience database for trade learning.
@@ -144,6 +152,50 @@ class ExperienceDatabase:
                 hyp_mae_points REAL,
                 horizon_bars INTEGER,
                 measured INTEGER DEFAULT 0
+            )
+        """)
+
+        # Append-only ADJUSTMENT LEDGER: every parameter change + its backtest and
+        # forward-test proof, per symbol, retained over time (NOT overwritten). This
+        # is the audit trail that proves new-beat-old per symbol AND the labelled
+        # training substrate the nightly XGBoost engine mines. Never deleted.
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS adjustment_ledger (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                timestamp TEXT NOT NULL,
+                symbol TEXT NOT NULL,
+                param TEXT NOT NULL,
+                old_value REAL,
+                new_value REAL,
+                backtest_pf REAL,
+                fwd_pf REAL,
+                fwd_green REAL,
+                exp_before REAL,
+                exp_after REAL,
+                n_samples INTEGER DEFAULT 0,
+                source TEXT,
+                adopted INTEGER DEFAULT 0
+            )
+        """)
+
+        # ML PATTERN STORE: patterns the nightly XGBoost engine discovers. A pattern
+        # is 'provisional' until it proves enough support (backtests/fwd-tests/
+        # samples); only 'authoritative' rows are fed live. Authority is data-earned.
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS ml_patterns (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                timestamp TEXT NOT NULL,
+                symbol TEXT NOT NULL,
+                pattern_key TEXT NOT NULL,
+                feature TEXT,
+                direction TEXT,
+                recommendation TEXT,
+                importance REAL,
+                support_samples INTEGER DEFAULT 0,
+                support_backtests INTEGER DEFAULT 0,
+                oos_score REAL,
+                status TEXT DEFAULT 'provisional',
+                model_version TEXT
             )
         """)
 
@@ -511,6 +563,106 @@ class ExperienceDatabase:
             conn.commit(); conn.close()
         except Exception as e:
             logger.debug(f"record_rejected_signal skip: {e}")
+
+    # ── Append-only adjustment ledger (proof trail + ML training substrate) ──
+    def record_adjustment(self, symbol, param, old_value, new_value,
+                          backtest_pf=None, fwd_pf=None, fwd_green=None,
+                          exp_before=None, exp_after=None, n_samples=0,
+                          source=None, adopted=False):
+        """Append one parameter adjustment with its backtest/forward-test proof.
+        Never overwrites — this is the durable per-symbol audit trail."""
+        from datetime import datetime as _dt
+        try:
+            conn = sqlite3.connect(self.db_path)
+            conn.execute("""
+                INSERT INTO adjustment_ledger
+                  (timestamp,symbol,param,old_value,new_value,backtest_pf,fwd_pf,
+                   fwd_green,exp_before,exp_after,n_samples,source,adopted)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
+            """, (_dt.now().isoformat(), symbol, str(param),
+                  _flt(old_value), _flt(new_value), _flt(backtest_pf), _flt(fwd_pf),
+                  _flt(fwd_green), _flt(exp_before), _flt(exp_after), int(n_samples or 0),
+                  str(source or "")[:200], 1 if adopted else 0))
+            conn.commit(); conn.close()
+        except Exception as e:
+            logger.debug(f"record_adjustment skip: {e}")
+
+    def adjustment_history(self, symbol=None, param=None, limit=1000):
+        """Return the adjustment trail (per symbol/param) for analysis + ML."""
+        try:
+            conn = sqlite3.connect(self.db_path); cur = conn.cursor()
+            q = ("SELECT timestamp,symbol,param,old_value,new_value,backtest_pf,fwd_pf,"
+                 "fwd_green,exp_before,exp_after,n_samples,adopted FROM adjustment_ledger WHERE 1=1")
+            p = []
+            if symbol: q += " AND symbol=?"; p.append(symbol)
+            if param: q += " AND param=?"; p.append(param)
+            q += " ORDER BY id DESC LIMIT ?"; p.append(limit)
+            cur.execute(q, p); rows = cur.fetchall(); conn.close()
+            cols = ["timestamp","symbol","param","old_value","new_value","backtest_pf",
+                    "fwd_pf","fwd_green","exp_before","exp_after","n_samples","adopted"]
+            return [dict(zip(cols, r)) for r in rows]
+        except Exception as e:
+            logger.debug(f"adjustment_history skip: {e}")
+            return []
+
+    # ── ML pattern store + authority gate ──
+    def record_ml_pattern(self, symbol, pattern_key, feature=None, direction=None,
+                          recommendation=None, importance=0.0, support_samples=0,
+                          support_backtests=0, oos_score=None, model_version=None):
+        """Store/refresh an ML-discovered pattern. Status is (re)computed by the
+        authority gate, not set here — a pattern earns authority from support."""
+        from datetime import datetime as _dt
+        try:
+            conn = sqlite3.connect(self.db_path)
+            conn.execute("""
+                INSERT INTO ml_patterns
+                  (timestamp,symbol,pattern_key,feature,direction,recommendation,
+                   importance,support_samples,support_backtests,oos_score,status,model_version)
+                VALUES (?,?,?,?,?,?,?,?,?,?, 'provisional', ?)
+            """, (_dt.now().isoformat(), symbol, pattern_key, feature, direction,
+                  recommendation, _flt(importance), int(support_samples or 0),
+                  int(support_backtests or 0), _flt(oos_score), model_version))
+            conn.commit(); conn.close()
+        except Exception as e:
+            logger.debug(f"record_ml_pattern skip: {e}")
+
+    def promote_ml_patterns(self, min_samples, min_backtests, min_oos_score=0.0):
+        """AUTHORITY GATE: mark patterns 'authoritative' only once they prove enough
+        support (samples + backtests) and clear the OOS score bar; else 'provisional'.
+        Returns count promoted. This is what makes ML data-earned, not assumed."""
+        try:
+            conn = sqlite3.connect(self.db_path); cur = conn.cursor()
+            cur.execute("""
+                UPDATE ml_patterns SET status='authoritative'
+                WHERE support_samples>=? AND support_backtests>=?
+                  AND (oos_score IS NULL OR oos_score>=?)
+            """, (int(min_samples), int(min_backtests), float(min_oos_score)))
+            cur.execute("""
+                UPDATE ml_patterns SET status='provisional'
+                WHERE NOT (support_samples>=? AND support_backtests>=?
+                  AND (oos_score IS NULL OR oos_score>=?))
+            """, (int(min_samples), int(min_backtests), float(min_oos_score)))
+            promoted = cur.execute(
+                "SELECT COUNT(*) FROM ml_patterns WHERE status='authoritative'").fetchone()[0]
+            conn.commit(); conn.close()
+            return promoted
+        except Exception as e:
+            logger.debug(f"promote_ml_patterns skip: {e}")
+            return 0
+
+    def authoritative_patterns(self, symbol=None):
+        """Return ONLY authoritative ML patterns — the sole ML source allowed live."""
+        try:
+            conn = sqlite3.connect(self.db_path); cur = conn.cursor()
+            q = "SELECT symbol,pattern_key,feature,direction,recommendation,importance,oos_score FROM ml_patterns WHERE status='authoritative'"
+            p = []
+            if symbol: q += " AND symbol=?"; p.append(symbol)
+            cur.execute(q, p); rows = cur.fetchall(); conn.close()
+            cols = ["symbol","pattern_key","feature","direction","recommendation","importance","oos_score"]
+            return [dict(zip(cols, r)) for r in rows]
+        except Exception as e:
+            logger.debug(f"authoritative_patterns skip: {e}")
+            return []
 
     def rejected_summary(self, base_symbol=None, limit=500):
         """Return measured rejected signals so the researcher can quantify

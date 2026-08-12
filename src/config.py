@@ -148,6 +148,18 @@ SCALP_RETAIN_ARM_ATR = float(os.getenv("SCALP_RETAIN_ARM_ATR", "0.35"))
 SCALP_TRAIL_MIN_ATR = float(os.getenv("SCALP_TRAIL_MIN_ATR", "0.5"))
 # Multiplier applied to the symbol's typical wick when trailing (breathing room).
 SCALP_TRAIL_WICK_MULT = float(os.getenv("SCALP_TRAIL_WICK_MULT", "1.3"))
+
+# ── ML Pattern Engine authority gate (owner design 2026-08-12) ──
+# A nightly XGBoost scan mines the adjustment ledger + trades per symbol and
+# proposes patterns. A pattern only becomes AUTHORITATIVE (usable live) once it
+# proves enough support. These thresholds are the "earn authority" bar — tune per
+# risk appetite. Nothing ML touches trading until it clears them.
+ML_ENABLED = os.getenv("ML_ENABLED", "true").lower() in ("true", "1", "yes")
+ML_AUTHORITY_MIN_SAMPLES = int(os.getenv("ML_AUTHORITY_MIN_SAMPLES", "200"))
+ML_AUTHORITY_MIN_BACKTESTS = int(os.getenv("ML_AUTHORITY_MIN_BACKTESTS", "3"))
+ML_AUTHORITY_MIN_OOS = float(os.getenv("ML_AUTHORITY_MIN_OOS", "0.55"))  # ROC-AUC bar
+ML_MIN_TRAIN_SAMPLES = int(os.getenv("ML_MIN_TRAIN_SAMPLES", "80"))
+ML_NIGHTLY_HOUR = int(os.getenv("ML_NIGHTLY_HOUR", "2"))   # local hour to run the scan
 # FOCUSED mode: trade only validated high-edge (strategy x regime) pockets
 # instead of the broad ensemble vote. Backtest: PF 1.24 vs 1.04.
 FOCUSED_MODE = os.getenv("FOCUSED_MODE", "true").lower() in ("true", "1", "yes")

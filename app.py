@@ -130,6 +130,50 @@ def start_knowledge_ingestion():
     console.print("  [green]Automated Knowledge ingestion scheduled[/green]")
     return t
 
+def start_ml_nightly():
+    """Nightly XGBoost pattern scan (non-blocking daemon, portable). Runs once per
+    day at ML_NIGHTLY_HOUR: mines the adjustment ledger + trades per symbol, records
+    patterns, and runs the AUTHORITY GATE so only well-supported patterns go live.
+    Never blocks trading; degrades quietly if ML deps/data unavailable."""
+    from src import config
+    if not getattr(config, "ML_ENABLED", True):
+        return None
+
+    def _run():
+        import time as _t
+        from datetime import datetime
+        from src.utils.logger import get_logger
+        log = get_logger("app")
+        last_day = None
+        # small delay so the engine/DB are up first
+        _t.sleep(30)
+        while True:
+            try:
+                now = datetime.now()
+                if now.hour == int(getattr(config, "ML_NIGHTLY_HOUR", 2)) and last_day != now.date():
+                    last_day = now.date()
+                    from src.learning.experience_db import ExperienceDatabase
+                    from src.learning.ml_pattern_engine import MLPatternEngine
+                    db = ExperienceDatabase()
+                    syms = [s.strip() for s in os.getenv("TRADING_SYMBOLS", "XAUUSD,BTCUSD").split(",") if s.strip()]
+                    res = MLPatternEngine(db).run_nightly(syms)
+                    log.info(f"[ML-NIGHTLY] scan complete: {res}")
+            except Exception as e:
+                try:
+                    from src.utils.logger import get_logger
+                    get_logger("app").warning(f"[ML-NIGHTLY] failed: {e}")
+                except Exception:
+                    pass
+            _t.sleep(600)  # check every 10 min
+
+    import threading
+    from src.utils.logger import console
+    t = threading.Thread(target=_run, daemon=True, name="ml_nightly")
+    t.start()
+    console.print("  [green]ML nightly pattern scan scheduled[/green]")
+    return t
+
+
 def main():
     mode = os.environ.get("TRADING_MODE", config.TRADING_MODE)
     console.print("\n" + "=" * 66, style="bold cyan")
@@ -153,8 +197,9 @@ def main():
 
     # 4) trading engine
     start_engine()
-    console.print(f"  [green]Trading engine started[/green] (mode={mode})\n")
 
+    # 5) nightly ML pattern scan (authority-gated; non-blocking)
+    start_ml_nightly()
     if mode == "OBSERVE":
         console.print("  [yellow]OBSERVE mode:[/yellow] analyzing only — no orders will be placed.")
         console.print("  Run 'python app.py LIVE_MICRO' to trade the demo account.\n")

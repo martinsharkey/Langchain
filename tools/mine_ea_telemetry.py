@@ -25,7 +25,15 @@ from collections import defaultdict
 ROOTS = [
     r"C:\Users\MartinSharkey\AppData\Roaming\MetaQuotes\Terminal",
     r"C:\Users\MartinSharkey\Documents\machine learning",
+    # Google Drive "Other computers" backup (real GoldShark telemetry CSVs).
+    r"G:\Other computers\My laptop\Downloads",
+    r"G:\Other computers\My laptop\Documents",
+    r"G:\Other computers\My Mac\Downloads",
 ]
+# Env override (portable across devices): GOLDSHARK_DATA_ROOTS="path1;path2"
+_extra = os.getenv("GOLDSHARK_DATA_ROOTS", "")
+if _extra:
+    ROOTS = [p.strip() for p in _extra.split(";") if p.strip()] + ROOTS
 EXCLUDE = ("venv", "site-packages", "node_modules")
 
 

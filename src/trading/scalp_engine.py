@@ -1373,6 +1373,7 @@ class ScalpEngine:
         used by the momentum-exhaustion exit (#29). Cached per cycle so managing
         several positions doesn't recompute. Returns {} on any failure.
         """
+        cache = getattr(self, "_live_ind_cache", None)
         if cache is None:
             cache = {}
             self._live_ind_cache = cache
@@ -1509,6 +1510,19 @@ class ScalpEngine:
                     continue
                 cfg = self._current_symbol_config(base)
                 decision = self.checkpointer.evaluate(base, cfg, exp, n)
+                # LEDGER: retain the adjustment + its expectancy proof, per symbol,
+                # append-only (audit trail + ML training substrate). Never overwrites.
+                try:
+                    if self.experience_db is not None and decision.get("action") in ("revert", "keep_best", "new_best"):
+                        best = decision.get("best_config") or {}
+                        self.experience_db.record_adjustment(
+                            symbol=base, param="config_checkpoint",
+                            old_value=None, new_value=None,
+                            exp_before=exp, exp_after=decision.get("best_expectancy"),
+                            n_samples=n, source=f"checkpointer:{decision.get('action')}",
+                            adopted=(decision.get("action") != "revert"))
+                except Exception:
+                    pass
                 if decision.get("action") == "revert":
                     self._apply_reverted_config(base, decision.get("best_config") or {})
             except Exception as e:

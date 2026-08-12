@@ -83,11 +83,15 @@ def _to_float(v) -> Optional[float]:
 
 
 def _norm_action(direction: str) -> Optional[str]:
-    """GoldShark LONG/SHORT (or 0/1/-1) -> engine buy/sell."""
+    """GoldShark LONG/SHORT (or 0/1/-1, or LIVE_LONG/SIM_SHORT etc.) -> buy/sell."""
     d = str(direction).strip().upper()
-    if d in ("LONG", "BUY", "1"):
+    # strip execution-context prefixes used in the unified trade log (LIVE_/SIM_/etc.)
+    for pre in ("LIVE_", "SIM_", "DEMO_", "REAL_", "PAPER_", "BACKTEST_"):
+        if d.startswith(pre):
+            d = d[len(pre):]
+    if "LONG" in d or d in ("BUY", "1"):
         return "buy"
-    if d in ("SHORT", "SELL", "-1"):
+    if "SHORT" in d or d in ("SELL", "-1"):
         return "sell"
     return None
 
