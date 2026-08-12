@@ -19,13 +19,24 @@ of 455 deposits ≥$1M, 0 reached selling_confirmed).
    expected direction (deposit→down, withdrawal→up).
 4. Aggregate by size bucket to test the size→predictiveness claim.
 
-## Result (2026-08-01, 65 events ≥ $1M, 15-min window)
+## Result — SINGLE date (2026-08-01, 65 events, 15-min window) — SUPERSEDED
+| Size bucket | n | moved right | avg net bps |
+|---|---|---|---|
+| ≥$6M | 9 | 78% | +3 |
+
+## Result — MULTI-DATE (2026-08-12, 573 events, 5 July/Aug days, 15-min window)
+> The honest larger-sample re-run. The 78% above was small-sample (n=9, 1 date).
 | Size bucket | n | avg large 1m candles | moved right | avg net bps |
 |---|---|---|---|---|
-| $1–3M | 30 | 3.7 | 63% | ~0 |
-| $3–6M | 26 | 3.7 | 50% | −1 |
-| **≥$6M** | **9** | **3.9** | **78%** | **+3** |
-| Overall | 65 | 3.7 | 60% | — |
+| $1–3M | 281 | 2.3 | 51% | +2 |
+| $3–6M | 158 | 2.3 | 47% | +1 |
+| **≥$6M** | **134** | **2.5** | **60%** | **+6** |
+| Overall | 573 | 2.3 | 52% | — |
+
+**Confirmed:** the ≥$6M size effect is REAL and repeats (60% directional + best
+net bps) but is **~60%, not 78%** — below $6M is coin-flip. Danny's LIVE capture
+began July 2026; Jan–Jun whale_events are on-chain BACKFILL (no matching feature/
+orderbook data) so ML training uses the July+ overlap window only.
 
 ## Findings
 1. **The correlation is REAL and SIZE-DEPENDENT.** ≥$6M whale orders move BTC in the
