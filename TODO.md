@@ -120,3 +120,46 @@ Fully wired, integrated, automated, and tested (162 passing). How it works:
 Next (data-gated): once each symbol accumulates >= ML_AUTHORITY_MIN_SAMPLES real
 trades + >= ML_AUTHORITY_MIN_BACKTESTS ledger entries, authoritative patterns will
 appear and can feed the confluence/optimiser as a trusted per-symbol source.
+
+## CryptoRTI Whale->Signal ML (ROADMAP, owner-requested 2026-08-12)
+
+GOAL: stop analysing ALL of Danny's L2 orderbook S3 data live (slow + costly).
+Instead: SAMPLE his history offline to LEARN the pattern, then trade LIVE purely
+off the CryptoRTI SIGNAL (the "order coming in X mins" push) + our own MT5 candles.
+Confirmed anecdote: a ~$6M L2 transaction drew ~6x 1m BTCUSD candles shortly after
+(direct correlation) but we had no ML to generalise it.
+
+LOW-LEVEL DESIGN (how, not just what):
+
+1. OFFLINE LABELLING (batch, S3 sampled — NOT live):
+   - src/cryptorti/s3_client.py already reads the bucket. Add a sampler that pulls
+     a bounded window (e.g. July 2026) of L2 whale events, NOT the whole bucket.
+   - For each whale event {ts, usd_size, side, exchange}, pull MT5 BTCUSD M1 candles
+     for T minutes after (get_rates). Label = realised move (MFE/MAE, direction hit,
+     #candles to peak). This is the {whale_event -> candle_outcome} training set.
+   - Store rows in a new table `whale_training` (append-only), tagged S3_SAMPLE.
+
+2. XGBoost MODEL (reuse ml_pattern_engine pattern):
+   - Features: usd_size (bucketed), side, exchange, time-of-day, recent BTC ATR/vol,
+     + the CryptoRTI SIGNAL fields when present (confidence, lead-time).
+   - Target: did price move in signalled direction >= X within the window? (class)
+     and magnitude (reg). Per-symbol=BTCUSD. OOS split by TIME (no leakage).
+   - Feeds the SAME authority gate: model only becomes AUTHORITATIVE once it proves
+     >= ML_AUTHORITY_MIN_SAMPLES whale events + OOS score bar. Until then, ignored.
+
+3. LIVE PATH (cheap, signal-only):
+   - The live engine already listens for CryptoRTI signals (signal_client). When a
+     signal arrives, it does NOT re-scan S3 — it asks the AUTHORITATIVE model:
+     "given this signal (size/side/exchange/lead) + current BTC vol, expected edge?"
+     -> a confidence that gates/sizes a BTCUSD entry via the existing CryptoRTI strategy.
+   - Danny runs his own ML on S3; we consume his SIGNAL + our learned model, so we
+     stay fast/cheap and never depend on live S3 scanning at decision time.
+
+4. FEEDBACK LOOP: every live signal + realised BTC outcome is appended to
+   whale_training (like rejected_signals), so the model retrains nightly and
+   improves — the authority gate re-promotes only if the growing sample still proves.
+
+STATUS: design only. Prereqs done: ML engine + authority gate + ledger exist and
+are reusable. Next build order: (1) S3 sampler + whale_training table + labeller,
+(2) whale XGBoost into ml_pattern_engine (or a sibling), (3) wire authoritative
+model into the live CryptoRTI strategy confidence, (4) tests + nightly retrain.
