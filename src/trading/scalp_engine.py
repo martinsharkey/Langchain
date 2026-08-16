@@ -1170,7 +1170,16 @@ class ScalpEngine:
                 1 for p in self.open_positions.values() if p.base_symbol == base
             )
             if open_for_symbol >= config.SCALP_MAX_OPEN_PER_SYMBOL:
-                continue
+                # Normally one position per symbol. EXCEPTION: when pyramiding is on,
+                # let it through to the pyramid gate in _evaluate_and_trade so a
+                # basket can ADD legs (that gate enforces all-legs-green + newest at
+                # BE + step trigger + HTF align before actually adding). Without this
+                # the basket can never grow past leg 1.
+                if not getattr(config, "GROWTH_ENABLED", False):
+                    continue
+                _cap = getattr(config, "GROWTH_PYRAMID_MAX", 0) or 0
+                if _cap > 0 and open_for_symbol >= _cap:
+                    continue
             self._evaluate_and_trade(base, adapter)
 
     def _variant_weights_for(self, base_symbol: str) -> dict:
@@ -3059,17 +3068,13 @@ class ScalpEngine:
                 newest = max(_same_dir, key=lambda p: getattr(p, "opened_at", 0) or 0)
                 newest_profit = _profit_pts(newest)
 
-                # CUMULATIVE-DOUBLING add rule (owner spec 2026-08-16): the next leg
-                # is added when AGGREGATE basket profit reaches base * 2^(n-1), where
-                # n = current leg count. Base = PYRAMID_BASE_TRIGGER_PTS (e.g. 400).
-                # -> leg2 at 400, leg3 at 800, leg4 at 1600, leg5 at 3200 ...
-                base_trig = float(getattr(config, "PYRAMID_BASE_TRIGGER_PTS", 400.0))
-                n_legs = len(_same_dir)
-                need = base_trig * (2 ** (n_legs - 1))
-                agg_profit = sum(_profit_pts(p) for p in _same_dir)
-                # newest leg must be at break-even before we stack another on top
+                # PER-LEG +400pt add rule (owner spec 2026-08-16): add the next leg
+                # when the MOST RECENT leg has locked break-even AND is >= this many
+                # points in profit ON ITS OWN. Fixed step -> ~one new leg per 400pt
+                # of continued movement (leg2 when leg1 +400, leg3 when leg2 +400 ...).
+                step_trig = float(getattr(config, "PYRAMID_BASE_TRIGGER_PTS", 400.0))
                 gates_ok = (all_profit and _at_breakeven(newest)
-                            and agg_profit >= need)
+                            and newest_profit >= step_trig)
 
                 # multi-timeframe alignment must still confirm the SAME direction
                 htf_ok = True
@@ -3086,8 +3091,8 @@ class ScalpEngine:
             if gates_ok and htf_ok:
                 _is_pyramid = True   # allow this leg; skip the same-level guard
                 logger.info(f"[PYRAMID] {base}: adding leg #{len(_same_dir)+1} "
-                            f"(agg +{agg_profit:.0f}pts >= {need:.0f} doubling trigger, "
-                            f"BE ok, HTF aligned)")
+                            f"(newest leg +{newest_profit:.0f}pts >= {step_trig:.0f}, "
+                            f"BE locked, HTF aligned)")
             else:
                 return   # basket conditions not met -> do not add a leg
 
