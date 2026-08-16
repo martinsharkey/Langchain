@@ -250,6 +250,11 @@ MTF_COUNTERTREND_MIN_CONF = float(os.getenv("MTF_COUNTERTREND_MIN_CONF", "0.7"))
 # counter-trend (quality modifier instead of a hard block). A strong signal can
 # still clear SCALP_CONFIDENCE_MIN after the penalty; a weak one is filtered out.
 MTF_COUNTERTREND_PENALTY = float(os.getenv("MTF_COUNTERTREND_PENALTY", "0.12"))
+# HARD BLOCK counter-trend entries (2026-08-16): evidence showed BTCUSD losing on
+# "WEAK counter-trend" scalps that entered against the HTF trend (mfe=0, straight
+# to loss) — a soft 0.12 penalty still cleared the 0.45 confidence bar. When true,
+# a signal opposed by higher timeframes is SKIPPED entirely (no weak POC trade).
+MTF_COUNTERTREND_HARD_BLOCK = os.getenv("MTF_COUNTERTREND_HARD_BLOCK", "true").lower() in ("true", "1", "yes")
 # Directional-balance guard (#3): the bot showed a persistent LONG bias (buy
 # trades ~4x sell volume and far more loss). When enabled, if a symbol's recent
 # realised win rate for the PROPOSED direction is materially worse than the

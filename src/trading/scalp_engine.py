@@ -2904,6 +2904,12 @@ class ScalpEngine:
         if config.MTF_ALIGNMENT_ENABLED:
             aligned, detail, oppose = self._mtf_aligned(adapter, signal.action)
             if not aligned:
+                # HARD BLOCK (2026-08-16): counter-trend scalps against the HTF trend
+                # were the BTCUSD losers (entered wrong, mfe=0). Skip entirely.
+                if getattr(config, "MTF_COUNTERTREND_HARD_BLOCK", False):
+                    logger.info(f"{base}: counter-trend {signal.action} BLOCKED "
+                                f"(HTF opposes: {detail})")
+                    return
                 penalty = eff_ct_penalty * max(oppose, 1)
                 before = signal.confidence
                 signal.confidence = max(0.0, signal.confidence - penalty)
