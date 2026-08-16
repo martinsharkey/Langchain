@@ -1103,6 +1103,36 @@ class ScalpEngine:
         # 3) per symbol: evaluate in priority order.
         self._scan_entries()
 
+        # 4) periodic LEARNING BACKUP (crash/portability safety). Time-gated and
+        #    only when RAM is healthy so it never contributes to a freeze. Lite
+        #    snapshot (core learning) to LEARNING_BACKUP_DIR (e.g. Google Drive).
+        self._maybe_backup_learning()
+
+    def _maybe_backup_learning(self):
+        if not getattr(config, "LEARNING_BACKUP_ENABLED", False):
+            return
+        every_h = float(getattr(config, "LEARNING_BACKUP_EVERY_HOURS", 0) or 0)
+        if every_h <= 0:
+            return
+        import time as _t
+        now = _t.time()
+        last = getattr(self, "_last_backup_ts", 0.0)
+        if now - last < every_h * 3600:
+            return
+        # don't back up when memory is tight (zip of DBs uses RAM)
+        if getattr(self, "_free_ram", 1e9) < config.SCALP_MIN_FREE_RAM_MB:
+            return
+        self._last_backup_ts = now
+        try:
+            from tools.backup_learning import run_auto_backup
+            path = run_auto_backup(config.LEARNING_BACKUP_DIR,
+                                   keep=getattr(config, "LEARNING_BACKUP_KEEP", 8),
+                                   lite=True, include_secrets=False)
+            if path:
+                logger.info(f"[BACKUP] learning snapshot -> {path}")
+        except Exception as e:
+            logger.debug(f"learning backup skip: {e}")
+
     def _scan_entries(self):
         """Evaluate entries for every eligible symbol in priority order.
         Extracted so it can run BOTH on the full cycle AND on the fast tick

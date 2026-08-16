@@ -227,6 +227,17 @@ SCALP_ENTRY_TICK_SECONDS = int(os.getenv("SCALP_ENTRY_TICK_SECONDS", "3"))
 SCALP_MIN_FREE_RAM_MB = int(os.getenv("SCALP_MIN_FREE_RAM_MB", "500"))
 SCALP_CRITICAL_FREE_RAM_MB = int(os.getenv("SCALP_CRITICAL_FREE_RAM_MB", "250"))
 
+# ─── Automatic learning backup (crash/portability safety) ───────────────────
+# Periodically snapshot learning (DBs + ChromaDB + models + state) to a ZIP so a
+# crash/freeze can never lose accumulated learning, and it's portable to another
+# machine. Lite = core learning only (fast, small). Set dir to a synced location
+# (e.g. Google Drive) to get off-box copies automatically. 0 hours = disabled.
+LEARNING_BACKUP_ENABLED = os.getenv("LEARNING_BACKUP_ENABLED", "true").lower() in ("true", "1", "yes")
+LEARNING_BACKUP_EVERY_HOURS = float(os.getenv("LEARNING_BACKUP_EVERY_HOURS", "6"))
+LEARNING_BACKUP_DIR = os.getenv("LEARNING_BACKUP_DIR", os.path.join(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data", "backups"))
+LEARNING_BACKUP_KEEP = int(os.getenv("LEARNING_BACKUP_KEEP", "8"))  # rotate: keep newest N
+
 # ─── Multi-Timeframe Alignment ──────────────────────────────────────
 # Before a fast (1m) entry, require that higher timeframes don't clearly oppose
 # the trade direction. Keeps scalps aligned with the broader trend.
