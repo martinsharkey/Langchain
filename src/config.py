@@ -311,6 +311,11 @@ GROWTH_DAILY_LOSS_HALT_PCT = float(os.getenv("GROWTH_DAILY_LOSS_HALT_PCT", "30.0
 PYRAMID_LEG1_TRIGGER_ATR = float(os.getenv("PYRAMID_LEG1_TRIGGER_ATR", "1.0"))
 # Each subsequent leg: newest leg must be >= this many ATR in profit (and at BE):
 PYRAMID_ADD_ATR = float(os.getenv("PYRAMID_ADD_ATR", "1.0"))
+# CUMULATIVE-DOUBLING add trigger (owner spec 2026-08-16). The next leg is added
+# when AGGREGATE basket profit (pts) reaches PYRAMID_BASE_TRIGGER_PTS * 2^(n-1),
+# n = current leg count: leg2 @400, leg3 @800, leg4 @1600, leg5 @3200 ...
+# (Supersedes the flat PYRAMID_ADD_ATR trigger in the live gate for this rule.)
+PYRAMID_BASE_TRIGGER_PTS = float(os.getenv("PYRAMID_BASE_TRIGGER_PTS", "400.0"))
 # Aggregate basket drawdown-from-peak ceiling (fraction). If the basket gives back
 # more than this of its peak aggregate profit, the deterministic layer cuts ALL legs.
 # 0 = disabled until the optimiser proves a value.

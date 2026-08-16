@@ -3,6 +3,7 @@
 > Auto-generated digest of what the self-learning loop changed and why.
 > Most-recent-first. Reporting only — never gates a live decision (#45.1).
 
+- **2026-08-16 16:25** [REVERT] `BTCUSD` reverted to best-known config -- why: live expectancy degraded vs best-known -- metric: restored sl_atr 0.8 tp_rr 2.0
 - **2026-08-16 11:28** [EXIT-LOCK] `BTCUSD` exit set sl_atr 1.82 tp_rr 1.2 -- why: robust -- metric: recent expectancy -0.1317 (n=30)
 - **2026-08-16 11:08** [EXIT-LOCK] `BTCUSD` exit set sl_atr 1.64 tp_rr 1.2 -- why: excursion -- metric: recent expectancy -0.1317 (n=30)
 - **2026-08-15 15:22** [EXIT-LOCK] `BTCUSD` exit set sl_atr 1.67 tp_rr 1.2 -- why: excursion -- metric: recent expectancy -0.1563 (n=30)

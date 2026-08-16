@@ -3045,9 +3045,6 @@ class ScalpEngine:
                 tick = adapter.live_tick()
                 px = tick.bid if signal.action == "buy" else tick.ask
                 pt = adapter.spec.point or 1
-                atr_pts = float(indicators.get("atr", 0) or 0) / pt if pt else 0
-                leg1_trig = float(getattr(config, "PYRAMID_LEG1_TRIGGER_ATR", 1.0)) * atr_pts
-                add_trig = float(getattr(config, "PYRAMID_ADD_ATR", 1.0)) * atr_pts
 
                 def _profit_pts(p):
                     d = (px - p.entry_price) if signal.action == "buy" else (p.entry_price - px)
@@ -3059,13 +3056,20 @@ class ScalpEngine:
 
                 # EVERY existing leg must be in profit (never pyramid into a loser)
                 all_profit = all(_profit_pts(p) > 0 for p in _same_dir)
-                # the MOST RECENT leg gates the next add: at breakeven + enough profit
                 newest = max(_same_dir, key=lambda p: getattr(p, "opened_at", 0) or 0)
                 newest_profit = _profit_pts(newest)
-                # leg-1 (basket start) needs the bigger trigger; later legs use add_trig
-                need = leg1_trig if len(_same_dir) == 1 else add_trig
+
+                # CUMULATIVE-DOUBLING add rule (owner spec 2026-08-16): the next leg
+                # is added when AGGREGATE basket profit reaches base * 2^(n-1), where
+                # n = current leg count. Base = PYRAMID_BASE_TRIGGER_PTS (e.g. 400).
+                # -> leg2 at 400, leg3 at 800, leg4 at 1600, leg5 at 3200 ...
+                base_trig = float(getattr(config, "PYRAMID_BASE_TRIGGER_PTS", 400.0))
+                n_legs = len(_same_dir)
+                need = base_trig * (2 ** (n_legs - 1))
+                agg_profit = sum(_profit_pts(p) for p in _same_dir)
+                # newest leg must be at break-even before we stack another on top
                 gates_ok = (all_profit and _at_breakeven(newest)
-                            and newest_profit >= max(need, 1.0))
+                            and agg_profit >= need)
 
                 # multi-timeframe alignment must still confirm the SAME direction
                 htf_ok = True
@@ -3082,7 +3086,8 @@ class ScalpEngine:
             if gates_ok and htf_ok:
                 _is_pyramid = True   # allow this leg; skip the same-level guard
                 logger.info(f"[PYRAMID] {base}: adding leg #{len(_same_dir)+1} "
-                            f"(newest +{newest_profit:.0f}pts, BE ok, HTF aligned)")
+                            f"(agg +{agg_profit:.0f}pts >= {need:.0f} doubling trigger, "
+                            f"BE ok, HTF aligned)")
             else:
                 return   # basket conditions not met -> do not add a leg
 
