@@ -250,6 +250,13 @@ LEARNING_ADAPTATION_ENABLED = os.getenv("LEARNING_ADAPTATION_ENABLED", "true").l
 #    feed the learners, so learning always favours recent behaviour. 0 = no window.
 LEARNING_REGIME_BREAK = os.getenv("LEARNING_REGIME_BREAK", "2026-08-04T08:00:00")
 LEARNING_WINDOW_DAYS = int(os.getenv("LEARNING_WINDOW_DAYS", "5"))
+# SAMPLE-COUNT-AWARE recency: the fixed LEARNING_WINDOW_DAYS cap is only applied when
+# it still yields at least this many clean trades. If recent data is thinner than this
+# (e.g. after an outage or during slow cadence), the recency cap is dropped and the
+# learners use the full clean history (regime-break + sim-exclusion still enforced).
+# This fixes the starvation where a 5-day window + downtime left the loops with ~2
+# samples while thousands of clean trades sat unused. 0 = disable (old fixed-window).
+LEARNING_MIN_SAMPLE = int(os.getenv("LEARNING_MIN_SAMPLE", "150"))
 # Restrict learning to the sole entry strategy (OsMA_Confluence) after cutover so the
 # retired ensemble era never trains the bot. NULL strategy rows inside the window are
 # kept (pre-attribution). Set false to learn across all strategies.

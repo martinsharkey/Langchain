@@ -2357,6 +2357,28 @@ class ScalpEngine:
                     break
         except Exception:
             pass
+        # STARVATION RELAX CAP (safety loosening, exempt from the evidence gate): when a
+        # symbol's live fire-rate collapses, entry_strength_learner.relax_for_starvation()
+        # lowers its dom_min/runway_min CAP so entries can resume. That cap lives in the
+        # learner but the live floors here can come straight from tuned_params.json (e.g. a
+        # reverted config), so without this clamp the relaxed cap never reaches the live
+        # gate and the symbol stays frozen (observed: BTCUSD blocked 465x by runway<2.0
+        # while the cap was being lowered to 0). Clamp the LIVE floors to the cap here so
+        # "learning to keep trading" actually loosens the signal. Loosening only.
+        try:
+            learner = getattr(self, "entry_strength_learner", None)
+            cap = None
+            if learner is not None:
+                key = resolved_symbol.upper().split("-")[0]
+                cap = (getattr(learner, "_relax_cap", {}) or {}).get(key)
+            if cap:
+                for gk in ("dom_min", "runway_min"):
+                    if gk in cap and gk in params:
+                        params[gk] = min(params[gk], cap[gk])
+                        if params[gk] <= 0:
+                            params.pop(gk, None)
+        except Exception:
+            pass
         return params
 
     def _maybe_run_adaptive(self):

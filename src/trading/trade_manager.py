@@ -285,11 +285,20 @@ class TradeManager:
         # Common capital-preservation: if price violently reverses past a hard
         # threshold beyond entry against us, exit (applies to all variants).
         adverse_points = -profit_points
-        # capital-preservation threshold: prefer ATR-scaled, but FALL BACK to a spread/point
-        # floor when atr_points is missing (0/None) so this software failsafe is UNCONDITIONAL
-        # (the broker SL still protects regardless, but never leave the in-code guard off).
-        _viol_thresh = (max(st.atr_points * 1.5, 2 * spread_points + 50) if st.atr_points
-                        else (2 * spread_points + 50))
+        # capital-preservation threshold: this is a CATASTROPHE failsafe, NOT the stop.
+        # It must sit BEYOND the intended (evidence-derived) broker SL so it never cuts a
+        # trade earlier than the stop that survives normal adverse excursion — otherwise it
+        # re-introduces the "cut losers early / stopped-then-recovered" leak (observed:
+        # 1.5*ATR ~=3492pts fired before the 2695pt/5405pt broker SL). Prefer the actual SL
+        # distance (+ a buffer past it, for the gap-through case); fall back to a WIDE
+        # ATR/spread floor only when no SL is set. The broker SL protects regardless.
+        _sl_dist = (abs(st.entry - st.sl) / point) if (getattr(st, "sl", 0) and point) else 0.0
+        if _sl_dist > 0:
+            _viol_thresh = _sl_dist * 1.25   # only a TRUE overshoot past the stop trips this
+        elif st.atr_points:
+            _viol_thresh = max(st.atr_points * 3.0, 2 * spread_points + 50)
+        else:
+            _viol_thresh = 2 * spread_points + 50
         violent = adverse_points > _viol_thresh
         if violent:
             self._log(st, "capital_preservation_exit", price)

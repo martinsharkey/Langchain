@@ -171,13 +171,58 @@ class ExperienceDatabase:
             from src import config
             brk = getattr(config, "LEARNING_REGIME_BREAK", "") or ""
             win = int(getattr(config, "LEARNING_WINDOW_DAYS", 0) or 0)
+            min_sample = int(getattr(config, "LEARNING_MIN_SAMPLE", 0) or 0)
             osma_flag = getattr(config, "LEARNING_OSMA_ONLY", True) and osma_only
         except Exception:
-            brk, win, osma_flag = "", 0, osma_only
+            brk, win, min_sample, osma_flag = "", 0, 0, osma_only
         if brk:
             frag += f" AND datetime({col}) > datetime(?)"; params.append(brk)
+        # RECENCY WINDOW — but SAMPLE-COUNT-AWARE (fix: a fixed 'last N days' window
+        # starves the learners after any outage/slow cadence; e.g. a 7.5-day downtime
+        # left the loops with ~2 samples while thousands of clean trades sat unused).
+        # Only apply the recency cap if it still yields >= LEARNING_MIN_SAMPLE clean
+        # trades; otherwise drop the recency cap and let the regime-break + source
+        # filters define the clean set (so the full clean history is learnable). The
+        # regime-break and sim-exclusion (R4) always still apply — this only relaxes
+        # the *recency* preference when recent data is too thin to learn from.
         if win > 0:
-            frag += f" AND datetime({col}) > datetime('now', ?)"; params.append(f"-{win} days")
+            apply_recency = True
+            if min_sample > 0:
+                # SAMPLE-AWARE probe: cache the yes/no for a short TTL so this hot helper
+                # (called by checkpointer/entry-quality/edge/graduation/post-mortem each
+                # cycle) doesn't open a fresh connection + COUNT on every call.
+                import time as _t
+                ck = (alias, bool(exclude_sim_ohlc), bool(osma_flag), win, min_sample, brk)
+                cache = getattr(self, "_lw_probe_cache", None)
+                if cache is None:
+                    cache = self._lw_probe_cache = {}
+                hit = cache.get(ck)
+                if hit is not None and (_t.time() - hit[1]) < 60:
+                    apply_recency = hit[0]
+                else:
+                    try:
+                        probe_frag = frag + f" AND datetime({col}) > datetime('now', ?)"
+                        probe_params = list(params) + [f"-{win} days"]
+                        # mirror the source/strategy filters for an accurate count
+                        src_frag = ""
+                        if exclude_sim_ohlc:
+                            cds = f"{alias}data_source"
+                            src_frag += (f" AND ({cds} IS NULL OR ({cds} NOT LIKE '%SIMULATED%' "
+                                         f"AND {cds} NOT LIKE 'DUKASCOPY%'))")
+                        if osma_flag:
+                            src_frag += (f" AND ({alias}strategy_used='OsMA_Confluence' "
+                                         f"OR {alias}strategy_used IS NULL)")
+                        conn = sqlite3.connect(self.db_path)
+                        n = conn.execute(
+                            "SELECT COUNT(*) FROM trades WHERE outcome IN ('win','loss','breakeven')"
+                            + probe_frag + src_frag, probe_params).fetchone()[0]
+                        conn.close()
+                        apply_recency = n >= min_sample
+                        cache[ck] = (apply_recency, _t.time())
+                    except Exception:
+                        apply_recency = True
+            if apply_recency:
+                frag += f" AND datetime({col}) > datetime('now', ?)"; params.append(f"-{win} days")
         if exclude_sim_ohlc:
             # Exclude EVERY simulated/synthetic/backtest source, not just SIMULATED_OHLC.
             # SIMULATED_REAL_TICKS blowups (e.g. a 421-trade -£9220 batch) were poisoning
