@@ -71,10 +71,8 @@ class ReversalSignatureAnalyzer:
         if self._srv_offset is not None:
             return self._srv_offset
         try:
-            import MetaTrader5 as mt5, datetime as _dt
-            t = mt5.symbol_info_tick("XAUUSD-ECN") or mt5.symbol_info_tick("EURUSD-ECN")
-            self._srv_offset = ((_dt.datetime.fromtimestamp(t.time) - _dt.datetime.now()).total_seconds()
-                                if t else 0.0)
+            from src.mt5.broker_time import broker_offset_seconds
+            self._srv_offset = broker_offset_seconds()
         except Exception:
             self._srv_offset = 0.0
         return self._srv_offset

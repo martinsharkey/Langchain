@@ -47,22 +47,24 @@ from src import config
 logger = logging.getLogger("cryptorti.whale_rag")
 
 class _SafeEmbeddingFunction:
-    """Fallback embedding function that avoids torch/sentence-transformers."""
+    """Fallback embedding function that avoids torch/sentence-transformers.
+
+    Canonical hash-embed math lives in src.learning.chroma_client.SafeEmbeddingFunction.
+    This thin subclass preserves the existing collection embedder name
+    ('safe_hash_embedder_dim4') so the persisted whale_wave_patterns collection stays
+    compatible."""
 
     def __init__(self, dim: int = 4):
+        from src.learning.chroma_client import SafeEmbeddingFunction
+        self._impl = SafeEmbeddingFunction(dim=dim)
         self.dim = dim
 
     def name(self) -> str:
         return "safe_hash_embedder_dim4"
 
-    def __call__(self, input: list[str]) -> list[list[float]]:
-        out: list[list[float]] = []
-        for text in input:
-            h = hashlib.sha256(text.encode("utf-8", errors="replace")).digest()
-            vec = [((h[i % len(h)] / 255.0) * 2.0 - 1.0) for i in range(self.dim)]
-            norm = math.sqrt(sum(v * v for v in vec)) or 1.0
-            out.append([v / norm for v in vec])
-        return out
+    def __call__(self, input: list) -> list:
+        return self._impl(input)
+
 
 _SIZE_ORDINAL = {"<1M": 0.1, "1-2M": 0.3, "2-5M": 0.5, "5-10M": 0.75, "10M+": 1.0}
 

@@ -197,20 +197,48 @@ class TradeManager:
         return max((st.atr_points or 60) * 0.35, 5.0)
 
     def _be_trigger_points(self, st, spread_points, wick) -> float:
-        """Profit (pts) needed before moving to break-even: must clear the symbol's
-        wick noise + spread so we don't BE-out on a normal retrace. Learnable."""
+        """Profit (pts) needed before moving to break-even. Prefers the DATA-DRIVEN
+        per-symbol value discovered by the exit backtest (config), then personality,
+        then a wick+spread fallback."""
+        try:
+            from src import config
+            _bysym = getattr(config, "SCALP_BE_TRIGGER_POINTS_BY_SYMBOL", {}) or {}
+            v = float(_bysym.get((st.base_symbol or "").upper(), 0) or 0)
+            if v > 0:
+                return max(v, spread_points + 5)
+        except Exception:
+            pass
         p = self._personality(st)
         if "be_trigger_pts" in p:
             return max(float(p["be_trigger_pts"]), spread_points + 5)
         return max(spread_points + wick * 1.2, spread_points + 20)
 
+    def _trail_activate_points(self, st, be_trigger) -> float:
+        """Profit (pts) at which the TRAILING stop STARTS moving — distinct from the
+        break-even trigger. Owner spec (gold M1): 250-300 pts so the trade breathes
+        past BE before the trail engages. Falls back to be_trigger if unset."""
+        try:
+            from src import config
+            _bysym = getattr(config, "SCALP_TRAIL_ACTIVATE_POINTS_BY_SYMBOL", {}) or {}
+            v = float(_bysym.get((st.base_symbol or "").upper(), 0) or 0)
+            if v > 0:
+                return v
+        except Exception:
+            pass
+        return be_trigger
+
     def _trail_points(self, st, spread_points, wick) -> float:
-        """RESPONSIVE trail distance (pts): wick-sized breathing room, floored by a
-        volatility-scaled minimum (SCALP_TRAIL_MIN_ATR x ATR) so normal volatility
-        cannot wick the trade out before it recovers — the #1 post-mortem finding
-        ("STOPPED THEN RECOVERED"). Both the wick multiplier and the ATR floor are
-        tunable (personality override -> config), so the optimiser discovers the
-        breathing room that best converts recover-after-stop losers into winners."""
+        """Trailing distance (pts) behind the best price. Prefers the DATA-DRIVEN
+        per-symbol value discovered by the exit backtest (config: e.g. XAU 200pt),
+        then personality/ATR-derived breathing room."""
+        try:
+            from src import config
+            _bysym = getattr(config, "SCALP_TRAIL_POINTS_BY_SYMBOL", {}) or {}
+            v = float(_bysym.get((st.base_symbol or "").upper(), 0) or 0)
+            if v > 0:
+                return max(v, spread_points + 12)
+        except Exception:
+            pass
         p = self._personality(st)
         mult = float(p.get("trail_wick_mult", getattr(config, "SCALP_TRAIL_WICK_MULT", 1.3)))
         min_atr = float(p.get("trail_min_atr", getattr(config, "SCALP_TRAIL_MIN_ATR", 0.5)))
@@ -458,11 +486,19 @@ class TradeManager:
             wick = self._wick_points(st)                      # symbol's typical adverse wick (pts)
             be_trigger = self._be_trigger_points(st, spread_points, wick)
             if not st.moved_to_be and profit_points >= be_trigger:
+                # STEP 1: at the BE trigger (owner spec 150 pts) lock to break-even+.
+                # Do NOT start trailing yet — gold needs room past BE before the trail
+                # engages, or noise wicks it out. Trailing activates separately below.
                 be_plus = st.entry + (spread_points + max(5, wick * 0.25)) * point * (1 if st.action == "buy" else -1)
                 st.moved_to_be = True
-                st.trail_active = True
                 self._log(st, "move_to_be_plus", be_plus)
                 return {"modify_sl": round(be_plus, 6)}
+            # STEP 2: once profit reaches the TRAIL-ACTIVATION threshold (owner spec
+            # 250 pts, separate from BE), start trailing at the trail distance (150).
+            trail_activate = self._trail_activate_points(st, be_trigger)
+            if st.moved_to_be and not st.trail_active and profit_points >= trail_activate:
+                st.trail_active = True
+                self._log(st, "trail_activated", profit_points)
             if st.trail_active:
                 trail_dist = self._trail_points(st, spread_points, wick) * point
                 new_sl = (st.best_price - trail_dist) if st.action == "buy" else (st.best_price + trail_dist)

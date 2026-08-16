@@ -11,6 +11,34 @@ logger = get_logger("chroma")
 _CLIENT = None
 _PROBE_CACHE: Optional[bool] = None
 
+
+class SafeEmbeddingFunction:
+    """Canonical fallback embedding function that avoids torch/sentence-transformers.
+
+    A deterministic SHA-256 hash → normalised vector. This is the SINGLE source of
+    truth for the safe embedder; all knowledge stores (knowledge_store, mql5_knowledge,
+    vector_store, whale_rag, goldshark_knowledge) import it from here so a change to
+    the embedding scheme can never silently diverge across collections. `dim` may
+    differ per store; vectors are only ever compared within one collection.
+    """
+
+    def __init__(self, dim: int = 20):
+        self.dim = dim
+
+    def name(self) -> str:
+        return "safe_hash_embedder"
+
+    def __call__(self, input: list) -> list:
+        import math, hashlib
+        out = []
+        for text in input:
+            h = hashlib.sha256(str(text).encode("utf-8", errors="replace")).digest()
+            vec = [((h[i % len(h)] / 255.0) * 2.0 - 1.0) for i in range(self.dim)]
+            norm = math.sqrt(sum(v * v for v in vec)) or 1.0
+            out.append([v / norm for v in vec])
+        return out
+
+
 # Probe run in a CHILD process: chromadb's native Rust `_add` can segfault on some
 # hosts (observed: chromadb 1.5.9 on this Windows box). A segfault kills the
 # process it runs in, so we test it in a throwaway subprocess — if the child dies,

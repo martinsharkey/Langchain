@@ -67,19 +67,13 @@ class TradePostMortem:
         MT5 stamps bar times in SERVER timezone (often several hours ahead of
         local). Trade timestamps are local. copy_rates_range expects server time,
         so we must shift the window by (server - local) or the bars won't align
-        with the trade. Computed once from a live tick.
-        """
+        with the trade. Delegates to the canonical broker_time helper (single
+        source of truth) so this offset is defined in exactly one place."""
         if getattr(self, "_srv_offset", None) is not None:
             return self._srv_offset
         try:
-            import MetaTrader5 as mt5
-            import datetime as _dt
-            # use any active symbol's tick
-            t = mt5.symbol_info_tick("XAUUSD-ECN") or mt5.symbol_info_tick("EURUSD-ECN")
-            if t:
-                self._srv_offset = (_dt.datetime.fromtimestamp(t.time) - _dt.datetime.now()).total_seconds()
-            else:
-                self._srv_offset = 0.0
+            from src.mt5.broker_time import broker_offset_seconds
+            self._srv_offset = broker_offset_seconds()
         except Exception:
             self._srv_offset = 0.0
         return self._srv_offset

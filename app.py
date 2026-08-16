@@ -20,6 +20,7 @@ The dashboard shows ONLY real data (live MT5 + engine status + learning DBs).
 import os
 import sys
 import time
+import signal
 import threading
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -220,13 +221,74 @@ def main():
 
     console.print("  Press Ctrl+C to stop.\n")
 
+    logger.info("[LIFECYCLE] Bot started and entering main loop (mode=%s, pid=%s)", mode, os.getpid())
+
     try:
         while True:
             time.sleep(1)
     except KeyboardInterrupt:
+        _log_shutdown("KeyboardInterrupt (Ctrl+C / manual stop)")
         console.print("\n  Shutting down…", style="yellow")
         console.print("  Stopped.\n", style="green")
+    except SystemExit as e:
+        _log_shutdown(f"SystemExit (code={getattr(e, 'code', None)})")
+        raise
+    except BaseException as e:  # noqa: BLE001 - we want the reason for ANY exit
+        logger.critical(
+            "[LIFECYCLE] Bot main loop CRASHED: %s: %s",
+            type(e).__name__, e, exc_info=True,
+        )
+        console.print(f"\n  Bot crashed: {type(e).__name__}: {e}\n", style="bold red")
+        raise
+    finally:
+        logger.info("[LIFECYCLE] Bot main loop exited (pid=%s)", os.getpid())
+
+
+# ---------------------------------------------------------------------------
+# Shutdown / lifecycle logging
+# ---------------------------------------------------------------------------
+# Records WHY the process stops so the log can distinguish a manual stop, an
+# OS/terminal kill (SIGTERM/close), or a crash. Prior to this, only Ctrl+C in
+# the bot's own terminal was logged, so silent kills left no trace.
+_shutdown_logged = False
+
+
+def _log_shutdown(reason: str) -> None:
+    global _shutdown_logged
+    if _shutdown_logged:
+        return
+    _shutdown_logged = True
+    logger.warning("[LIFECYCLE] Bot shutting down — reason: %s (pid=%s)", reason, os.getpid())
+
+
+def _signal_handler(signum, _frame):
+    try:
+        name = signal.Signals(signum).name
+    except Exception:
+        name = str(signum)
+    _log_shutdown(f"received signal {name} ({signum}) — external stop/kill")
+    # Re-raise as a normal exit so `finally`/atexit still run.
+    raise SystemExit(0)
+
+
+def _install_lifecycle_handlers() -> None:
+    import atexit
+    atexit.register(lambda: _log_shutdown("process exit (atexit)"))
+    # SIGINT is deliberately left to Python's default (KeyboardInterrupt), which the
+    # main loop already logs. We handle the SILENT-kill signals — SIGTERM (kill /
+    # service stop) and SIGBREAK (Windows console close) — which otherwise leave no
+    # trace. atexit + the main-loop finally cover every remaining exit path.
+    for sig_name in ("SIGTERM", "SIGBREAK"):
+        sig = getattr(signal, sig_name, None)
+        if sig is None:
+            continue
+        try:
+            signal.signal(sig, _signal_handler)
+        except (ValueError, OSError, RuntimeError):
+            # Not all signals are settable on every platform / thread.
+            pass
 
 
 if __name__ == "__main__":
+    _install_lifecycle_handlers()
     main()

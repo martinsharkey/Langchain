@@ -67,6 +67,51 @@ class ContinualResearcher:
         self.robust_tester = robust_tester
         self._robust = {}
 
+    def revalidate_floors(self, base_symbol: str, resolved: str = None, target_wr: float = 70.0) -> dict:
+        """OWNER METHOD (2026-08-13): validate the symbol's alignment floors over a
+        MULTI-WEEK window and, if win rate is below target, AUTO-ESCALATE the floors
+        (longs UP / shorts DOWN — higher indicator strength = higher entry quality)
+        until win rate >= target. Persists the discovered high-quality floors via
+        alignment_floors.propose_rebaseline, which can only RAISE the baseline and can
+        NEVER reverse directional alignment. Same routine the symbol-onboarding process
+        uses. Returns the discovery result."""
+        sym = resolved or base_symbol
+        try:
+            from src.learning.floor_validator import discover_high_quality_floors
+            from src.strategies.alignment_floors import propose_rebaseline, baseline
+        except Exception as e:
+            return {"error": f"unavailable: {e}"}
+        res = discover_high_quality_floors(sym, target_wr=target_wr)
+        if not res.get("found"):
+            logger.info(f"[FLOOR-REVALIDATE] {sym}: no >= {target_wr}% level found "
+                        f"({res.get('error','entries dried up')}); floors unchanged.")
+            return res
+        best = res["best"]; cur = baseline(sym)
+        long_new = {"osma_min": best["osma_min_long"], "bulls_min": best["bulls_min_long"],
+                    "bears_min": best["bears_min_long"]}
+        short_new = {"osma_max": best["osma_max_short"], "bears_max": best["bears_max_short"],
+                     "bulls_max": best["bulls_max_short"]}
+        raised = (long_new["osma_min"] > cur["long"]["osma_min"] or
+                  short_new["osma_max"] < cur["short"]["osma_max"])
+        if raised:
+            propose_rebaseline(sym, "long", long_new, source="floor_revalidate")
+            propose_rebaseline(sym, "short", short_new, source="floor_revalidate")
+            logger.warning(f"[FLOOR-REVALIDATE] {sym}: escalated floors to hold WR>={target_wr}% "
+                           f"-> WR {best['win_rate']}% PF {best['pf']} {best['trades_per_week']}/wk")
+            if self.ks is not None:
+                try:
+                    self.ks.remember(
+                        f"{sym} floors escalated to osma_long={best['osma_min_long']} "
+                        f"bulls_long={best['bulls_min_long']} bears_long={best['bears_min_long']} "
+                        f"-> {best['win_rate']}% WR, {best['trades_per_week']}/wk over {res['weeks']}wks",
+                        kind="decision", topic=f"floor_revalidate_{sym}")
+                except Exception:
+                    pass
+        else:
+            logger.info(f"[FLOOR-REVALIDATE] {sym}: baseline already holds "
+                        f"{best['win_rate']}% (>= {target_wr}%) at {best['trades_per_week']}/wk; no change.")
+        return res
+
     def lock_in_pattern(self, base_symbol: str, resolved: str = None) -> dict:
         """
         #40 CORE: discover the best exit config for the MACD-leads-OsMA pattern on
@@ -334,8 +379,7 @@ class ContinualResearcher:
         # We invoke the LLM to think like the Quantitative Architect
         llm_response_text = ""
         try:
-            from src.core.llm import get_analytical_llm
-            from litellm import completion
+            from src.core.llm import get_analytical_llm, extract_text
             
             # Formulate the prompt enforcing the required domain knowledge
             messages = [
@@ -357,10 +401,12 @@ Constraints & Rules for your response:
             ]
             
             try:
-                # Assuming get_analytical_llm returns a LiteLLM-compatible model string or wrapper
-                model_str = get_analytical_llm()
-                response = completion(model=model_str, messages=messages)
-                llm_response_text = response.choices[0].message.content
+                # Route through the centralized LLM wrapper (provider fallback +
+                # Bedrock/tool-call config live here) instead of calling litellm
+                # directly — a direct completion() bypasses that config.
+                llm = get_analytical_llm()
+                resp = llm.invoke(messages)
+                llm_response_text = extract_text(resp) or ""
             except Exception as e:
                 logger.warning(f"LLM failure during research_symbol: {e}")
                 llm_response_text = ""

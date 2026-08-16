@@ -77,7 +77,11 @@ PARAM_SPACE = {
     "macd_lead_bars":  (1, 12, 1, int),
     # fresh-momentum window: enter within this many bars of the OsMA cross (GoldShark
     # InpMaxMomentumAge). Proven-edge gold ~26; wide range so the optimizer can tune it.
-    "max_momentum_age": (1, 40, 1, int),
+    "max_momentum_age": (1, 3, 1, int),   # OWNER RULE: enter candle 2 only (=1); cap at 2 so the optimizer can NEVER push entries several bars into the cycle
+    # CANDLE-1 anticipation trigger: enter once the OsMA zero-cross is this fraction
+    # formed. OWNER RULE: tunable strictly within [0.50, 0.95]. Bulls/Bears alignment
+    # is still enforced by the directional gate.
+    "osma_anticipate_pct": (0.50, 0.95, 0.01, float),
     # OsMA acceleration magnitude |osma_now - osma_prev| / ATR. GoldShark data shows
     # this is the single strongest predictor found (corr -0.68 with drawdown). ATR-
     # normalized so one range fits all symbols. 0.0 = disabled (legacy behaviour).
@@ -105,7 +109,7 @@ DEFAULTS = {
     "macd_min_long": 0.0, "macd_max_short": 0.0,
     "bulls_min_long": 0.0, "bears_min_long": 0.0,
     "bears_max_short": 0.0, "bulls_max_short": 0.0, "atr_min_rel": 0.0,
-    "rsi_long_max": 72.0, "rsi_short_min": 28.0, "macd_lead_bars": 5, "max_momentum_age": 5,
+    "rsi_long_max": 72.0, "rsi_short_min": 28.0, "macd_lead_bars": 5, "max_momentum_age": 3,
     "accel_min": 0.0, "sl_atr": 2.0, "tp_rr": 1.0,
 }
 
@@ -123,7 +127,7 @@ SYMBOL_BASELINES = {
         "atr_period": 14, "min_ema_slope": 0.2, "atr_min": 1.4, "atr_max": 0.0,
         "osma_min_long": 0.87, "bulls_min_long": 0.3, "bears_min_long": 0.0,
         "osma_max_short": -0.30, "bulls_max_short": 0.0, "bears_max_short": -0.04,
-        "max_momentum_age": 26,
+        "max_momentum_age": 3,
         "rsi_long_max": 100.0, "rsi_short_min": 0.0,
         "sl_atr": 0.8, "tp_rr": 2.0, "min_confluence": 3, "accel_min": 0.1,
     },
@@ -137,7 +141,7 @@ SYMBOL_BASELINES = {
         "atr_period": 14, "min_ema_slope": 0.05, "atr_min": 0.0, "atr_max": 0.0,
         "osma_min_long": 0.1, "bulls_min_long": 1.5, "bears_min_long": 0.0,
         "osma_max_short": -0.1, "bulls_max_short": 0.0, "bears_max_short": -1.5,
-        "max_momentum_age": 26, "rsi_long_max": 100.0, "rsi_short_min": 0.0,
+        "max_momentum_age": 3, "rsi_long_max": 100.0, "rsi_short_min": 0.0,
         "sl_atr": 0.8, "tp_rr": 2.0, "min_confluence": 3, "accel_min": 0.0,
     },
     "GER40": {
@@ -145,7 +149,7 @@ SYMBOL_BASELINES = {
         "atr_period": 14, "min_ema_slope": 0.05, "atr_min": 0.0, "atr_max": 0.0,
         "osma_min_long": 0.2, "bulls_min_long": 1.0, "bears_min_long": 0.0,
         "osma_max_short": -0.2, "bulls_max_short": 0.0, "bears_max_short": -1.0,
-        "max_momentum_age": 26, "rsi_long_max": 100.0, "rsi_short_min": 0.0,
+        "max_momentum_age": 3, "rsi_long_max": 100.0, "rsi_short_min": 0.0,
         "sl_atr": 0.8, "tp_rr": 2.0, "min_confluence": 3, "accel_min": 0.0,
     },
 }
@@ -211,6 +215,18 @@ class ParameterOptimizer:
                        "bulls_max_short", "bears_min_long")
 
     def current_params(self, symbol: str) -> dict:
+        """Live per-symbol params, ALWAYS clamped so directional-alignment floors are
+        never violated (long floors > 0, short floors < 0, never below the per-symbol
+        baseline). This is the single read path all consumers use."""
+        p = self._current_params_raw(symbol)
+        try:
+            from src.strategies.alignment_floors import clamp_floors
+            p = clamp_floors(symbol, p)
+        except Exception:
+            pass
+        return p
+
+    def _current_params_raw(self, symbol: str) -> dict:
         key = self._key(symbol)
         gold = SYMBOL_BASELINES.get("XAUUSD", {})
         is_gold = key.startswith("XAUUSD")

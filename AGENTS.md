@@ -170,3 +170,21 @@ Async Q&A doc synced to S3. Open questions blocking us (label `danny-blocked`):
 - CryptoRTI: `src/cryptorti/{s3_client,correlation_miner,whale_rag,strategy}.py`
 - Config: `src/config.py` · Docs: `README.md`, `CRYPTORTI_WAVE_DESIGN.md`,
   `LEARNING_ARCHITECTURE.md`, `DISTRIBUTED_ARCHITECTURE.md`, `SESSION_LOG.md`
+
+## Canonical docs (2026-08-12 consolidation)
+
+To stop doc sprawl, each topic now has ONE canonical file. Superseded/dated
+duplicates were moved to `docs/archive/` (history preserved). Do not resurrect them.
+
+- Architecture → `ARCHITECTURE_OVERVIEW.md` (archived: `ARCHITECTURE.md`, `plans/architecture-plan.md`)
+- Learning → `LEARNING_ARCHITECTURE.md` (archived: `ADAPTIVE_INTELLIGENCE.md`)
+- Validation/baselines → `TESTING.md` + `BASELINE.md` (archived: `BACKTEST_STRATEGY.md`)
+- Strategy/indicators → `CONFLUENCE_STRATEGY.md` + `INDICATOR_SCHEMA.md`
+- Symbol onboarding & floor auto-tuning → `SYMBOL_ONBOARDING.md` (proven per-symbol
+  floors, wide-SL+BE+trail exit, multi-week validation + auto-escalate to >=70% WR;
+  code: `src/learning/floor_validator.py`, `tools/onboard_symbol.py`,
+  researcher `revalidate_floors`)
+- Whale/CryptoRTI → `WHALE_ANALYSIS_AND_TRADING.md` + `CRYPTORTI_INTEGRATION.md`
+- Dated one-offs archived: `CODE_REVIEW_2026-07-30.md`, `REPAIR_PLAN.md`
+- Code note: the safe hash embedder is defined ONCE in
+  `src/learning/chroma_client.py::SafeEmbeddingFunction`; all knowledge stores import it.

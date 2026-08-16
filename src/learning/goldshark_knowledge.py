@@ -13,22 +13,11 @@ from src.learning.chroma_client import get_shared_chroma_client
 logger = logging.getLogger("goldshark_knowledge")
 
 class _SafeEmbeddingFunction:
-    """Fallback embedding function that avoids torch/c10.dll native crashes on Windows."""
-    def __init__(self, dim: int = 20):
-        self.dim = dim
+    """Fallback embedder — canonical impl in src.learning.chroma_client.SafeEmbeddingFunction."""
+    def __new__(cls, dim: int = 20):
+        from src.learning.chroma_client import SafeEmbeddingFunction
+        return SafeEmbeddingFunction(dim=dim)
 
-    def name(self) -> str:
-        return "safe_hash_embedder"
-
-    def __call__(self, input: list[str]) -> list[list[float]]:
-        import math, hashlib
-        out: list[list[float]] = []
-        for text in input:
-            h = hashlib.sha256(text.encode("utf-8", errors="replace")).digest()
-            vec = [((h[i % len(h)] / 255.0) * 2.0 - 1.0) for i in range(self.dim)]
-            norm = math.sqrt(sum(v * v for v in vec)) or 1.0
-            out.append([v / norm for v in vec])
-        return out
 
 class GoldSharkKnowledge:
     """

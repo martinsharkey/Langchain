@@ -123,6 +123,18 @@ SCALP_MODE = os.getenv("SCALP_MODE", "true").lower() in ("true", "1", "yes")
 SCALP_LOT = float(os.getenv("SCALP_LOT", "0.01"))
 SCALP_TP_POINTS = int(os.getenv("SCALP_TP_POINTS", "400"))   # take-profit distance in points
 SCALP_SL_POINTS = int(os.getenv("SCALP_SL_POINTS", "300"))   # stop-loss floor (points) when ATR unavailable
+# ── WIDE broker-side SL floor (owner design): give the trade room to breathe so it
+# isn't wicked out on entry. Per-symbol minimum SL distance in POINTS. Gold wants
+# 300-500 pts; BTC is far more volatile so it also falls back to sl_atr*ATR when
+# that is wider. NO fixed TP is used — exits are trailing-stop + break-even + reversal.
+SCALP_SL_MIN_POINTS = int(os.getenv("SCALP_SL_MIN_POINTS", "0"))   # global default (0 = ATR-only)
+SCALP_SL_MIN_POINTS_BY_SYMBOL = {
+    "XAUUSD": int(os.getenv("SCALP_SL_MIN_POINTS_XAUUSD", "500")),      # discovered: SL 500 -> 83.7% WR PF1.37
+    "XAUUSD-ECN": int(os.getenv("SCALP_SL_MIN_POINTS_XAUUSD", "500")),
+    "BTCUSD": int(os.getenv("SCALP_SL_MIN_POINTS_BTCUSD", "62000")),   # honest validated: 78% WR PF1.09
+    "GER40": int(os.getenv("SCALP_SL_MIN_POINTS_GER40", "23785")),     # onboarded 2026-08-13: 76% WR PF1.08
+    "GER40.": int(os.getenv("SCALP_SL_MIN_POINTS_GER40", "23785")),
+}
 # Backtest-tuned exit system (focused pockets, WITH manager, out-of-sample):
 # SL = 1.0*ATR, RR = 2.0, giveback = 0.55  ->  PF 1.35 @ 50% WR. These three
 # were tuned TOGETHER because the manager's giveback and the TP interact.
@@ -148,6 +160,36 @@ SCALP_RETAIN_ARM_ATR = float(os.getenv("SCALP_RETAIN_ARM_ATR", "0.35"))
 SCALP_TRAIL_MIN_ATR = float(os.getenv("SCALP_TRAIL_MIN_ATR", "0.5"))
 # Multiplier applied to the symbol's typical wick when trailing (breathing room).
 SCALP_TRAIL_WICK_MULT = float(os.getenv("SCALP_TRAIL_WICK_MULT", "1.3"))
+# ── EXPLICIT per-symbol exit geometry (owner spec 2026-08-13, M1 gold scalp) ──
+# Gold M1 (1 pip = 10 pts here). Owner spec to avoid premature exits from gold's
+# rapid noise while still protecting profit:
+#   BREAK-EVEN trigger : 15-20 pips (150-200 pts)  -> 150
+#   TRAIL ACTIVATION   : 25-30 pips (250-300 pts)  -> 250  (trail only STARTS here)
+#   TRAIL DISTANCE     : 15-20 pips (150-200 pts)  -> 150  (distance behind peak)
+# SL stays WIDE (500), NO fixed TP. BTC confluence disabled.
+SCALP_TRAIL_POINTS_BY_SYMBOL = {
+    "XAUUSD": int(os.getenv("SCALP_TRAIL_POINTS_XAUUSD", "150")),
+    "XAUUSD-ECN": int(os.getenv("SCALP_TRAIL_POINTS_XAUUSD", "150")),
+    "BTCUSD": int(os.getenv("SCALP_TRAIL_POINTS_BTCUSD", "20900")),
+    "GER40": int(os.getenv("SCALP_TRAIL_POINTS_GER40", "7928")),
+    "GER40.": int(os.getenv("SCALP_TRAIL_POINTS_GER40", "7928")),
+}
+SCALP_BE_TRIGGER_POINTS_BY_SYMBOL = {
+    "XAUUSD": int(os.getenv("SCALP_BE_TRIGGER_XAUUSD", "150")),
+    "XAUUSD-ECN": int(os.getenv("SCALP_BE_TRIGGER_XAUUSD", "150")),
+    "BTCUSD": int(os.getenv("SCALP_BE_TRIGGER_BTCUSD", "16720")),
+    "GER40": int(os.getenv("SCALP_BE_TRIGGER_GER40", "6342")),
+    "GER40.": int(os.getenv("SCALP_BE_TRIGGER_GER40", "6342")),
+}
+# Profit (pts) at which the TRAILING stop STARTS moving (distinct from BE). Until
+# this, only the break-even lock is active — gives gold room to breathe past BE.
+SCALP_TRAIL_ACTIVATE_POINTS_BY_SYMBOL = {
+    "XAUUSD": int(os.getenv("SCALP_TRAIL_ACTIVATE_XAUUSD", "250")),
+    "XAUUSD-ECN": int(os.getenv("SCALP_TRAIL_ACTIVATE_XAUUSD", "250")),
+    "BTCUSD": int(os.getenv("SCALP_TRAIL_ACTIVATE_BTCUSD", "20000")),
+    "GER40": int(os.getenv("SCALP_TRAIL_ACTIVATE_GER40", "9000")),
+    "GER40.": int(os.getenv("SCALP_TRAIL_ACTIVATE_GER40", "9000")),
+}
 
 # ── ML Pattern Engine authority gate (owner design 2026-08-12) ──
 # A nightly XGBoost scan mines the adjustment ledger + trades per symbol and
@@ -173,6 +215,17 @@ SCALP_CYCLE_SECONDS = int(os.getenv("SCALP_CYCLE_SECONDS", "15"))         # loop
 # #53 exit-leak fix: manage OPEN POSITIONS this often (fast sub-tick between full
 # cycles) so intra-cycle peaks are protected by the ratchet/trail/reversal.
 SCALP_MANAGE_SECONDS = int(os.getenv("SCALP_MANAGE_SECONDS", "2"))
+# Issue #2 latency fix: evaluate NEW ENTRIES this often on the fast sub-tick so a
+# fresh signal fires within a few seconds of the bar close, instead of waiting up
+# to SCALP_CYCLE_SECONDS. Learning/adaptive work still runs only on the full cycle.
+SCALP_ENTRY_TICK_SECONDS = int(os.getenv("SCALP_ENTRY_TICK_SECONDS", "3"))
+# ─── Low-RAM backoff guard (2026-08-16 freeze mitigation) ───────────────────
+# On a memory-constrained host, back off BEFORE thrashing/freezing. When available
+# physical RAM drops below SCALP_MIN_FREE_RAM_MB, the engine skips heavy learning
+# work (adaptive/edge/optimizer) that cycle; below the CRITICAL floor it also
+# pauses opening NEW positions (management of existing trades always continues).
+SCALP_MIN_FREE_RAM_MB = int(os.getenv("SCALP_MIN_FREE_RAM_MB", "500"))
+SCALP_CRITICAL_FREE_RAM_MB = int(os.getenv("SCALP_CRITICAL_FREE_RAM_MB", "250"))
 
 # ─── Multi-Timeframe Alignment ──────────────────────────────────────
 # Before a fast (1m) entry, require that higher timeframes don't clearly oppose
@@ -333,6 +386,19 @@ ADAPTIVE_MIN_SAMPLE = int(os.getenv("ADAPTIVE_MIN_SAMPLE", "10"))
 # backtests each walk-forward, and keeps only validated improvements. Runs on the
 # adaptive cadence. Iterations kept modest so it never blocks trading for long.
 OPTIMIZER_ENABLED = os.getenv("OPTIMIZER_ENABLED", "true").lower() in ("true", "1", "yes")
+# ── MANUAL TUNING LOCK (owner control 2026-08-13) ──
+# When TRUE, the auto-optimizer and the checkpointer-revert are FROZEN so they can
+# NOT change the manually-set entry floors (osma/bulls/bears) or exit geometry
+# (SL/BE/trail). The owner is tuning these by hand; the bot must NOT override them.
+# Other learning (post-mortem logging, whale outcome learning, stats) still runs.
+# Set MANUAL_TUNING_LOCK=false to hand control back to the auto-optimizer.
+MANUAL_TUNING_LOCK = os.getenv("MANUAL_TUNING_LOCK", "false").lower() in ("true", "1", "yes")
+# ── Auto floor revalidation (owner method) ──
+# The researcher periodically validates each symbol's alignment floors over a
+# MULTI-WEEK window and auto-escalates them (longs up / shorts down) to hold the
+# target win rate. Heavy backtest, so slow cadence.
+FLOOR_TARGET_WR = float(os.getenv("FLOOR_TARGET_WR", "70"))
+FLOOR_REVALIDATE_CYCLES = int(os.getenv("FLOOR_REVALIDATE_CYCLES", "2000"))
 OPTIMIZER_ITERATIONS = int(os.getenv("OPTIMIZER_ITERATIONS", "30"))  # directed coord-search budget/run (covers strength floors + periods)
 # Frequency-starvation guard: if a config change drops fire-rate below MIN_FIRE_PCT
 # over >= MIN_EVALS evaluations (trading stopped), revert to the last firing config /

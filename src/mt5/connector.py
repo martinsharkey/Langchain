@@ -47,6 +47,17 @@ except ImportError:
     mt5 = None
 
 
+# ─── Global MT5 access lock ──────────────────────────────────
+# The MetaTrader5 Python API is NOT thread-safe. The bot has a main trading thread
+# (live ticks/orders) AND a research daemon thread (backtester/post_mortem pulling
+# copy_rates_range / copy_ticks). Concurrent native calls caused repeated
+# 0xC0000005 access-violation crashes (~every 45 min overnight). ALL heavy MT5 data
+# calls must acquire this lock so research and live never hit the native layer at
+# the same time. Re-entrant so nested calls on one thread don't deadlock.
+import threading as _mt5_threading
+MT5_LOCK = _mt5_threading.RLock()
+
+
 # ─── Constants ───────────────────────────────────────────────
 
 DOCKER_BRIDGE_HOST = os.getenv("MT5_BRIDGE_HOST", "localhost")

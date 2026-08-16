@@ -35,14 +35,19 @@ DEFAULT_CFG = {
     "atr_min_rel": 0.7,
     "power_period": 13, "rsi_period": 14, "rsi_long_max": 72.0, "rsi_short_min": 28.0,
     "min_confluence": 4,   # re-baseline (#47): 4/5 soft checks lifted PF 1.56->2.98 vs 3
-    # ENTRY TRIGGER: a pure closed-bar zero-cross is only a ~3% event, which starves
-    # the bot to ~0 trades/day. GoldShark itself enters on FRESH momentum (a cross
-    # within InpMaxMomentumAge bars), not only the exact flip bar. So fresh-momentum is
-    # ON by default (age<=5) — the move must still pass every quality gate (strength
-    # floors, MACD, EMA side, ATR, confluence), and the frequency-starvation guard +
-    # optimizer keep the entry/quality balance. `allow_anticipated` stays OFF (that one
-    # enters BEFORE the cross = probability, whipsaw-prone).
-    "allow_fresh_momentum": True, "max_momentum_age": 5, "allow_anticipated": False,
+    # ENTRY TIMING (owner rule 2026-08-14): enter EARLY in the OsMA cycle — on
+    # CANDLE 2 (the bar right after the confirmed zero-cross candle 1), NOT several
+    # bars in. max_momentum_age=1 restricts fresh-momentum to sign_age<=1 = candle 2
+    # only. The strict closed-bar cross (candle 1 confirmed) also enters. Anticipation
+    # (enter on candle 1 at an agreed % formation) is available via allow_anticipated
+    # + osma_anticipate_atr but stays OFF by default (probability, whipsaw-prone).
+    # Previously age<=5 let entries fire up to 6 bars into the cycle (the bug that put
+    # entries "several bars in" nowhere near the cycle start).
+    # Anticipation ENABLED (owner rule 2026-08-14): enter on CANDLE 1 once the cross
+    # is osma_anticipate_pct formed (50-95%, tunable). Bulls/Bears alignment still
+    # enforced. Complements candle-2 entry (max_momentum_age=1).
+    "allow_fresh_momentum": True, "max_momentum_age": 3, "allow_anticipated": True,
+    "osma_anticipate_pct": 0.75,   # tunable within [0.50, 0.95]
 }
 
 
@@ -145,9 +150,22 @@ def evaluate_confluence_bar(ind: dict, cfg=None) -> dict:
     cd = osma_prev >= 0 > osma_now      # confirmed cross DOWN through zero
     au = ad = fresh_up = fresh_dn = False
     if c.get("allow_anticipated", False):
-        band = c.get("osma_anticipate_atr", 0.15) * atr
-        au = (not cu) and (-band <= osma_now <= 0) and (osma_now > osma_prev)
-        ad = (not cd) and (0 <= osma_now <= band) and (osma_now < osma_prev)
+        # ── CANDLE-1 ANTICIPATION (owner rule 2026-08-14) ──
+        # Enter on candle 1 BEFORE the zero-cross completes, once OsMA has closed
+        # osma_anticipate_pct (50%-95%, tunable) of the distance from the prior bar
+        # toward the zero line — i.e. the cross is 50-95% "formed". Directional
+        # alignment (Bulls/Bears on the correct side) is STILL required (enforced by
+        # the directional_gate below). Only candle 1 (osma still on the OLD side,
+        # moving toward zero); once it actually crosses, the confirmed cross handles it.
+        pct = float(c.get("osma_anticipate_pct", 0.75) or 0.75)
+        pct = min(max(pct, 0.50), 0.95)          # clamp to the 50-95% rule
+        prev_abs = abs(osma_prev)
+        if prev_abs > 1e-9:
+            progress = (prev_abs - abs(osma_now)) / prev_abs   # how far toward zero (0..1)
+            # UP: prior was negative, now still <=0 but moved >= pct toward zero
+            au = (not cu) and osma_prev < 0 and osma_now <= 0 and progress >= pct
+            # DOWN: prior was positive, now still >=0 but moved >= pct toward zero
+            ad = (not cd) and osma_prev > 0 and osma_now >= 0 and progress >= pct
     if c.get("allow_fresh_momentum", False):
         max_age = int(c.get("max_momentum_age", 5))
         recent = ind.get("osma_recent") or []
@@ -162,10 +180,14 @@ def evaluate_confluence_bar(ind: dict, cfg=None) -> dict:
                 else:
                     break
             return age
-        fresh_up = (not (cu or au)) and osma_now > 0 and 0 < _sign_age(True) <= max_age
-        fresh_dn = (not (cd or ad)) and osma_now < 0 and 0 < _sign_age(False) <= max_age
+        # fresh-momentum must NOT fire against an active anticipation (ad/au): during
+        # a SHORT anticipation OsMA is still slightly positive, which would otherwise
+        # trip fresh_up (buy). Anticipation owns the direction.
+        fresh_up = (not (cu or au or ad)) and osma_now > 0 and 0 < _sign_age(True) <= max_age
+        fresh_dn = (not (cd or ad or au)) and osma_now < 0 and 0 < _sign_age(False) <= max_age
     if not (cu or cd or au or ad or fresh_up or fresh_dn):
         return {"action": "hold", "trigger_kind": None, "confluence": 0, "reason": "no OsMA zero-cross"}
+    # direction priority: confirmed cross, then ANTICIPATION (au=buy/ad=sell), then fresh
     direction = "buy" if (cu or au or fresh_up) else "sell"
     trigger_kind = "cross" if (cu or cd) else ("anticipated" if (au or ad) else "fresh")
     # MACD confirmation — GOLDSHARK PARITY: GoldShark's IsM1MACDAligned checks
@@ -256,6 +278,20 @@ def evaluate_confluence_bar(ind: dict, cfg=None) -> dict:
     if direction == "sell" and rsi_sell_above and _rsi < rsi_sell_above:
         return {"action": "hold", "trigger_kind": trigger_kind, "confluence": 0,
                 "reason": f"rsi {_rsi:.0f} < sell-above {rsi_sell_above:.0f} (chasing, not a pullback)"}
+    # ── HARD RSI-EXHAUSTION GATE (2026-08-13, fixes gold losing) ──
+    # NEVER short into extreme oversold or long into extreme overbought — those are
+    # where mean-reversion bounces stop the trade out (gold took shorts at RSI 14-24
+    # into a bounce -> big SL losses). Previously rsi_long_max/rsi_short_min were only
+    # SOFT checks (bypassable by the confluence count); make them HARD so an exhausted
+    # entry can never fire regardless of the other confirmations.
+    _rsi_hi = float(c.get("rsi_long_max", 72.0) or 72.0)
+    _rsi_lo = float(c.get("rsi_short_min", 28.0) or 28.0)
+    if direction == "buy" and _rsi >= _rsi_hi:
+        return {"action": "hold", "trigger_kind": trigger_kind, "confluence": 0,
+                "reason": f"rsi {_rsi:.0f} >= {_rsi_hi:.0f} overbought (no long into exhaustion)"}
+    if direction == "sell" and _rsi <= _rsi_lo:
+        return {"action": "hold", "trigger_kind": trigger_kind, "confluence": 0,
+                "reason": f"rsi {_rsi:.0f} <= {_rsi_lo:.0f} oversold (no short into exhaustion)"}
     # ── POWER TUG-OF-WAR (rate-of-change, tunable, default OFF) — the owner's core
     # edge. For a LONG we want BULLS RISING and BEARS RISING toward zero over the
     # last few bars, EVEN IF bulls are still negative (e.g. -4.5->-2.3->0.1->1.8).
@@ -314,6 +350,40 @@ def evaluate_confluence_bar(ind: dict, cfg=None) -> dict:
     macd_v = macd
     _a = atr if atr > 0 else 1.0
     def _floor(key): return float(c.get(key, 0.0) or 0.0) * _a   # ATR-scaled per symbol
+
+    # ── IMMUTABLE DIRECTIONAL-ALIGNMENT GATE (owner rule from LIVE GoldShark telemetry) ──
+    # Derived from real millisecond execution logs (NotebookLM analysis 2026-08-13),
+    # which revealed the "SPREAD REALITY": the DOMINANT power aligns strongly with the
+    # trade, but the OPPOSITE power is dragged POSITIVE by the spread and does NOT flip
+    # sign. So the rule is ASYMMETRIC, not "all three same sign":
+    #   LONG : OsMA >= osma_floor(>0)   AND Bulls >= bulls_floor(strong +, e.g. 2.4)
+    #          AND Bears >= bears_floor(small +, e.g. 0.6 — bears stays POSITIVE)
+    #   SHORT: OsMA <= osma_ceil(<0)    AND Bears <= bears_ceil(strong -, e.g. -1.3)
+    #          AND 0 <= Bulls <= bulls_short_cap (Bulls stays POSITIVE but small in spread)
+    # This is a HARD gate (never skippable) and its DIRECTION can never be reversed.
+    # Floors/ceils come from alignment_floors (per-symbol, from winners; tuner may make
+    # STRICTER, never looser; XGBoost may raise but not flip sign).
+    try:
+        from src.strategies.alignment_floors import directional_gate as _dir_gate
+        _sym = c.get("symbol") or ind.get("symbol") or ""
+        # For an ANTICIPATED candle-1 entry, OsMA is by definition still on the old
+        # side of zero (the cross hasn't completed), so we do NOT require OsMA to have
+        # the trade's sign yet — the % trigger already validated OsMA is moving the
+        # right way. But BULLS and BEARS MUST still be directionally aligned (owner
+        # rule). Pass anticipated=True so the gate skips the OsMA sign/floor check only.
+        ok, why = _dir_gate(_sym, direction, osma_now, bulls_v, bears_v, _a, c,
+                            anticipated=(trigger_kind == "anticipated"))
+        if not ok:
+            return {"action": "hold", "trigger_kind": trigger_kind, "confluence": 0, "reason": why}
+    except Exception:
+        # fail-safe minimal sign gate if the module is unavailable
+        if direction == "buy" and not (osma_now > 0 and bulls_v > 0):
+            return {"action": "hold", "trigger_kind": trigger_kind, "confluence": 0,
+                    "reason": "not aligned LONG (osma & bulls must be > 0)"}
+        if direction == "sell" and not (osma_now < 0 and bears_v < 0):
+            return {"action": "hold", "trigger_kind": trigger_kind, "confluence": 0,
+                    "reason": "not aligned SHORT (osma & bears must be < 0)"}
+
     if direction == "buy":
         gates = [
             ("osma", osma_now, _floor("osma_min_long"), ">="),

@@ -9,6 +9,7 @@ Falls back to simulated data when neither is available.
 
 from typing import Optional
 from datetime import datetime, timedelta
+import os
 
 from src.mt5.connector import get_connector, MT5_AVAILABLE, mt5, mt5_error_handler, SILICON_MT5_AVAILABLE
 from src.utils.logger import get_logger
@@ -176,13 +177,23 @@ def get_rates(
     return result
 
 
-def get_ticks(symbol: str, from_epoch: float, to_epoch: float, max_ticks: int = 5_000_000):
+def get_ticks(symbol: str, from_epoch: float, to_epoch: float, max_ticks: int = None):
     """Real bid/ask TICKS for [from_epoch, to_epoch]. Returns a dict of parallel arrays
     {'time': [...], 'bid': [...], 'ask': [...]} (lists of float), or None if unavailable.
     Used by the backtester for tick-accurate SL/TP fills (MT5 'real ticks' model). Never
-    raises — returns None so the caller can fall back to bar-based fills."""
+    raises — returns None so the caller can fall back to bar-based fills.
+
+    max_ticks is capped (env BACKTEST_MAX_TICKS, default 750k) because a 5M-tick
+    native allocation via mt5.copy_ticks_from on every optimizer backtest iteration
+    caused repeated 0xC0000005 access-violation crashes (native memory pressure).
+    750k ticks still covers the walk-forward window at M1/M5 tick density."""
     if not MT5_AVAILABLE:
         return None
+    if max_ticks is None:
+        try:
+            max_ticks = int(os.getenv("BACKTEST_MAX_TICKS", "750000"))
+        except (TypeError, ValueError):
+            max_ticks = 750_000
     try:
         import datetime as _dt
         t = mt5.copy_ticks_from(symbol, _dt.datetime.utcfromtimestamp(float(from_epoch)),

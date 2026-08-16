@@ -66,10 +66,12 @@ class DynamicFixer:
         # 1) EXIT FIX — the dominant, evidence-backed leak (applied LIVE, gate-free)
         if last != "exit_fix" and (directives.get("sl_atr") or directives.get("giveback")
                                    or directives.get("entry_extension_filter")):
-            ov = (self.e._exit_override.setdefault(base.upper(), {}))
-            cur_sl = ov.get("sl_atr", self.e._tuned_params(resolved).get("sl_atr", 1.0))
+            new_sl = None
             if directives.get("sl_atr"):
-                ov["sl_atr"] = round(min(cur_sl + float(directives["sl_atr"]), 3.0), 2)
+                # route through the engine's SINGLE coherent, locked writer so the
+                # stop-widen can never leave an incoherent wide-SL / tiny-tp_rr mix
+                # (the two loops previously wrote _exit_override without coordination).
+                new_sl = self.e.adjust_exit_sl_atr(base, float(directives["sl_atr"]), cap=3.0)
             if directives.get("giveback"):
                 cur_gb = self.e._giveback_override.get(base.upper(), 0.6)
                 self.e._giveback_override[base.upper()] = round(min(cur_gb + float(directives["giveback"]), 0.9), 2)
@@ -80,7 +82,7 @@ class DynamicFixer:
                 cur_st = self.e._stretch_override.get(base.upper(), 2.0)
                 self.e._stretch_override[base.upper()] = round(max(cur_st - 0.3, 0.7), 2)
             step = "exit_fix"
-            detail = {"sl_atr": ov.get("sl_atr"), "giveback": self.e._giveback_override.get(base.upper()),
+            detail = {"sl_atr": new_sl, "giveback": self.e._giveback_override.get(base.upper()),
                       "max_stretch_atr": self.e._stretch_override.get(base.upper())}
 
         # 2) PARAM RETUNE — hand the leak to the optimizer (mql5-grounded, #25)

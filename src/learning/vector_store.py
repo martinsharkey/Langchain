@@ -31,29 +31,13 @@ logger = logging.getLogger("learning.vector_store")
 
 
 class _SafeEmbeddingFunction:
-    """ChromaDB embedding function that avoids torch/sentence-transformers.
+    """ChromaDB fallback embedder — canonical impl in
+    src.learning.chroma_client.SafeEmbeddingFunction (single source of truth)."""
 
-    Torch DLL initialization is failing on this Windows host (c10.dll load
-    error), which crashes the process when chromadb's default sentence-
-    transformer embedding function tries to import it. This fallback uses
-    deterministic hash-based vectors so the store still works for exact/similarity
-    lookups without any ML runtime dependency.
-    """
+    def __new__(cls, dim: int = 20):
+        from src.learning.chroma_client import SafeEmbeddingFunction
+        return SafeEmbeddingFunction(dim=dim)
 
-    def __init__(self, dim: int = 20):
-        self.dim = dim
-
-    def name(self) -> str:
-        return "safe_hash_embedder"
-
-    def __call__(self, input: list[str]) -> list[list[float]]:
-        out: list[list[float]] = []
-        for text in input:
-            h = hashlib.sha256(text.encode("utf-8", errors="replace")).digest()
-            vec = [((h[i % len(h)] / 255.0) * 2.0 - 1.0) for i in range(self.dim)]
-            norm = math.sqrt(sum(v * v for v in vec)) or 1.0
-            out.append([v / norm for v in vec])
-        return out
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

@@ -144,6 +144,15 @@ class ScalpEngine:
             self.post_mortem = None
         self._postmortem_cache = {}
         self._edge_cache = {}
+
+        # LLM decision self-validation: score whether the supervisor's HOLD/EXIT/
+        # TIGHTEN answers aligned with the actual trade outcome (read-only to trading).
+        try:
+            from src.learning.decision_alignment import DecisionAlignmentTracker
+            self.decision_alignment = DecisionAlignmentTracker()
+        except Exception as e:
+            logger.warning(f"DecisionAlignmentTracker unavailable: {e}")
+            self.decision_alignment = None
         self._symbol_profit_cache = {}
 
         # Self-learning parameter optimizer (autonomous indicator tuning)
@@ -151,10 +160,21 @@ class ScalpEngine:
             from src.learning.backtester import Backtester
             from src.learning.param_optimizer import ParameterOptimizer
             _bt = Backtester(self.registry)
+            def _opt_backtest(sym, params, sl_atr, tp_rr):
+                # Tune entries against the SAME live exit model + per-symbol SL/BE/
+                # trail (be_trail, no TP) so optimizer results match live behaviour.
+                base = (sym or "").upper()
+                for k, v in (("XAUUSD-ECN", "XAUUSD"),):
+                    pass
+                _sl = (getattr(config, "SCALP_SL_MIN_POINTS_BY_SYMBOL", {}) or {}).get(base, 0)
+                _be = (getattr(config, "SCALP_BE_TRIGGER_POINTS_BY_SYMBOL", {}) or {}).get(base, 0)
+                _tr = (getattr(config, "SCALP_TRAIL_POINTS_BY_SYMBOL", {}) or {}).get(base, 0)
+                return _bt.walkforward_focused(
+                    sym, params, sl_atr=sl_atr, tp_rr=tp_rr,
+                    exit_model="be_trail", sl_pts=_sl, be_trigger_pts=_be, trail_pts=_tr)
             self.param_optimizer = ParameterOptimizer(
                 self.registry,
-                lambda sym, params, sl_atr, tp_rr: _bt.walkforward_focused(
-                    sym, params, sl_atr=sl_atr, tp_rr=tp_rr),
+                _opt_backtest,
             )
         except Exception as e:
             logger.warning(f"ParameterOptimizer unavailable: {e}")
@@ -200,6 +220,13 @@ class ScalpEngine:
         # bypassing the backtest gate so a diagnosed "SL too tight" fix reaches
         # live trades immediately (checkpointer verifies + reverts if worse).
         self._exit_override: dict = {}
+        # Single lock guarding ALL _exit_override reads/writes. Multiple daemon loops
+        # (continual_researcher via _apply_exit_config, dynamic_fixer) write this while
+        # the main trading thread reads it — without this lock the main thread could
+        # read a half-written {sl_atr, tp_rr} pair, or the two loops could leave an
+        # INCOHERENT wide-stop + tiny-tp_rr mix that neither vetted together (the
+        # documented "loss via tp" leak). All mutations go through set_exit_config().
+        self._exit_override_lock = threading.RLock()
         # #36b live per-symbol ENTRY extension override (max_stretch_atr) set by the
         # DynamicFixer when the post-mortem diagnoses ENTERING LATE / into extended
         # moves — a diagnosed entry fix must reach live, not stay a directive.
@@ -483,6 +510,15 @@ class ScalpEngine:
         if not self.adapters:
             logger.error("No tradable symbols resolved — cannot start")
             return False
+        # Register the resolved broker symbols with the canonical broker-time helper
+        # so the server-time offset is measured from THIS broker's real symbols
+        # (portable across brokers with different symbol naming / timezones).
+        try:
+            from src.mt5.broker_time import set_reference_symbols, broker_offset_hours
+            set_reference_symbols([a.resolved_symbol for a in self.adapters.values()])
+            logger.info(f"Broker time offset: {broker_offset_hours():+.2f}h vs UTC")
+        except Exception as e:
+            logger.debug(f"broker-time init skip: {e}")
         # Adopt any open positions (incl. manual trades) so the bot manages them.
         self._adopt_existing_positions()
         # Close the loop for any trades left 'pending' from prior runs / manual closes.
@@ -831,17 +867,29 @@ class ScalpEngine:
 
     def _fast_manage_until(self, deadline: float):
         """Between full cycles, run manage-open-positions + reconcile on a fast tick
-        so intra-cycle peaks are protected (does NOT evaluate new entries or learning)."""
+        so intra-cycle peaks are protected. Also evaluates NEW ENTRIES on a fast
+        cadence (Issue #2 latency fix) so a fresh signal fires within seconds of the
+        bar close instead of waiting up to SCALP_CYCLE_SECONDS. Learning/adaptive
+        work still runs only on the full cycle."""
         every = max(1, config.SCALP_MANAGE_SECONDS)
+        entry_every = max(1, int(getattr(config, "SCALP_ENTRY_TICK_SECONDS", 3)))
+        next_entry_scan = 0.0
         while self.running and time.time() < deadline:
             time.sleep(min(every, max(0.0, deadline - time.time())))
-            if not self.open_positions:
-                continue
             try:
-                self._reconcile_closed()
-                self._manage_open_positions()
+                if self.open_positions:
+                    self._reconcile_closed()
+                    self._manage_open_positions()
             except Exception as e:
                 logger.debug(f"fast-manage tick error: {e}")
+            # fast ENTRY scan (does not run learning/adaptive — those stay on the cycle)
+            now = time.time()
+            if now >= next_entry_scan:
+                next_entry_scan = now + entry_every
+                try:
+                    self._scan_entries()
+                except Exception as e:
+                    logger.debug(f"fast-entry tick error: {e}")
 
     def _maybe_backoff_market_closed(self, base_symbol: str, reason: str):
         """If MT5 rejected an order with 'Market closed', back off this symbol
@@ -897,9 +945,25 @@ class ScalpEngine:
             config.DISABLED_SYMBOLS = [s.upper() for s in req["disabled_symbols"]]
             logger.warning(f"[CONTROL] disabled symbols -> {config.DISABLED_SYMBOLS} (dashboard)")
 
+    def _free_ram_mb(self) -> float:
+        """Available physical RAM in MB (best-effort; large number if psutil absent)."""
+        try:
+            import psutil
+            return psutil.virtual_memory().available / 1048576.0
+        except Exception:
+            return 1e9  # unknown -> don't block
+
     def _run_cycle(self):
         # 0) apply any pending dashboard control request (#19)
         self._apply_control()
+        # RAM GUARD (2026-08-16): sample free RAM once per cycle; gate heavy learning
+        # work + new entries so a low-memory host can't thrash/freeze. Management of
+        # existing positions always continues regardless.
+        self._free_ram = self._free_ram_mb()
+        if self._free_ram < config.SCALP_MIN_FREE_RAM_MB:
+            logger.warning(f"[RAM-GUARD] low memory {self._free_ram:.0f}MB free "
+                           f"(< {config.SCALP_MIN_FREE_RAM_MB}MB): skipping heavy "
+                           f"learning work this cycle")
         # 0) adopt any NEW manual trades the user opened since last cycle
         self._adopt_existing_positions()
         # 1) reconcile any positions that closed since last cycle
@@ -975,7 +1039,8 @@ class ScalpEngine:
             # pattern lock) on a moderate cadence — not once/day. Outcomes are
             # applied LIVE immediately; the checkpointer verifies + reverts. This is
             # what makes the learning ACT, not sit in the KnowledgeStore.
-            if self.researcher is not None and self.cycle % config.EXIT_CALIBRATION_CYCLES == 7:
+            if self.researcher is not None and self.cycle % config.EXIT_CALIBRATION_CYCLES == 7 \
+                    and not getattr(config, "MANUAL_TUNING_LOCK", False):
                 for _b in self.adapters:
                     if not self.sessions.is_open(_b):
                         continue  # need live movement; skip closed markets
@@ -984,6 +1049,19 @@ class ScalpEngine:
                         self.researcher.lock_in_pattern(_b, self.adapters[_b].resolved_symbol)
                     except Exception as e:
                         logger.debug(f"exit calibration skip {_b}: {e}")
+            # OWNER METHOD: periodically REVALIDATE alignment floors over a multi-week
+            # window and auto-escalate them (longs up / shorts down) to hold WR>=70%
+            # per symbol. Heavy (multi-week backtest) so on a slow cadence. Gated by the
+            # manual tuning lock so it never overrides hand-set floors while locked.
+            if self.researcher is not None and not getattr(config, "MANUAL_TUNING_LOCK", False) \
+                    and self.cycle % getattr(config, "FLOOR_REVALIDATE_CYCLES", 2000) == 123:
+                for _b in self.adapters:
+                    try:
+                        self.researcher.revalidate_floors(
+                            _b, self.adapters[_b].resolved_symbol,
+                            target_wr=getattr(config, "FLOOR_TARGET_WR", 70.0))
+                    except Exception as e:
+                        logger.debug(f"floor revalidate skip {_b}: {e}")
             # #44/#46: resolve pending whale-signal outcomes against realised candles
             # (labels the bot's own whale dataset as the window elapses).
             if self.whale_outcomes is not None and self.cycle % config.EXIT_CALIBRATION_CYCLES == 11:
@@ -1018,13 +1096,32 @@ class ScalpEngine:
         #     GATED by LEARNING_ADAPTATION_ENABLED (#27): frozen -> no self-tuning.
         if (config.LEARNING_ADAPTATION_ENABLED
                 and self.adaptive is not None and not self._adaptive_running
+                and getattr(self, "_free_ram", 1e9) >= config.SCALP_MIN_FREE_RAM_MB
                 and self.cycle % config.ADAPTIVE_EVERY_CYCLES == 5):
             self._maybe_run_adaptive()
 
         # 3) per symbol: evaluate in priority order.
-        #    Prioritise OPEN symbols, then those with the best learned
-        #    profitability (pnl_per_trade) — the bot leans into the 'easiest'
-        #    symbol while still covering others (incl. 24/7 crypto when gold is shut).
+        self._scan_entries()
+
+    def _scan_entries(self):
+        """Evaluate entries for every eligible symbol in priority order.
+        Extracted so it can run BOTH on the full cycle AND on the fast tick
+        (Issue #2 latency fix): a fresh signal no longer waits up to
+        SCALP_CYCLE_SECONDS to be acted on.
+            Prioritise OPEN symbols, then those with the best learned
+            profitability (pnl_per_trade) — the bot leans into the 'easiest'
+            symbol while still covering others (incl. 24/7 crypto when gold is shut).
+        """
+        # RAM GUARD: below the critical floor, do NOT open new positions (each entry
+        # loads bars/indicators/RAG). Managing existing trades continues elsewhere.
+        free_ram = getattr(self, "_free_ram", None)
+        if free_ram is None:
+            free_ram = self._free_ram_mb()
+        if free_ram < config.SCALP_CRITICAL_FREE_RAM_MB:
+            logger.warning(f"[RAM-GUARD] critical memory {free_ram:.0f}MB free "
+                           f"(< {config.SCALP_CRITICAL_FREE_RAM_MB}MB): pausing NEW "
+                           f"entries this scan (existing trades still managed)")
+            return
         def _priority(item):
             base, _ = item
             is_open = self.sessions.is_open(base)
@@ -1492,6 +1589,11 @@ class ScalpEngine:
         """
         if self.checkpointer is None:
             return
+        # MANUAL TUNING LOCK: the owner is hand-tuning; do NOT let the checkpointer
+        # revert/override the manual config. (Frequency-starvation guard still runs
+        # separately and falls back to the GOLDEN baseline, which trades.)
+        if getattr(config, "MANUAL_TUNING_LOCK", False):
+            return
         for base in self.adapters:
             try:
                 # ── FREQUENCY-STARVATION guard (frequency IN the loop) ──
@@ -1540,63 +1642,128 @@ class ScalpEngine:
         return (entered / evals) < min_fire
 
     def _revert_to_last_firing(self, base: str) -> bool:
-        """Revert the symbol to its last config that was actually producing trades, or
-        relax the most-recently-tightened entry lever. Records the starving direction
-        as a failed direction so the optimizer won't re-apply it. Resets the freq tally."""
+        """Frequency-starvation guard: if a config tuned the floors so high the bot
+        STOPPED trading, restore a config that DOES trade. Owner directive
+        (2026-08-13): the fallback is the GOLDEN BASELINE (proven hand-tuned values),
+        NOT the old 'last firing' snapshot which was often a WEAK config. This keeps
+        the bot trading without ever landing on a degraded configuration."""
         buk = base.upper()
-        snap = getattr(self, "_last_firing_config", {}).get(buk)
         acted = False
-        if snap:
-            self._apply_reverted_config(base, snap)
-            logger.warning(f"[FREQ-REVERT] {base}: fire_rate collapsed "
-                           f"({self._freq_entered.get(base,0)}/{self._freq_evals.get(base,0)}) "
-                           f"-> reverted to last-firing config (top block: "
-                           f"{sorted(self._freq_block.get(base,{}).items(), key=lambda x:-x[1])[:1]})")
-            acted = True
-        else:
-            # no snapshot yet: relax the tightest live strength override (stretch) so we
-            # don't stay frozen — widen max_stretch_atr one notch.
-            ov = self._stretch_override.get(buk)
-            if ov:
-                self._stretch_override[buk] = round(ov + 0.3, 2)
-                logger.warning(f"[FREQ-RELAX] {base}: starved, no firing snapshot -> "
-                               f"widened max_stretch_atr {ov}->{self._stretch_override[buk]}")
-                acted = True
-        # mark the starving config as a failed direction + record to RAG
+        # 1) PREFER the golden baseline (proven, always-trades) as the fallback floor.
         try:
-            if self.checkpointer is not None:
-                self.checkpointer._record_failure(
-                    base, self._current_symbol_config(base), -999.0, 0.0)
-        except Exception:
-            pass
-        # reset the tally so the reverted config gets a fresh measurement window
+            from src.learning.golden_baseline import golden_entry_floors
+            gf = golden_entry_floors(base)
+            if gf and self.param_optimizer is not None:
+                entry = self.param_optimizer.tuned.get(buk, {})
+                merged = {**entry.get("params", {}), **gf}   # restore proven floors
+                entry["params"] = merged
+                self.param_optimizer.tuned[buk] = entry
+                try: self.param_optimizer._persist()
+                except Exception: pass
+                # clear any live overrides that tightened us into starvation
+                self._stretch_override.pop(buk, None)
+                logger.warning(f"[FREQ-REVERT] {base}: fire_rate collapsed "
+                               f"({self._freq_entered.get(base,0)}/{self._freq_evals.get(base,0)}) "
+                               f"-> restored GOLDEN baseline floors {gf}")
+                acted = True
+        except Exception as e:
+            logger.debug(f"golden revert skip {base}: {e}")
+        # 2) fallback to the old last-firing snapshot ONLY if no golden baseline exists
+        if not acted:
+            snap = getattr(self, "_last_firing_config", {}).get(buk)
+            if snap:
+                self._apply_reverted_config(base, snap)
+                logger.warning(f"[FREQ-REVERT] {base}: no golden baseline -> reverted to last-firing config")
+                acted = True
+            else:
+                ov = self._stretch_override.get(buk)
+                if ov:
+                    self._stretch_override[buk] = round(ov + 0.3, 2)
+                    logger.warning(f"[FREQ-RELAX] {base}: starved, no snapshot -> "
+                                   f"widened max_stretch_atr {ov}->{self._stretch_override[buk]}")
+                    acted = True
+        # reset the tally so the restored config gets a fresh measurement window
         self._freq_evals[base] = 0; self._freq_entered[base] = 0; self._freq_block[base] = {}
         return acted
+
+    # Minimum viable reward:risk. Overnight evidence (2026-08-13): tp_rr < 1.0
+    # configs (even with wide stops) produced net-losing "tp" exits, and XGBoost
+    # found entry features have ~0.51 AUC (no entry edge) — so the payoff MUST come
+    # from a positive reward:risk. We therefore floor tp_rr at 1.2 UNCONDITIONALLY;
+    # the earlier wide-stop exception (0.8) was too permissive and was the residual
+    # loss-via-tp leak.
+    _MIN_TP_RR = 1.2
+
+    def _coerce_viable_rr(self, sl_atr: float, tp_rr: float) -> float:
+        """Floor tp_rr to a viable reward:risk so trades cannot take net-losing TP
+        exits. Applies regardless of stop width (see note above)."""
+        try:
+            sl_atr = float(sl_atr); tp_rr = float(tp_rr)
+        except (TypeError, ValueError):
+            return tp_rr
+        floor = self._MIN_TP_RR
+        if tp_rr < floor:
+            logger.warning(f"[EXIT-GUARD] tp_rr {tp_rr} below viable floor {floor} "
+                           f"(sl_atr {sl_atr}) — clamping to {floor}")
+            return floor
+        return tp_rr
 
     def _apply_exit_config(self, base_symbol: str, sl_atr: float, tp_rr: float, source: str = "pattern"):
         """#40/#41: lock a discovered exit config into the LIVE per-symbol override
         (entry sizing reads _exit_override). Sources: 'pattern' (MACD-leads-OsMA
         backtest) and 'excursion' (OsMA-cycle movement). When both exist we BLEND
         (average) so the exit reflects both the backtested edge and the symbol's
-        real movement. The #27 checkpointer verifies realised expectancy + reverts."""
-        ov = self._exit_override.setdefault(base_symbol.upper(), {})
-        srcs = ov.setdefault("_by_source", {})
-        srcs[source] = {"sl_atr": round(float(sl_atr), 2), "tp_rr": round(float(tp_rr), 2)}
-        # blend across available sources (mean) -> the effective live exit config
-        sls = [v["sl_atr"] for v in srcs.values()]
-        rrs = [v["tp_rr"] for v in srcs.values()]
-        ov["sl_atr"] = round(sum(sls) / len(sls), 2)
-        ov["tp_rr"] = round(sum(rrs) / len(rrs), 2)
+        real movement. The #27 checkpointer verifies realised expectancy + reverts.
+
+        SINGLE COHERENT WRITER: all _exit_override mutations pass through here under
+        _exit_override_lock, and the blended tp_rr is floored to a viable RR so a
+        wide stop can never pair with a sub-floor TP."""
+        # MANUAL TUNING LOCK: when the owner is hand-tuning SL/BE/trail, the auto
+        # learning loops must NOT override the exit config. Freeze here.
+        if getattr(config, "MANUAL_TUNING_LOCK", False):
+            return
+        with self._exit_override_lock:
+            ov = self._exit_override.setdefault(base_symbol.upper(), {})
+            srcs = ov.setdefault("_by_source", {})
+            srcs[source] = {"sl_atr": round(float(sl_atr), 2), "tp_rr": round(float(tp_rr), 2)}
+            # blend across available sources (mean) -> the effective live exit config
+            sls = [v["sl_atr"] for v in srcs.values()]
+            rrs = [v["tp_rr"] for v in srcs.values()]
+            ov["sl_atr"] = round(sum(sls) / len(sls), 2)
+            # re-derive tp_rr COHERENTLY with the blended stop and floor it.
+            ov["tp_rr"] = self._coerce_viable_rr(ov["sl_atr"], round(sum(rrs) / len(rrs), 2))
+            eff_sl, eff_rr = ov["sl_atr"], ov["tp_rr"]
         logger.warning(f"[EXIT-LOCK] {base_symbol}: {source} sl_atr {sl_atr} tp_rr {tp_rr} "
-                       f"-> blended live sl_atr {ov['sl_atr']} tp_rr {ov['tp_rr']} "
+                       f"-> blended live sl_atr {eff_sl} tp_rr {eff_rr} "
                        f"(let winners run / cut losers early)")
         if self.learning_log is not None:
             try:
                 exp, n = self._recent_expectancy(base_symbol)
-                self.learning_log.exit_lock(base_symbol, ov["sl_atr"], ov["tp_rr"], source,
+                self.learning_log.exit_lock(base_symbol, eff_sl, eff_rr, source,
                                             metric=f"recent expectancy {exp} (n={n})")
             except Exception:
                 pass
+
+    def adjust_exit_sl_atr(self, base_symbol: str, delta: float, cap: float = 3.0) -> float:
+        """Coherent, locked helper for the DynamicFixer to WIDEN the stop without
+        touching tp_rr directly. Re-derives a viable tp_rr for the new stop width so
+        the two learning loops can never leave an incoherent wide-SL/tiny-TP config.
+        Returns the new sl_atr."""
+        if getattr(config, "MANUAL_TUNING_LOCK", False):
+            # owner is hand-tuning exits; don't let the fixer widen the stop
+            with self._exit_override_lock:
+                return self._exit_override.get(base_symbol.upper(), {}).get("sl_atr", 0.0)
+        with self._exit_override_lock:
+            ov = self._exit_override.setdefault(base_symbol.upper(), {})
+            cur_sl = ov.get("sl_atr", self._tuned_params(
+                self.adapters[base_symbol].resolved_symbol
+                if base_symbol in self.adapters else base_symbol).get("sl_atr", 1.0))
+            new_sl = round(min(float(cur_sl) + float(delta), cap), 2)
+            ov["sl_atr"] = new_sl
+            # keep TP coherent with the (now wider) stop
+            cur_rr = ov.get("tp_rr", config.SCALP_TP_RR)
+            ov["tp_rr"] = self._coerce_viable_rr(new_sl, cur_rr)
+            return new_sl
 
     def _apply_reverted_config(self, base_symbol: str, best_cfg: dict):
         """Restore a best-known config live: tuned params -> optimizer, giveback -> override."""
@@ -2017,6 +2184,13 @@ class ScalpEngine:
         logger.info(f"[SUPERVISOR] #{st.ticket} {st.base_symbol}: {decision} "
                     f"(profit {profit_pts:.0f}pts, legs {n_legs}, {out.get('reason','')})")
 
+        # self-validation: capture the decision + profit context so we can later
+        # score whether the LLM's answer aligned with the trade's real outcome.
+        if getattr(self, "decision_alignment", None) is not None:
+            self.decision_alignment.record_decision(
+                ticket=st.ticket, decision=decision, profit_pts=profit_pts,
+                symbol=st.base_symbol, reason=out.get("reason", ""), n_legs=n_legs)
+
         if decision in ("EXIT", "CUT_ALL"):
             # CUT_ALL closes every leg of this symbol+direction; EXIT closes this one.
             targets = _same_dir if decision == "CUT_ALL" else [pos]
@@ -2286,7 +2460,8 @@ class ScalpEngine:
                             logger.debug(f"post-mortem {sym} skip: {e}")
 
                 # AUTONOMOUS PARAMETER TUNING guided by reflection, gated by walk-forward.
-                if self.param_optimizer is not None and config.OPTIMIZER_ENABLED:
+                if self.param_optimizer is not None and config.OPTIMIZER_ENABLED \
+                        and not getattr(config, "MANUAL_TUNING_LOCK", False):
                     # Periodically run the FULL-RANGE grid sweep (reproduces the MT5
                     # optimiser) so the search can REACH the proven high-floor cluster
                     # (e.g. osma_min_long ~1.4, bulls ~2.0, atr_min ~1.4) instead of
@@ -2513,6 +2688,9 @@ class ScalpEngine:
         fs = self.registry.get_focused_signal(indicators, tuned)   # pass tuned strength floors
         if fs is not None and fs.action != "hold":
             signal = fs
+            # LATENCY INSTRUMENTATION (Issue #2): stamp when a tradable signal is
+            # confirmed so we can measure signal->order_send latency at the send site.
+            self._t_signal = time.perf_counter()
         # PYRAMID EXCEPTION: the entry extension guard (max_stretch_atr) must gate only
         # FRESH leg-1 entries — a pyramid add is, by design, into an extended winning
         # move. If we already hold a winning same-direction position and the ONLY thing
@@ -2759,23 +2937,37 @@ class ScalpEngine:
         # sl_atr/tp_rr override that bypasses the backtest gate (the diagnosed
         # "SL too tight" fix must reach live trades, not be stuck behind WR>=50).
         # The #27 checkpointer verifies realised expectancy and reverts if worse.
-        _ov = (getattr(self, "_exit_override", {}) or {}).get(base.upper(), {})
+        with self._exit_override_lock:
+            _ov = dict((getattr(self, "_exit_override", {}) or {}).get(base.upper(), {}))
         sl_atr_mult = _ov.get("sl_atr", _tp.get("sl_atr", config.SCALP_SL_ATR_MULT))
         tp_rr = _ov.get("tp_rr", _tp.get("tp_rr", config.SCALP_TP_RR))
         atr_pts = (indicators.get("atr", 0) or 0) / pt if pt else 0
-        sl_pts = max(sl_atr_mult * atr_pts, min_dist_pts) if atr_pts > 0 \
-            else max(config.SCALP_SL_POINTS, min_dist_pts)
-        # PAYOFF LEVER (backtest-proven): TP as a MULTIPLE of the actual SL.
-        tp_pts = sl_pts * tp_rr
+        # ── WIDE SL, NO FIXED TP (owner design 2026-08-13) ──
+        # A fixed TP CAPS winners and makes "let runners run" impossible. So we place
+        # a WIDE broker-side protective SL (room to breathe so the trade isn't wicked
+        # out on entry) and NO take-profit — the exit is managed entirely by the
+        # trade_manager's break-even + trailing stop + reversal logic. The SL is a
+        # per-symbol minimum in POINTS (gold 300-500) OR sl_atr*ATR, whichever is
+        # wider, so volatile symbols (BTC) also get adequate room.
+        sl_floor_pts = float(getattr(config, "SCALP_SL_MIN_POINTS", 0) or 0)
+        try:
+            _persym = getattr(config, "SCALP_SL_MIN_POINTS_BY_SYMBOL", {}) or {}
+            sl_floor_pts = float(_persym.get(base.upper(), sl_floor_pts) or sl_floor_pts)
+        except Exception:
+            pass
+        sl_pts = max(sl_atr_mult * atr_pts, min_dist_pts, sl_floor_pts) if atr_pts > 0 \
+            else max(config.SCALP_SL_POINTS, min_dist_pts, sl_floor_pts)
+        # NO take-profit: winners ride the trailing stop, not a fixed cap.
+        tp_pts = 0.0
 
         if signal.action == "buy":
             sl = price - sl_pts * pt
-            tp = price + tp_pts * pt
+            tp = 0.0
         else:
             sl = price + sl_pts * pt
-            tp = price - tp_pts * pt
+            tp = 0.0
         sl = round(sl, spec.digits)
-        tp = round(tp, spec.digits)
+        tp = 0.0   # no broker-side TP
 
         # which strategies agreed (for learning attribution)
         # ATTRIBUTION: the entry IS OsMA_Confluence (the sole signal). `also_agreed`
@@ -2865,6 +3057,26 @@ class ScalpEngine:
                         f"{signal.price} (same-level guard)")
             return
 
+        # ── ONE-TRADE-PER-OSMA-CYCLE guard (owner rule 2026-08-14) ──
+        # Only ONE fresh entry per OsMA cycle (the run of same-sign OsMA between zero
+        # crosses). This stops the 6-entries-in-one-cycle churn where each scratched
+        # trade immediately re-qualified fresh-momentum and re-opened. A genuine
+        # PYRAMID/BASKET leg (_is_pyramid) is exempt — that's a deliberate add to a
+        # winning position, not a fresh re-entry. The cycle id = sign of OsMA; a new
+        # cycle only begins after OsMA crosses zero to the opposite side.
+        if not _is_pyramid:
+            _osma = float(indicators.get("osma_closed", indicators.get("osma", 0.0)) or 0.0)
+            _cycle_sign = 1 if _osma > 0 else (-1 if _osma < 0 else 0)
+            _traded = getattr(self, "_cycle_traded", None)
+            if _traded is None:
+                self._cycle_traded = {}; _traded = self._cycle_traded
+            last_sign = _traded.get(base.upper())
+            if last_sign == _cycle_sign and _cycle_sign != 0:
+                logger.info(f"{base}: skip {signal.action} — already traded this OsMA "
+                            f"cycle (sign={_cycle_sign}); waiting for zero-cross "
+                            f"(one-trade-per-cycle, pyramids exempt)")
+                return
+
         # ── NO-OPPOSITE-DIRECTION guard (user rule) ──
         # Never open a trade opposite an already-open position on the SAME symbol —
         # holding buy+sell on one symbol just fights itself (self-inflicted whipsaw).
@@ -2900,9 +3112,32 @@ class ScalpEngine:
             _lot = round(_lot * _ws, 2)
         result = adapter.place(signal.action, _lot, sl=sl, tp=tp, comment=comment)
 
+        # LATENCY INSTRUMENTATION (Issue #2): measure signal->send latency. High
+        # values mean the signal waited (cycle cadence / IPC contention) before the
+        # order actually went out — the suspected cause of live slippage vs backtest.
+        try:
+            _ts = getattr(self, "_t_signal", None)
+            if _ts is not None:
+                _lat_ms = (time.perf_counter() - _ts) * 1000.0
+                _lvl = logger.warning if _lat_ms > 1500 else logger.info
+                _lvl(f"[LATENCY] {base}: signal->send {_lat_ms:.0f}ms "
+                     f"(cycle={config.SCALP_CYCLE_SECONDS}s)")
+                self._t_signal = None
+        except Exception:
+            pass
+
         if not result.ok:
             logger.info(f"{base}: no entry ({result.reason})")
             return
+
+        # record which OsMA cycle we traded in (one-trade-per-cycle guard). Pyramid
+        # legs deliberately do NOT overwrite it — the cycle was already claimed by leg 1.
+        if not _is_pyramid:
+            try:
+                _osma_c = float(indicators.get("osma_closed", indicators.get("osma", 0.0)) or 0.0)
+                self._cycle_traded[base.upper()] = 1 if _osma_c > 0 else (-1 if _osma_c < 0 else 0)
+            except Exception:
+                pass
 
         # record as pending in experience DB
         # ENTRY-ONLY wide-window capture for the adaptive-lookback study: store long
@@ -3022,6 +3257,12 @@ class ScalpEngine:
                 logger.debug(f"exit_points calc skip {ticket}: {e}")
                 _exit_pts = None
 
+            # self-validation: score the supervisor's decisions on this trade
+            # against the realised outcome (updates rolling per-decision hit-rate).
+            if getattr(self, "decision_alignment", None) is not None:
+                self.decision_alignment.score_trade(
+                    ticket=ticket, final_pnl=profit, final_profit_pts=_exit_pts,
+                    mfe_pts=_mfe, mae_pts=_mae)
             # feed realized P&L to the risk manager (drives the daily-loss halt)
             try:
                 self.risk.record_realized(profit)

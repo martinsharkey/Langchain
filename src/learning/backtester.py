@@ -50,16 +50,67 @@ class BacktestResult:
 class Backtester:
     def __init__(self, registry):
         self.registry = registry
+        self._spec_cache = {}
+
+    # ── £-on-0.01-lot conversion helpers (real broker tick value) ──
+    def _spec(self, symbol):
+        if symbol in self._spec_cache:
+            return self._spec_cache[symbol]
+        spec = {"point": 0.01, "tick_value": None, "tick_size": 0.01}
+        try:
+            import MetaTrader5 as mt5
+            info = mt5.symbol_info(symbol)
+            if info:
+                spec = {"point": info.point or 0.01,
+                        "tick_value": getattr(info, "trade_tick_value", None),
+                        "tick_size": getattr(info, "trade_tick_size", info.point) or info.point}
+        except Exception:
+            pass
+        self._spec_cache[symbol] = spec
+        return spec
+
+    def _point(self, symbol):
+        return self._spec(symbol)["point"] or 0.01
+
+    def _gbp_per_price_unit_001(self, symbol):
+        """Account-currency value of ONE full PRICE UNIT (e.g. $1 of XAU move) on a
+        0.01 lot, from the broker's tick value. tick_value is the account-currency
+        P&L for a 1.0-lot move of one tick_size; so per price unit at 0.01 lot =
+        (tick_value / tick_size) * 0.01. ATR and R below are in price units, so this
+        is the single, dimensionally-consistent multiplier (no extra /point)."""
+        s = self._spec(symbol)
+        tv, tsz = s["tick_value"], s["tick_size"] or 0.01
+        if tv:
+            return (tv / tsz) * 0.01          # per price-unit value at 0.01 lot
+        # fallback: XAU ~ $1/point contract → ~0.7388 GBP per $1 move at 0.01 lot
+        return 0.7388
+
+    def _avg_atr_points(self, series, lo, hi):
+        vals = []
+        for i in range(lo, min(hi, len(series))):
+            ind = series[i] if i < len(series) else None
+            a = (ind or {}).get("atr") if isinstance(ind, dict) else None
+            if a and a > 0:
+                vals.append(float(a))
+        return (sum(vals) / len(vals)) if vals else 0.0
 
     def walkforward_focused(self, symbol, params, sl_atr=1.0, tp_rr=2.0,
                             giveback=0.55, arm=0.5, timeframe=config.ENTRY_TIMEFRAME,
-                            bars=12000, windows=3, warmup=210, trail_min_atr=0.0):
+                            bars=12000, windows=3, warmup=210, trail_min_atr=0.0,
+                            exit_model="be_trail", sl_pts=0, be_trigger_pts=0, trail_pts=0,
+                            osma_exit_frac=0.0):
         """
         Walk-forward backtest of the symbol's FOCUSED pockets with a GIVEN
-        indicator param set + realistic manager exits (giveback of peak).
-        Recomputes indicators with `params` so tuning EMA/OsMA/RSI actually
-        changes signals. Returns generalization metrics for the optimizer:
-          {pfs, wrs, n_total, generalizes, score}  (score = min PF across windows)
+        indicator param set. Recomputes indicators with `params` so tuning
+        EMA/OsMA/RSI actually changes signals.
+
+        EXIT MODEL (owner design, exit_model='be_trail', DEFAULT): mirrors LIVE —
+        a WIDE broker-side SL in POINTS, NO fixed take-profit, move to BREAK-EVEN
+        once profit >= be_trigger_pts, then TRAIL trail_pts behind the best price so
+        runners run. This makes backtest == live == the GoldShark EA exit behaviour.
+        (exit_model='giveback' keeps the legacy peak-giveback model for comparison.)
+
+        Returns {pfs, wrs, n_total, generalizes, score, ...£/day + max_run_R}.
         """
         from src.strategies.indicators import compute_indicator_series
         from src.learning.edge_weights import focused_rules
@@ -73,6 +124,12 @@ class Backtester:
         fns = {nm: (self.registry.get(nm).signal_fn, {**self.registry.get(nm).params, **(params or {})})
                for nm, _ in rules if self.registry.get(nm)}
         n = len(rates); seg = (n - warmup) // windows
+        pt = self._point(symbol)
+        # exit params: explicit points override; else derive wide defaults from ATR
+        _sl_pts = float(sl_pts or params.get("sl_pts", 0) or 0)
+        _be_pts = float(be_trigger_pts or params.get("be_trigger_pts", 0) or 0)
+        _tr_pts = float(trail_pts or params.get("trail_pts", 0) or 0)
+        _osma_exit_frac = float(osma_exit_frac or params.get("osma_exit_frac", 0) or 0)
 
         # TICK DATA (real-life fills): fetch real bid/ask ticks for the bar window and
         # index them by bar so SL/TP are resolved TICK-BY-TICK in correct sequence with
@@ -101,19 +158,56 @@ class Backtester:
             logger.debug(f"tick fetch skip {symbol}: {e}")
 
         def _resolve_open(ot, i, price, giveback):
-            """Return realised R if the trade closes in bar i, else None. Uses ticks
-            (correct intrabar sequence + spread) when available; else bar high/low.
+            """Return realised R if the trade closes in bar i, else None.
 
-            Honors the volatility-scaled trail FLOOR: a giveback-close only fires if
-            the retrace from peak also exceeds trail_min_atr*ATR (ot['trail_floor']),
-            mirroring the live SCALP_TRAIL_MIN_ATR so the backtest proves the same
-            behaviour ('stopped then recovered' fix)."""
+            Two exit models:
+              * 'be_trail' (owner design, default): WIDE SL, NO TP, move to BE once
+                profit >= be_trigger_pts, then trail trail_pts behind best price.
+                Realised R = points_from_entry / sl_pts (SL distance = 1R).
+              * 'giveback' (legacy): fixed TP (rr) + peak-giveback trail.
+            Uses ticks (correct intrabar sequence + spread) when available; else bar
+            high/low."""
+            d = ot["dir"]
+            def _tick_px_seq():
+                if tick_by_bar and tick_by_bar[i]:
+                    for bid, ask in tick_by_bar[i]:
+                        yield bid if d == "buy" else ask
+                else:
+                    hib, lob = rates[i]["high"], rates[i]["low"]
+                    # worst-first ordering within the bar (conservative)
+                    yield (lob if d == "buy" else hib)
+                    yield (hib if d == "buy" else lob)
+
+            if ot.get("model") == "be_trail":
+                risk = ot["risk"]  # = sl_pts * pt (price distance of 1R)
+                for px in _tick_px_seq():
+                    if d == "buy":
+                        # stop first
+                        if px <= ot["sl"]:
+                            return (ot["sl"] - ot["entry"]) / risk
+                        ot["peak"] = max(ot["peak"], px)
+                        prof_pts = (ot["peak"] - ot["entry"]) / pt
+                        if not ot["be_done"] and prof_pts >= ot["be_pts"]:
+                            ot["sl"] = max(ot["sl"], ot["entry"] + 2 * pt); ot["be_done"] = True
+                        if ot["be_done"] and ot["trail_pts"] > 0:
+                            ot["sl"] = max(ot["sl"], ot["peak"] - ot["trail_pts"] * pt)
+                    else:
+                        if px >= ot["sl"]:
+                            return (ot["entry"] - ot["sl"]) / risk
+                        ot["peak"] = min(ot["peak"], px)
+                        prof_pts = (ot["entry"] - ot["peak"]) / pt
+                        if not ot["be_done"] and prof_pts >= ot["be_pts"]:
+                            ot["sl"] = min(ot["sl"], ot["entry"] - 2 * pt); ot["be_done"] = True
+                        if ot["be_done"] and ot["trail_pts"] > 0:
+                            ot["sl"] = min(ot["sl"], ot["peak"] + ot["trail_pts"] * pt)
+                return None
+
+            # ── legacy giveback model ──
             tf_floor = ot.get("trail_floor", 0.0)
             ticks = tick_by_bar[i] if tick_by_bar else None
             if ticks:
-                d = ot["dir"]
                 for bid, ask in ticks:
-                    px = bid if d == "buy" else ask   # price we realise on exit
+                    px = bid if d == "buy" else ask
                     if d == "buy":
                         ot["peak"] = max(ot["peak"], px)
                         if px <= ot["sl"]: return -1.0
@@ -129,9 +223,8 @@ class Backtester:
                         if fav >= ot["arm"] and retr >= giveback * fav and retr >= tf_floor:
                             return (ot["entry"] - px) / ot["risk"]
                 return None
-            # bar fallback
             hib, lob = rates[i]["high"], rates[i]["low"]
-            if ot["dir"] == "buy":
+            if d == "buy":
                 ot["peak"] = max(ot["peak"], hib); fav = ot["peak"] - ot["entry"]; retr = ot["peak"] - price
                 if lob <= ot["sl"]: return -1.0
                 if hib >= ot["tp"]: return ot["rr"]
@@ -160,6 +253,23 @@ class Backtester:
                         if r > 0: w += 1; gw += r
                         else: l += 1; gl += abs(r)
                         ot = None
+                # ── OsMA-PEAK ROLLOVER EXIT (be_trail only, optional) ──
+                # Owner idea: exit FASTER in profit when momentum rolls over. Track the
+                # best |OsMA| while in profit; if it fades below osma_exit_frac * peak
+                # AND we're in profit past be_pts, close now instead of waiting for the
+                # trail. osma_exit_frac=0 disables it. Proven via backtest before live.
+                if ot and ot.get("model") == "be_trail" and _osma_exit_frac > 0:
+                    o_now = abs(float(ind.get("osma") or 0.0))
+                    ot["peak_osma"] = max(ot.get("peak_osma", 0.0), o_now)
+                    prof = ((price - ot["entry"]) if ot["dir"] == "buy"
+                            else (ot["entry"] - price)) / pt
+                    if (ot["peak_osma"] > 1e-9 and prof >= ot["be_pts"]
+                            and o_now <= _osma_exit_frac * ot["peak_osma"]):
+                        rr = ((price - ot["entry"]) if ot["dir"] == "buy"
+                              else (ot["entry"] - price)) / ot["risk"]
+                        if rr > 0: w += 1; gw += rr
+                        else: l += 1; gl += abs(rr)
+                        ot = None
                 if ot:
                     continue
                 regime = self.registry._detect_market_regime(ind)
@@ -175,27 +285,58 @@ class Backtester:
                         action = s.action; break
                 if not action:
                     continue
-                risk = sl_atr * atr; tpd = tp_rr * risk
-                sl = price - risk if action == "buy" else price + risk
-                tp = price + tpd if action == "buy" else price - tpd
-                ot = {"dir": action, "entry": price, "sl": sl, "tp": tp, "risk": risk,
-                      "rr": tp_rr, "peak": price, "arm": arm * atr,
-                      "trail_floor": trail_min_atr * atr}
+                if exit_model == "be_trail":
+                    # WIDE SL in points (owner design). If not given, derive a wide
+                    # default: max(sl_atr*ATR, a points floor) so it's never tight.
+                    sl_dist_pts = _sl_pts if _sl_pts > 0 else max(sl_atr * atr / pt, 300)
+                    be_pts = _be_pts if _be_pts > 0 else (0.4 * sl_dist_pts)
+                    tr_pts = _tr_pts if _tr_pts > 0 else (0.6 * sl_dist_pts)
+                    risk = sl_dist_pts * pt
+                    sl = price - risk if action == "buy" else price + risk
+                    ot = {"dir": action, "entry": price, "sl": sl, "risk": risk,
+                          "peak": price, "model": "be_trail", "be_done": False,
+                          "be_pts": be_pts, "trail_pts": tr_pts}
+                else:
+                    risk = sl_atr * atr; tpd = tp_rr * risk
+                    sl = price - risk if action == "buy" else price + risk
+                    tp = price + tpd if action == "buy" else price - tpd
+                    ot = {"dir": action, "entry": price, "sl": sl, "tp": tp, "risk": risk,
+                          "rr": tp_rr, "peak": price, "arm": arm * atr,
+                          "trail_floor": trail_min_atr * atr, "model": "giveback"}
             tot = w + l
             pf = round(gw / gl, 2) if gl > 0 else (gw if gw else 0.0)
             return tot, (round(w / tot * 100, 1) if tot else 0), pf, round(gw - gl, 1)
 
-        pfs = []; wrs = []; n_total = 0
+        pfs = []; wrs = []; n_total = 0; total_R = 0.0
         for k in range(windows):
             lo = warmup + k * seg; hi = warmup + (k + 1) * seg if k < windows - 1 else n
             tot, wr, pf, R = _sim(lo, hi)
             if tot < 15:      # too few trades in a window -> unreliable
                 return {"pfs": pfs, "wrs": wrs, "n_total": n_total,
                         "generalizes": False, "score": -1.0}
-            pfs.append(pf); wrs.append(wr); n_total += tot
+            pfs.append(pf); wrs.append(wr); n_total += tot; total_R += R
         generalizes = all(p >= 1.0 for p in pfs)
-        return {"pfs": pfs, "wrs": wrs, "n_total": n_total,
-                "generalizes": generalizes, "score": min(pfs) if pfs else -1.0}
+        # ── £-on-0.01-lot readout (owner asked "how much did it make") ──
+        # 1R = sl_atr * ATR, expressed in PRICE UNITS. net_R * price-per-R gives the
+        # total favourable price distance; multiply by the account-currency value of
+        # one price unit at 0.01 lot (broker tick value) to get money. All three terms
+        # are in consistent PRICE-UNIT space — no extra /point conversion.
+        try:
+            avg_atr = self._avg_atr_points(series, warmup, n)         # price units
+            gbp_per_unit = self._gbp_per_price_unit_001(symbol)       # GBP per price unit @0.01 lot
+            price_per_R = (sl_atr * avg_atr)                          # price units per 1R
+            gbp_total = total_R * price_per_R * gbp_per_unit
+            bars_per_day = {"M1": 1440, "M5": 288, "M15": 96,
+                            "M30": 48, "H1": 24, "H4": 6, "D1": 1}.get(timeframe, 1440)
+            span_days = max((n - warmup) / bars_per_day, 1e-9)
+            money = {"gbp_total_001lot": round(gbp_total, 2),
+                     "gbp_per_day_001lot": round(gbp_total / span_days, 2),
+                     "trades_per_day": round(n_total / span_days, 1),
+                     "avg_atr_pts": round(avg_atr, 1), "span_days": round(span_days, 1)}
+        except Exception:
+            money = {}
+        return {"pfs": pfs, "wrs": wrs, "n_total": n_total, "total_R": round(total_R, 2),
+                "generalizes": generalizes, "score": min(pfs) if pfs else -1.0, **money}
 
     def walkforward_basket(self, symbol, params, sl_atr=1.0, tp_rr=2.0,
                            leg1_trigger_atr=1.0, add_atr=1.0, max_dd_frac=0.0,
