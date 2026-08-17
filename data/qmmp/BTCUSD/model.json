@@ -2,7 +2,7 @@
   "symbol": "BTCUSD",
   "status": "ONBOARDED",
   "onboarded_at": "2026-08-17",
-  "build": 16,
+  "build": 17,
   "timeframe": "H1",
   "path_timeframe": "M30",
   "cost_model": {
@@ -30,7 +30,14 @@
       "London": 10.259,
       "NewYork": 76.329
     },
-    "bulls": "OFF (not validated)",
+    "bulls": {
+      "Asian_long": 433.075,
+      "Asian_short": -184.006,
+      "London_long": 374.312,
+      "London_short": -142.521,
+      "NewYork_long": 626.909,
+      "NewYork_short": -137.729
+    },
     "bears": "OFF (not validated)",
     "atr": {
       "Asian": 632.985,
@@ -60,10 +67,17 @@
       "summary": "helps 2/2 folds -> KEEP"
     },
     "bulls": {
-      "value": "OFF (not validated)",
-      "helps": 1,
+      "value": {
+        "Asian_long": 433.075,
+        "Asian_short": -184.006,
+        "London_long": 374.312,
+        "London_short": -142.521,
+        "NewYork_long": 626.909,
+        "NewYork_short": -137.729
+      },
+      "helps": 2,
       "folds": 2,
-      "summary": "helps 1/2 folds -> OFF"
+      "summary": "helps 2/2 folds -> KEEP"
     },
     "bears": {
       "value": "OFF (not validated)",
@@ -149,35 +163,35 @@
         "fixed \u00a350": {
           "p_reach_100k": 0.0,
           "p_ruin": 0.0,
-          "median": 765,
+          "median": 768,
           "stress_worst_first": 725,
           "stress_streak_ruin_pct": 0.0
         },
         "fixed \u00a325": {
           "p_reach_100k": 0.0,
           "p_ruin": 0.0,
-          "median": 7505,
+          "median": 7707,
           "stress_worst_first": 7268,
           "stress_streak_ruin_pct": 0.0
         },
         "taper 10->25->50": {
           "p_reach_100k": 0.0,
           "p_ruin": 0.0,
-          "median": 18524,
+          "median": 18456,
           "stress_worst_first": 17506,
           "stress_streak_ruin_pct": 0.0
         },
         "fixed \u00a310": {
           "p_reach_100k": 99.9,
           "p_ruin": 0.0,
-          "median": 103109,
+          "median": 103758,
           "stress_worst_first": 101752,
           "stress_streak_ruin_pct": 0.0
         },
         "fixed \u00a35": {
           "p_reach_100k": 100.0,
           "p_ruin": 0.0,
-          "median": 103674,
+          "median": 103522,
           "stress_worst_first": "RUIN",
           "stress_streak_ruin_pct": 0.0
         }
@@ -292,6 +306,6 @@
     "net_gbp": 2003.0,
     "gbp_per_trade": 1.729
   },
-  "config_version": "e9d263330a05",
+  "config_version": "3f248d312f31",
   "ea_verification": "PASS"
 }

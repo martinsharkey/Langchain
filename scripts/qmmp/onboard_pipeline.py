@@ -788,7 +788,8 @@ def _validate_floor(R, ind, folds=3):
                 for side in ("long", "short"):
                     s = tr[(tr.session == sn) & (tr.side == side)]
                     w = s[s.win == 1][ind].dropna(); l = s[s.win == 0][ind].dropna()
-                    if len(w) > 8 and len(l) > 8:
+                    # lower bar for by-side buckets (sample halved by direction split)
+                    if len(w) > 3 and len(l) > 3:
                         thr[f"{sn}_{side}"] = (w.mean() + l.mean()) / 2
             else:
                 s = tr[tr.session == sn]
