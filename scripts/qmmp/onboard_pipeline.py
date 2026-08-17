@@ -54,9 +54,12 @@ def session_of(ep: int) -> str:
     return "Off"
 
 
-def _sess_floor(floors, key, session, default=0.0):
+def _sess_floor(floors, key, session, side=None, default=0.0):
     v = floors.get(key)
     if isinstance(v, dict):
+        if key in ("bulls", "bears") and side:
+            k = f"{session}_{side}"
+            return float(v.get(k, default) or default)
         return float(v.get(session, default) or default)
     return default
 
@@ -736,8 +739,9 @@ def _build_tester_ini(symbol: str, tf: str, model: dict, R_bt: pd.DataFrame, R_f
     for s in ("Asian", "London", "NewYork"):
         inp(f"OsmaFloor_{s}", round(_sess_floor(fl, "osma_mag", s), 3))
         inp(f"EmaAlign_{s}", round(_sess_floor(fl, "ema_align", s), 3))
-        inp(f"BullsFloor_{s}", round(_sess_floor(fl, "bulls", s), 3))
-        inp(f"BearsFloor_{s}", round(_sess_floor(fl, "bears", s), 3))
+        for side in ("Long", "Short"):
+            inp(f"BullsFloor_{s}_{side}", round(_sess_floor(fl, "bulls", s, side.lower()), 3))
+            inp(f"BearsFloor_{s}_{side}", round(_sess_floor(fl, "bears", s, side.lower()), 3))
         inp(f"AtrFloor_{s}", round(_sess_floor(fl, "atr", s), 3))
     inp("HardSL_pts", int(ex.get("sl", 628348))); inp("BE_pts", int(ex.get("be", 11057)))
     inp("BE_lock_pts", int(ex.get("be_lock", 1105))); inp("Trail_pts", int(ex.get("trail", 11057)))
@@ -770,7 +774,8 @@ ReplaceExpertParameters=1
 
 def _validate_floor(R, ind, folds=3):
     """Walk-forward: learn a per-session floor on train (midpoint winner/loser mean),
-    apply on test; keep if it raises mean net$/trade in a MAJORITY of folds."""
+    apply on test; keep if it raises mean net$/trade in a MAJORITY of folds.
+    For direction-aware indicators (bulls, bears), fits separate long/short thresholds."""
     R = R.sort_values("t"); fs = len(R)//folds
     if fs < 20:
         return dict(value="OFF (insufficient data)", summary="insufficient data", helps=0, folds=0)
@@ -779,22 +784,33 @@ def _validate_floor(R, ind, folds=3):
         tr = R.iloc[:(i+1)*fs]; te = R.iloc[(i+1)*fs:(i+2)*fs]
         thr = {}
         for sn in SESSIONS:
-            s = tr[tr.session == sn]
-            w = s[s.win == 1][ind].dropna(); l = s[s.win == 0][ind].dropna()
-            if len(w) > 8 and len(l) > 8:
-                thr[sn] = (w.mean() + l.mean()) / 2
+            if ind in ("bulls", "bears"):
+                for side in ("long", "short"):
+                    s = tr[(tr.session == sn) & (tr.side == side)]
+                    w = s[s.win == 1][ind].dropna(); l = s[s.win == 0][ind].dropna()
+                    if len(w) > 8 and len(l) > 8:
+                        thr[f"{sn}_{side}"] = (w.mean() + l.mean()) / 2
+            else:
+                s = tr[tr.session == sn]
+                w = s[s.win == 1][ind].dropna(); l = s[s.win == 0][ind].dropna()
+                if len(w) > 8 and len(l) > 8:
+                    thr[sn] = (w.mean() + l.mean()) / 2
         learned = thr
         def passes(r):
-            t = thr.get(r["session"])
+            key = r["session"] + ("_long" if r["side"] == "long" else "_short") if ind in ("bulls", "bears") else r["session"]
+            t = thr.get(key)
             if t is None or pd.isna(r[ind]): return True
-            return r[ind] >= t          # all our signed indicators: higher-aligned = better
+            return r[ind] >= t
         kept = te[te.apply(passes, axis=1)]
         nf += 1
         if len(kept) >= 10 and kept['usd'].mean() > te['usd'].mean():
             helps += 1
-    ok = helps >= (nf) and nf > 0        # helps in ALL folds
-    return dict(value=({k: round(v,3) for k,v in learned.items()} if ok else "OFF (not validated)"),
-                helps=helps, folds=nf,
+    ok = helps >= (nf) and nf > 0
+    if ind in ("bulls", "bears"):
+        val = {k: round(v,3) for k,v in learned.items()} if ok else "OFF (not validated)"
+    else:
+        val = {k: round(v,3) for k,v in learned.items()} if ok else "OFF (not validated)"
+    return dict(value=val, helps=helps, folds=nf,
                 summary=f"helps {helps}/{nf} folds -> {'KEEP' if ok else 'OFF'}")
 
 

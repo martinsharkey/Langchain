@@ -16,9 +16,12 @@ TF_ENUM = {"M1": "PERIOD_M1", "M5": "PERIOD_M5", "M15": "PERIOD_M15",
            "M30": "PERIOD_M30", "H1": "PERIOD_H1", "H4": "PERIOD_H4"}
 
 
-def _sess_floor(floors, key, session, default=0.0):
+def _sess_floor(floors, key, session, side=None, default=0.0):
     v = floors.get(key)
     if isinstance(v, dict):
+        if key in ("bulls", "bears") and side:
+            k = f"{session}_{side}"
+            return float(v.get(k, default) or default)
         return float(v.get(session, default) or default)
     return default
 
@@ -59,8 +62,9 @@ def build_ea(model: dict) -> tuple[str, str, dict]:
     for sname in ("Asian", "London", "NewYork"):
         add(f"OsmaFloor_{sname}",  round(_sess_floor(fl, "osma_mag",  sname), 3), 0, 200, 1)
         add(f"EmaAlign_{sname}",   round(_sess_floor(fl, "ema_align", sname), 3), -100, 200, 1)
-        add(f"BullsFloor_{sname}", round(_sess_floor(fl, "bulls",     sname), 3), 0, 500, 5)
-        add(f"BearsFloor_{sname}", round(_sess_floor(fl, "bears",     sname), 3), -500, 0, 5)
+        for side in ("Long", "Short"):
+            add(f"BullsFloor_{sname}_{side}", round(_sess_floor(fl, "bulls", sname, side.lower()), 3), -500, 500, 5)
+            add(f"BearsFloor_{sname}_{side}", round(_sess_floor(fl, "bears", sname, side.lower()), 3), -500, 500, 5)
         add(f"AtrFloor_{sname}",   round(_sess_floor(fl, "atr",       sname), 3), 0, 5000, 25)
     # --- exit (basket trail + early pyramid) — every tunable exit element ---
     add("HardSL_pts",  int(ex.get("sl", 628348)), 50000, 800000, 25000, "int")
@@ -77,9 +81,9 @@ def build_ea(model: dict) -> tuple[str, str, dict]:
 
     # Build grouped input block using MQL5 `input group` directive
     entry_block = "\n".join(inputs[:3])
-    floor_block = "\n".join(inputs[3:3 + 15])
-    exit_block = "\n".join(inputs[3 + 15:3 + 15 + 7])
-    mm_block = "\n".join(inputs[3 + 15 + 7:])
+    floor_block = "\n".join(inputs[3:3 + 21])
+    exit_block = "\n".join(inputs[3 + 21:3 + 21 + 7])
+    mm_block = "\n".join(inputs[3 + 21 + 7:])
     inp_block = f'\ninput group "Entry / OsMA"\n{entry_block}\n' \
                 f'\ninput group "Per-session strength floors (0 = OFF)"\n{floor_block}\n' \
                 f'\ninput group "Exit: basket trail + early pyramid"\n{exit_block}\n' \
@@ -156,8 +160,8 @@ double OsMA(int shift)
    }}
 double ATRv(int shift){{ double a[1]; if(CopyBuffer(hATR,0,shift,1,a)<1) return(0); return(a[0]); }}
 double EMAv(int shift){{ double e[1]; if(CopyBuffer(hEMA,0,shift,1,e)<1) return(0); return(e[0]); }}
-double BullsP(int shift){{ double v[1]; if(CopyBuffer(hBulls,0,shift,1,v)<1) return(0); return(v[0]/_Point); }}
-double BearsP(int shift){{ double v[1]; if(CopyBuffer(hBears,0,shift,1,v)<1) return(0); return(v[0]/_Point); }}
+double BullsP(int shift){{ double v[1]; if(CopyBuffer(hBulls,0,shift,1,v)<1) return(0); return(v[0]); }}
+double BearsP(int shift){{ double v[1]; if(CopyBuffer(hBears,0,shift,1,v)<1) return(0); return(v[0]); }}
 
 //--- session (broker/server time assumed ~UTC; adjust if your server offset differs)
 string CurSession()
@@ -168,11 +172,12 @@ string CurSession()
    if(h>=0  && h<9 ) return("Asian");
    return("Off");
    }}
-void SessionFloors(string s, double &osma, double &ema, double &bulls, double &bears, double &atr)
+void SessionFloors(string s, bool isLong, double &osma, double &ema, double &bulls, double &bears, double &atr)
   {{
-   if(s=="Asian"){{  osma=OsmaFloor_Asian;  ema=EmaAlign_Asian;  bulls=BullsFloor_Asian;  bears=BearsFloor_Asian;  atr=AtrFloor_Asian; }}
-   else if(s=="London"){{ osma=OsmaFloor_London; ema=EmaAlign_London; bulls=BullsFloor_London; bears=BearsFloor_London; atr=AtrFloor_London; }}
-   else {{ osma=OsmaFloor_NewYork; ema=EmaAlign_NewYork; bulls=BullsFloor_NewYork; bears=BearsFloor_NewYork; atr=AtrFloor_NewYork; }}
+   string side = isLong ? "Long" : "Short";
+   if(s=="Asian"){{  osma=OsmaFloor_Asian;  ema=EmaAlign_Asian;  bulls=isLong?BullsFloor_Asian_Long:BullsFloor_Asian_Short;  bears=isLong?BearsFloor_Asian_Long:BearsFloor_Asian_Short;  atr=AtrFloor_Asian; }}
+   else if(s=="London"){{ osma=OsmaFloor_London; ema=EmaAlign_London; bulls=isLong?BullsFloor_London_Long:BullsFloor_London_Short; bears=isLong?BearsFloor_London_Long:BearsFloor_London_Short; atr=AtrFloor_London; }}
+   else {{ osma=OsmaFloor_NewYork; ema=EmaAlign_NewYork; bulls=isLong?BullsFloor_NewYork_Long:BullsFloor_NewYork_Short; bears=isLong?BearsFloor_NewYork_Long:BearsFloor_NewYork_Short; atr=AtrFloor_NewYork; }}
    }}
 
 //+------------------------------------------------------------------+
@@ -192,11 +197,11 @@ void OnTick()
    bool crossDown = (o2>=0 && o1<0);
    if(!crossUp && !crossDown) return;
 
-   double fOsma,fEma,fBulls,fBears,fAtr; SessionFloors(sess,fOsma,fEma,fBulls,fBears,fAtr);
+    double fOsma,fEma,fBulls,fBears,fAtr; SessionFloors(sess,crossUp,fOsma,fEma,fBulls,fBears,fAtr);
    double osma_mag = MathAbs(o1);
    double ema_slope = EMAv(1)-EMAv(4);               // slope over 3 bars
    double ema_align = crossUp ? ema_slope : -ema_slope;
-   double atr = ATRv(1)/_Point;
+    double atr = ATRv(1);
    double bulls_al = crossUp ? BullsP(1) : -BullsP(1);   // aligned power (long wants +bulls)
    double bears_al = crossUp ? BearsP(1) : -BearsP(1);
    // KEEP-floor gates (0 = OFF => always passes; validated floors set the non-zero gate)
@@ -222,7 +227,9 @@ double PerLegLots()
    double step=SymbolInfoDouble(_Symbol,SYMBOL_VOLUME_STEP);
    perLeg = MathFloor(perLeg/step)*step;
    double vmin=SymbolInfoDouble(_Symbol,SYMBOL_VOLUME_MIN);
-   return(perLeg<vmin?0.0:perLeg);
+   double lots = perLeg<vmin?0.0:perLeg;
+   Print("GoldShark PerLegLots: eq=", DoubleToString(eq,2), " units=", IntegerToString(units), " perLeg=", DoubleToString(perLeg,2), " lots=", DoubleToString(lots,2));
+   return(lots);
    }}
 
 void OpenLeg(bool isLong)
