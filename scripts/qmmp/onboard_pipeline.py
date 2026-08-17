@@ -437,9 +437,10 @@ def run(symbol, spread_pts=None, comm_per_lot=6.0, slip_pts=100.0, gbp_per_001=5
         win = R['win'].mean()*100
         tf_results.append(dict(tf=tf, cyc=len(R), move_cost=round(ratio,1), win=round(win,0),
                                exit=ec, R=R, med_peak=round(med),
-                               bt_ret=round(bt_ret,0), bt_dd=round(bt_dd,1), bt_days=round(bt_days),
-                               ft_ret=round(ft_ret,0), ft_ann=round(ft_ann,0), ft_dd=round(ft_dd,1),
-                               ft_days=round(ft_days), ft_bal=round(ft_bal)))
+                                bt_ret=round(bt_ret,0), bt_dd=round(bt_dd,1), bt_days=round(bt_days),
+                                ft_ret=round(ft_ret,0), ft_ann=round(ft_ann,0), ft_dd=round(ft_dd,1),
+                                ft_days=round(ft_days), ft_bal=round(ft_bal),
+                                bt_df=bt, ft_df=ft))
         L(f"  {tf}: cyc={len(R):4d} mc={ratio:4.1f}x win={win:3.0f}%  "
           f"BACKTEST £{start_bal:.0f}->£{bt_bal:,.0f} ({bt_ret:+.0f}%, {bt_days:.0f}d)  "
           f"FORWARD £{start_bal:.0f}->£{ft_bal:,.0f} ({ft_ret:+.0f}%, ann {ft_ann:+.0f}%, DD {ft_dd:.0f}%, {ft_days:.0f}d)")
@@ -450,6 +451,7 @@ def run(symbol, spread_pts=None, comm_per_lot=6.0, slip_pts=100.0, gbp_per_001=5
         _write(d, log, None); return None
     chosen = max(viable, key=lambda t: t["ft_ret"])
     TF = chosen["tf"]; R = chosen["R"]; ec = chosen["exit"]
+    bt = chosen.get("bt_df"); ft = chosen.get("ft_df")
     L(f"\n  -> CHOSEN TIMEFRAME (best FORWARD-TEST compounded return): {TF}")
     L(f"     forward £{start_bal:.0f} -> £{chosen['ft_bal']:,.0f} ({chosen['ft_ret']:+.0f}% over {chosen['ft_days']:.0f}d, "
       f"annualized {chosen['ft_ann']:+.0f}%, maxDD {chosen['ft_dd']:.0f}%), win {chosen['win']:.0f}%, {chosen['cyc']} cycles\n")
@@ -539,10 +541,17 @@ def run(symbol, spread_pts=None, comm_per_lot=6.0, slip_pts=100.0, gbp_per_001=5
                                        balance_sweep=bal_sweep,
                                        dream_100k=dict(target=100000, base=100, schedules=mm,
                                                        lowest_risk_viable=dream_pick)),
-                 forward_test=dict(base=start_bal, final=chosen["ft_bal"], return_pct=chosen["ft_ret"],
-                                   annualized_pct=chosen["ft_ann"], max_dd_pct=chosen["ft_dd"],
-                                   days=chosen["ft_days"], split="70/30 backtest/forward"),
-                 backtest=dict(return_pct=chosen["bt_ret"], max_dd_pct=chosen["bt_dd"], days=chosen["bt_days"]),
+                  forward_test=dict(base=start_bal, final=chosen["ft_bal"], return_pct=chosen["ft_ret"],
+                                    annualized_pct=chosen["ft_ann"], max_dd_pct=chosen["ft_dd"],
+                                    days=chosen["ft_days"], split="70/30 backtest/forward"),
+                  backtest=dict(return_pct=chosen["bt_ret"], max_dd_pct=chosen["bt_dd"], days=chosen["bt_days"]),
+                  validation_window=dict(
+                      backtest_start=pd.Timestamp(bt["t"].iloc[0], unit="s").strftime("%Y-%m-%d") if bt is not None and len(bt) else None,
+                      split_date=pd.Timestamp(ft["t"].iloc[0], unit="s").strftime("%Y-%m-%d") if ft is not None and len(ft) else None,
+                      forward_end=pd.Timestamp(ft["t"].iloc[-1], unit="s").strftime("%Y-%m-%d") if ft is not None and len(ft) else None,
+                      split_pct="70/30",
+                      note="Use ForwardMode=4 in MT5 Strategy Tester with ForwardDate=split_date to match pipeline's 70/30 split"
+                  ),
                  timeframe_scan=[{k: t[k] for k in ("tf","cyc","move_cost","win","bt_ret","bt_dd","ft_ret","ft_ann","ft_dd","ft_days","ft_bal")} for t in tf_results],
                  overall=dict(cycles=len(R), win_pct=round(R['win'].mean()*100,1),
                               net_gbp=round(R['usd'].sum(),0), gbp_per_trade=round(R['usd'].mean(),3)))
@@ -716,7 +725,7 @@ def _build_tester_ini(symbol: str, tf: str, model: dict, R_bt: pd.DataFrame, R_f
     bt_end   = pd.Timestamp(R_bt["t"].iloc[-1], unit="s").strftime("%Y.%m.%d") if len(R_bt) else "2024.12.31"
     ft_start = pd.Timestamp(R_ft["t"].iloc[0], unit="s").strftime("%Y.%m.%d") if len(R_ft) else "2025.01.01"
     ft_end   = pd.Timestamp(R_ft["t"].iloc[-1], unit="s").strftime("%Y.%m.%d") if len(R_ft) else "2025.06.30"
-    # use forward mode 2 (backtest+forward) with split date
+    # use forward mode 4 (custom date) so ForwardDate is honored
     forward_date = ft_start
     deposit = mm.get("base_balance", 5000.0)
     gbp_per = mm.get("gbp_per_001", 50.0)
@@ -744,7 +753,7 @@ Period={tf}
 Model=2
 Optimization=0
 OptimizationMode=0
-ForwardMode=2
+ForwardMode=4
 FromDate={bt_start}
 ToDate={ft_end}
 ForwardDate={forward_date}

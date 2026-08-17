@@ -2,7 +2,7 @@
   "symbol": "BTCUSD",
   "status": "ONBOARDED",
   "onboarded_at": "2026-08-17",
-  "build": 9,
+  "build": 11,
   "timeframe": "H1",
   "path_timeframe": "M30",
   "cost_model": {
@@ -157,35 +157,35 @@
         "fixed \u00a350": {
           "p_reach_100k": 0.0,
           "p_ruin": 0.0,
-          "median": 765,
+          "median": 766,
           "stress_worst_first": 725,
           "stress_streak_ruin_pct": 0.0
         },
         "fixed \u00a325": {
           "p_reach_100k": 0.0,
           "p_ruin": 0.0,
-          "median": 7569,
+          "median": 7473,
           "stress_worst_first": 7268,
           "stress_streak_ruin_pct": 0.0
         },
         "taper 10->25->50": {
           "p_reach_100k": 0.0,
           "p_ruin": 0.0,
-          "median": 18390,
+          "median": 18590,
           "stress_worst_first": 17506,
           "stress_streak_ruin_pct": 0.0
         },
         "fixed \u00a310": {
           "p_reach_100k": 99.9,
           "p_ruin": 0.0,
-          "median": 103254,
+          "median": 103578,
           "stress_worst_first": 101752,
           "stress_streak_ruin_pct": 0.0
         },
         "fixed \u00a35": {
           "p_reach_100k": 100.0,
           "p_ruin": 0.0,
-          "median": 103532,
+          "median": 104011,
           "stress_worst_first": "RUIN",
           "stress_streak_ruin_pct": 0.0
         }
@@ -206,6 +206,13 @@
     "return_pct": 39952.0,
     "max_dd_pct": 8.2,
     "days": 485
+  },
+  "validation_window": {
+    "backtest_start": "2024-09-14",
+    "split_date": "2026-01-13",
+    "forward_end": "2026-08-17",
+    "split_pct": "70/30",
+    "note": "Use ForwardMode=4 in MT5 Strategy Tester with ForwardDate=split_date to match pipeline's 70/30 split"
   },
   "timeframe_scan": [
     {
