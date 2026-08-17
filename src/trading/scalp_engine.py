@@ -1035,6 +1035,13 @@ class ScalpEngine:
         # 1b) MANAGE open positions (BE+/trail/exit) via the A/B trade manager
         self._manage_open_positions()
 
+        # 1b-ii) PYRAMID_TRAIL leg-adds: add a new aligned leg once price advances
+        # +PYRAMID_ADD_STEP_POINTS beyond the last leg, while direction still holds.
+        try:
+            self._maybe_add_pyramid_legs()
+        except Exception as e:
+            logger.debug(f"pyramid leg-add skip: {e}")
+
         # 2) adapt strategy weights from REAL closed-trade performance (L2)
         #    + refresh per-variant performance so the trade manager biases
         #    variant selection toward what actually works (visible learning).
@@ -1235,9 +1242,11 @@ class ScalpEngine:
         historical variant performance.
         """
         from src.trading.trade_manager import VARIANTS
-        # GS_PROVEN is the gold-pinned proven model (assigned directly for XAUUSD), NOT an
-        # exploratory arm for other symbols — keep it out of the A/B weight pool.
-        _explore = tuple(v for v in VARIANTS if v != "GS_PROVEN")
+        # GS_PROVEN and PYRAMID_TRAIL are PINNED, deliberate exit models (assigned by
+        # symbol), NOT exploratory A/B arms — keep both out of the weight pool so nothing
+        # "explores" them. (There are currently no exploratory arms; the pool is empty.)
+        _pinned = ("GS_PROVEN", "PYRAMID_TRAIL")
+        _explore = tuple(v for v in VARIANTS if v not in _pinned)
         weights = {v: 1.0 for v in _explore}  # exploration floor
         if not config.LEARNING_ADAPTATION_ENABLED:
             return weights
@@ -1890,6 +1899,121 @@ class ScalpEngine:
                 return True
         return False
 
+    def _maybe_add_pyramid_legs(self):
+        """OWNER PYRAMID model (PYRAMID_TRAIL symbols, e.g. BTCUSD): add a NEW aligned
+        leg once price has advanced +PYRAMID_ADD_STEP_POINTS beyond the MOST-ADVANCED
+        existing leg's entry AND the entry direction still holds. Equal per-leg size
+        (the normal per-position lot); each new leg is a separate position managed with
+        its OWN BE+trail (PYRAMID_TRAIL variant), so every committed leg finishes in
+        profit. No hard cap by default (PYRAMID_TRAIL_MAX_LEGS=0); the per-leg trailing
+        stop + wide broker SL end the run. Only fires in live modes."""
+        if not config.is_live_mode():
+            return
+        pyr_syms = [s.upper().split("-")[0].rstrip(".")
+                    for s in (getattr(config, "PYRAMID_TRAIL_SYMBOLS", []) or [])]
+        if not pyr_syms:
+            return
+        add_step = float(getattr(config, "PYRAMID_ADD_STEP_POINTS", 200.0))
+        max_legs = int(getattr(config, "PYRAMID_TRAIL_MAX_LEGS", 0) or 0)
+        # group open legs by (base, action)
+        groups = {}
+        for ticket, pos in self.open_positions.items():
+            b = pos.base_symbol.upper().split("-")[0].rstrip(".")
+            if b in pyr_syms:
+                groups.setdefault((pos.base_symbol, pos.action), []).append(pos)
+        for (base, action), legs in groups.items():
+            if max_legs and len(legs) >= max_legs:
+                continue
+            adapter = self.adapters.get(base)
+            if adapter is None or adapter.spec is None:
+                continue
+            pt = adapter.spec.point or 0.01
+            # the most-advanced leg entry in the trade direction (highest for buy,
+            # lowest for sell) — new legs are added ABOVE/BELOW the frontier only.
+            entries = [p.entry_price for p in legs]
+            frontier = max(entries) if action == "buy" else min(entries)
+            try:
+                tick = adapter.live_tick()
+                if tick is None:
+                    continue
+                px = tick.ask if action == "buy" else tick.bid
+            except Exception:
+                continue
+            advanced = ((px - frontier) if action == "buy" else (frontier - px)) / pt
+            if advanced < add_step:
+                continue
+            # direction must STILL align (live OsMA_Confluence agrees with this side)
+            if not self._pyramid_direction_holds(base, adapter, action):
+                logger.info(f"[PYRAMID] {base} {action}: +{advanced:.0f}pt past frontier "
+                            f"but direction no longer aligned -> no add")
+                continue
+            # risk gate (respects daily halt etc.)
+            try:
+                spread_pts = ((tick.ask - tick.bid) / pt) if pt else 0
+                if not self.risk.check_entry(spread_points=spread_pts).allowed:
+                    continue
+            except Exception:
+                pass
+            self._place_pyramid_leg(base, adapter, action, px, pt, len(legs))
+
+    def _pyramid_direction_holds(self, base, adapter, action) -> bool:
+        """True if the live OsMA_Confluence signal still favours `action` for this symbol."""
+        try:
+            resolved = adapter.resolved_symbol
+            rates = adapter.get_rates(timeframe=config.ENTRY_TIMEFRAME, count=300)
+            if not rates:
+                return False
+            ind = compute_full_indicators(rates, self._tuned_params(resolved))
+            sig = self.registry.get_focused_signal(ind, self._tuned_params(resolved))
+            return bool(sig and getattr(sig, "action", None) == action)
+        except Exception as e:
+            logger.debug(f"pyramid dir-check skip {base}: {e}")
+            return False
+
+    def _place_pyramid_leg(self, base, adapter, action, price, pt, existing_legs):
+        """Open one additional equal-size leg with the wide (3000pt) broker SL."""
+        spec = adapter.spec
+        _lot = self._position_lot(adapter)
+        if config.TRADING_MODE == "LIVE_MICRO":
+            _lot = min(_lot, config.LIVE_MICRO_MAX_LOT)
+        sl_pts = float(getattr(config, "PYRAMID_HARD_SL_POINTS", 3000.0))
+        safety_tp = self._tuned_params(adapter.resolved_symbol).get("safety_tp_points") or (sl_pts * 3)
+        if action == "buy":
+            sl = round(price - sl_pts * pt, spec.digits)
+            tp = round(price + float(safety_tp) * pt, spec.digits)
+        else:
+            sl = round(price + sl_pts * pt, spec.digits)
+            tp = round(price - float(safety_tp) * pt, spec.digits)
+        result = adapter.place(action, _lot, sl=sl, tp=tp,
+                               comment=f"pyramid_leg{existing_legs + 1}")
+        if not result.ok:
+            logger.info(f"[PYRAMID] {base} {action}: leg add rejected ({result.reason})")
+            return
+        resolved = adapter.resolved_symbol
+        indicators = {}
+        try:
+            indicators = self._live_indicators(base, adapter) or {}
+        except Exception:
+            pass
+        db_id = self.experience_db.record_trade(
+            signal={"symbol": resolved, "action": action, "price": result.price,
+                    "stop_loss": sl, "take_profit": tp,
+                    "position_size": result.filled_volume, "confidence": 0.0,
+                    "strategy_used": "OsMA_Confluence"},
+            indicators=indicators, outcome="pending",
+            strategy_combination="pyramid_add", timeframe=config.ENTRY_TIMEFRAME,
+            mt5_ticket=result.ticket)
+        self.open_positions[result.ticket] = TrackedPosition(
+            ticket=result.ticket, symbol=resolved, base_symbol=base, action=action,
+            entry_price=result.price, volume=result.filled_volume, sl=sl, tp=tp,
+            confidence=0.0, strategy="OsMA_Confluence", strategy_combo="pyramid_add",
+            opened_at=datetime.now(timezone.utc).isoformat(), db_trade_id=db_id,
+            indicators={k: v for k, v in indicators.items()
+                        if isinstance(v, (int, float, str, bool))})
+        self.trades_opened += 1
+        logger.warning(f"[PYRAMID] {base} {action}: ADDED leg #{existing_legs + 1} "
+                       f"@ {result.price} (SL {sl_pts:.0f}pt) — direction still aligned")
+
     def _manage_baskets(self):
         """GoldShark-style BASKET management for profit-gated pyramids. When a symbol has
         >=2 same-direction legs, treat them as one basket: track the COMBINED unrealised
@@ -1909,6 +2033,16 @@ class ScalpEngine:
         for (base, action), legs in groups.items():
             if len(legs) < 2:
                 continue   # not a basket
+            # PYRAMID_TRAIL symbols manage each leg INDEPENDENTLY (owner model: per-leg
+            # BE+trail so every committed leg finishes in profit) — do NOT trail/close
+            # them as one combined basket here.
+            try:
+                if base.upper().split("-")[0].rstrip(".") in [
+                        s.upper().split("-")[0].rstrip(".")
+                        for s in (getattr(config, "PYRAMID_TRAIL_SYMBOLS", []) or [])]:
+                    continue
+            except Exception:
+                pass
             adapter = self.adapters.get(base)
             if adapter is None or adapter.spec is None:
                 continue
@@ -2073,9 +2207,22 @@ class ScalpEngine:
                                            f"keeping tracked")
                             continue
                     if verdict == "blip" and not getattr(st, "htf_widened", False):
-                        # widen the broker stop to survive the wick, ONCE, capped
+                        # widen the broker stop to survive the wick, ONCE, capped.
+                        # SKIP for PYRAMID_TRAIL: its broker SL is already WIDE (3000pt =
+                        # a full OsMA cycle) precisely to survive wicks — an ATR-based
+                        # "widen" here would actually TIGHTEN it to ~50pt and get the leg
+                        # cut immediately (observed: SL yanked to 51pt, then a 3489pt
+                        # 'violent reversal' close on a trade that should have had 3000pt).
+                        if getattr(st, "variant", None) == "PYRAMID_TRAIL":
+                            continue
                         widen = max(st.atr_points * config.HTF_WICK_WIDEN_ATR, spread_pts * 3) * adapter.spec.point
                         new_sl = (pos.entry_price - widen) if pos.action == "buy" else (pos.entry_price + widen)
+                        # only ever LOOSEN the stop, never tighten it below the current SL
+                        cur_sl = getattr(pos, "sl", 0) or st.sl or 0
+                        if cur_sl:
+                            farther = (new_sl < cur_sl) if pos.action == "buy" else (new_sl > cur_sl)
+                            if not farther:
+                                continue
                         r = adapter.modify_sl(ticket, round(new_sl, adapter.spec.digits))
                         if r.ok:
                             st.htf_widened = True
@@ -2670,7 +2817,10 @@ class ScalpEngine:
         if self._symbol_paused(base):
             return
         resolved = adapter.resolved_symbol
-        rates = get_rates(resolved, timeframe=config.ENTRY_TIMEFRAME, count=120)
+        # PER-SYMBOL entry timeframe (QMMP): BTCUSD trades H1 (spread-negative on M1);
+        # others use the default ENTRY_TIMEFRAME. See config.entry_timeframe_for.
+        _etf = config.entry_timeframe_for(resolved)
+        rates = get_rates(resolved, timeframe=_etf, count=120)
         if not rates or len(rates) < 30:
             logger.warning(f"{base}: insufficient rate data")
             return

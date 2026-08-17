@@ -16,7 +16,9 @@ CORE_RULES = [
     "MACD/CCI/BB/RSI standalone entries. All other strategies are retired.",
     "R2  ONE EXIT MODEL: every symbol uses the GS_PROVEN exit — a wide, data-derived "
     "broker SL + break-even lock + trailing stop, and the broker TP is REMOVED once "
-    "trailing arms (a TP only caps winners). No per-symbol split exit variants.",
+    "trailing arms (a TP only caps winners). EXCEPTION: symbols in PYRAMID_TRAIL_SYMBOLS "
+    "(owner-specified, e.g. BTCUSD) use PYRAMID_TRAIL — per-leg BE+trail + profit-gated "
+    "pyramid adds. No OTHER per-symbol split exit variants.",
     "R3  PER-SYMBOL SL IS DATA-DERIVED AT ONBOARDING: the broker SL / safety-TP / BE / "
     "trail are derived from that symbol's own OsMA-cycle excursion (points travelled from "
     "a zero-cross until it reverses, sampled over ~20 cycles), then live-tuned. Never "
@@ -58,14 +60,24 @@ def assert_core_rules() -> list[str]:
     startup so standardisation drift is caught immediately."""
     problems = []
 
-    # R1/R2: the trade manager must assign GS_PROVEN for every symbol.
+    # R1/R2: the trade manager must assign the sole exit model for every symbol —
+    # GS_PROVEN, EXCEPT symbols the owner explicitly puts on the PYRAMID_TRAIL model
+    # (per-leg BE+trail + profit-gated adds; e.g. BTCUSD). Both are proven, deliberate
+    # exit models — not drift. Any OTHER variant is a violation.
     try:
         from src.trading.trade_manager import TradeManager, VARIANTS
+        from src import config
         tm = TradeManager()
+        _pyr = [s.upper().split("-")[0].rstrip(".") for s in
+                getattr(config, "PYRAMID_TRAIL_SYMBOLS", []) or []]
         for sym in ("XAUUSD", "BTCUSD", "GER40", "EURUSD", "SOMETHINGNEW"):
             v = tm.assign_variant(sym)
-            if v != SOLE_EXIT_VARIANT:
-                problems.append(f"R2 violated: assign_variant({sym})={v}, expected {SOLE_EXIT_VARIANT}")
+            base = sym.upper().split("-")[0].rstrip(".")
+            allowed = {SOLE_EXIT_VARIANT}
+            if base in _pyr:
+                allowed = {"PYRAMID_TRAIL"}
+            if v not in allowed:
+                problems.append(f"R2 violated: assign_variant({sym})={v}, expected {allowed}")
     except Exception as e:
         problems.append(f"R2 check error: {e}")
 

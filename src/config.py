@@ -80,7 +80,16 @@ MT5_SERVER = os.getenv("MT5_SERVER", "")
 # ─── Trading Parameters ─────────────────────────────────────
 SYMBOL = "XAUUSD"         # Base/primary symbol (broker suffix resolved at runtime)
 TIMEFRAME = "H1"          # Primary timeframe for analysis
-ENTRY_TIMEFRAME = "M15"   # Timeframe for entry signals
+ENTRY_TIMEFRAME = "M15"   # Default timeframe for entry signals
+# PER-SYMBOL entry timeframe override (QMMP validation). BTCUSD is spread-negative on M1
+# (move/cost 1.7x) but viable on H1 (move/cost ~36x) — validated 2026-08-17, see
+# data/qmmp/BTCUSD/model.json + QMMP_SPEC.md. Symbols not listed use ENTRY_TIMEFRAME.
+SYMBOL_ENTRY_TIMEFRAME = {
+    "BTCUSD": os.getenv("BTCUSD_ENTRY_TIMEFRAME", "H1"),
+}
+def entry_timeframe_for(symbol: str) -> str:
+    base = (symbol or "").upper().split("-")[0].rstrip(".")
+    return SYMBOL_ENTRY_TIMEFRAME.get(base, ENTRY_TIMEFRAME)
 RISK_PERCENT = float(os.getenv("XAUUSD_RISK_PERCENT", "1.0"))
 MAX_POSITION_SIZE = float(os.getenv("XAUUSD_MAX_POSITION_SIZE", "0.1"))
 MIN_RISK_REWARD_RATIO = 2.0
@@ -223,6 +232,35 @@ GROWTH_DAILY_LOSS_HALT_PCT = float(os.getenv("GROWTH_DAILY_LOSS_HALT_PCT", "30.0
 # once the peak passes the arm (points). GoldShark-style InpBasketGivebackPct/PeakThreshold.
 GROWTH_BASKET_GIVEBACK_PCT = float(os.getenv("GROWTH_BASKET_GIVEBACK_PCT", "0.35"))
 GROWTH_BASKET_ARM_POINTS = float(os.getenv("GROWTH_BASKET_ARM_POINTS", "200.0"))
+
+# ─── PYRAMID_TRAIL exit model (owner-specified, BTCUSD) ──────────────────────
+# Owner's manual, evidence-based BTCUSD model (2026-08-16): the OsMA-cycle excursion
+# averages ~3000 points of movement, so:
+#   * broker-side hard SL at PYRAMID_HARD_SL_POINTS from entry (survives a full cycle);
+#   * each leg trails INDEPENDENTLY (per-leg, NOT one basket stop): move to break-even
+#     at +PYRAMID_BE_TRIGGER_POINTS, then trail the SL up every
+#     PYRAMID_TRAIL_STEP_POINTS of new profit — so every committed leg finishes in profit;
+#   * add a NEW pyramid leg once price is +PYRAMID_ADD_STEP_POINTS beyond the PREVIOUS
+#     leg's entry AND the entry direction still aligns; equal per-leg size, no hard cap
+#     (the per-leg trailing stop + broker SL end the run).
+# Applied only to symbols in PYRAMID_TRAIL_SYMBOLS; all others keep GS_PROVEN.
+PYRAMID_TRAIL_SYMBOLS = [s.strip().upper() for s in
+                         os.getenv("PYRAMID_TRAIL_SYMBOLS", "BTCUSD").split(",") if s.strip()]
+# BTCUSD exit — WALK-FORWARD VALIDATED + REVERSAL-AWARE (2026-08-17). The raw net-points
+# optimum picked trail=200pt, but BTCUSD's MEASURED median intra-cycle PULLBACK is ~2200pt
+# (75th ~4200), so a 200pt trail is ~10x too tight — it survives a strong trend by luck
+# but gets shaken out on every normal pullback (the whipsaw -0.22 losses). Corrected: trail
+# = 2200pt (= median pullback, rides normal reversals). BE=4500 (lock once move is real),
+# add-leg at +2500pt (leg-1 profit cushion covers cost). Walk-forward stable across folds
+# (net +330k/+547k unseen, 59-65% win). Leg-1 SL 6000pt survives median/75th adverse before BE.
+PYRAMID_HARD_SL_POINTS = float(os.getenv("PYRAMID_HARD_SL_POINTS", "6000.0"))
+PYRAMID_BE_TRIGGER_POINTS = float(os.getenv("PYRAMID_BE_TRIGGER_POINTS", "4500.0"))
+PYRAMID_BE_LOCK_POINTS = float(os.getenv("PYRAMID_BE_LOCK_POINTS", "400.0"))
+PYRAMID_TRAIL_STEP_POINTS = float(os.getenv("PYRAMID_TRAIL_STEP_POINTS", "2200.0"))
+PYRAMID_ADD_STEP_POINTS = float(os.getenv("PYRAMID_ADD_STEP_POINTS", "2500.0"))
+# 0 = no cap (owner's model). A positive value caps legs as a safety ceiling.
+PYRAMID_TRAIL_MAX_LEGS = int(os.getenv("PYRAMID_TRAIL_MAX_LEGS", "0"))
+
 
 
 def is_live_mode() -> bool:

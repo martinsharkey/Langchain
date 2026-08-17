@@ -1,0 +1,70 @@
+{
+  "symbol": "BTCUSD",
+  "status": "VALIDATED",
+  "validated_at": "2026-08-17",
+  "timeframe": "H1",
+  "path_timeframe_for_sim": "M30",
+  "rationale": "M1 BTCUSD is spread-negative (move/cost 1.7x). H1 move/cost ~36x makes the OsMA edge survive real ECN cost. Validated tick/M30-path + walk-forward + native vectorbt from_order_func (two independent engines agree).",
+  "entry": {
+    "signal": "OsMA H1 zero-cross",
+    "long": "osma[-2] <= 0 < osma[-1]",
+    "short": "osma[-2] >= 0 > osma[-1]",
+    "osma_params": {"fast": 12, "slow": 26, "signal": 9},
+    "notes": "Entry filters tested (bulls/bears power, ATR/EMA, forming-candle strength) are TIMEFRAME-SPECIFIC and did NOT transfer from M1; on H1 the raw OsMA cross + exit model is the validated edge. Power polarity FLIPS on H1 (extreme power = exhausted move)."
+  },
+  "exit": {
+    "model": "single basket trailing stop + early-pyramid",
+    "catastrophe_sl_points": 250000,
+    "be_trigger_points": 15850,
+    "trail_points": 15850,
+    "trail_pct_of_median_peak": 0.15,
+    "add_step_points": 15850,
+    "early_pyramid_window_frac": 0.15,
+    "max_legs": 4,
+    "new_leg_sl": "previous leg entry (break-even)",
+    "basket_trail": "single stop trails behind basket peak; all legs close together on hit or OsMA sign-flip",
+    "tp": "none (trailing only)"
+  },
+  "money_management": {
+    "account_currency": "GBP",
+    "leverage": "1:500",
+    "start_balance": 5000,
+    "sizing": "floor(balance / GBP_per_001) x 0.01 lot total, split equally (whole 0.01) across up to 4 legs, COMPOUNDING per balance",
+    "gbp_per_001_options": {"aggressive": 50, "moderate": 100, "conservative": 250},
+    "recommended_gbp_per_001": 250,
+    "broker_lot_cap": 100,
+    "parallel_accounts": "open a new account when size would exceed 100 lots (~GBP500k at GBP50/0.01)"
+  },
+  "cost_model_real_ecn": {
+    "broker": "VT Markets / Fusion Markets Raw ECN",
+    "spread_points": 1200,
+    "spread_gbp_per_001_roundturn_approx": 0.084,
+    "commission_usd_per_lot_roundturn": 6.0,
+    "slippage_points_per_fill": 100,
+    "gbp_per_point_per_001_lot": 0.00007,
+    "note": "DEMO has NO spread/slippage and hid this - always model real ECN cost."
+  },
+  "results_walk_forward": {
+    "custom_sim_basket": {"win_pct": "78-91", "usd_per_basket": "1.1-3.0", "note": "3-fold WF on M30 and M15, all folds positive OOS"},
+    "native_vectorbt_from_order_func": {"total_return_pct": 2987, "win_pct": 56.5, "sharpe": 6.6, "max_dd_pct": 7.5, "trades": 1257, "sizing": "GBP250/0.01", "period": "2024-09..2026-08 M30 path"},
+    "equity_forward_test_fresh_5000_after_frictions": {
+      "gbp50_per_001": {"end": 19938, "return_pct": 299, "maxdd_pct": 6.4},
+      "gbp100_per_001": {"end": 10108, "return_pct": 102, "maxdd_pct": 3.3},
+      "gbp250_per_001": {"end": 6679, "return_pct": 34, "maxdd_pct": 1.3}
+    }
+  },
+  "caveats": [
+    "Single ~2yr window (BTC-trend-favorable).",
+    "In-sample compounded returns (+27000%) are meaningless; use OOS fresh-5000 figures.",
+    "Slippage modeled flat 100pt/fill; real slippage grows with size and in fast moves.",
+    "Swap/overnight financing NOT modeled (H1 baskets can span rollover).",
+    "M30-path fills, not tick-exact (adequate since H1 moves >> spread).",
+    "Large-size compounding limited by 100-lot/account cap -> parallel accounts (operationally heavy)."
+  ],
+  "vectorbt_artifacts": {
+    "engine": "scripts/qmmp/vbt_ordermodel.py (from_order_func, native)",
+    "trades": "data/qmmp/BTCUSD/vbt_ordermodel_trades.parquet",
+    "stats": "data/qmmp/BTCUSD/vbt_ordermodel_stats.json",
+    "onnx_integration": "trade records + entry features exported for ONNX ML validation"
+  }
+}

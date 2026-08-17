@@ -30,8 +30,9 @@ from src.utils.logger import get_logger
 
 logger = get_logger("trade_manager")
 
-# The ONE proven management model (legacy A/B arms removed).
-VARIANTS = ("GS_PROVEN",)
+# The proven management model (legacy A/B arms removed). PYRAMID_TRAIL is the
+# owner-specified per-leg trail model for pyramided symbols (e.g. BTCUSD).
+VARIANTS = ("GS_PROVEN", "PYRAMID_TRAIL")
 
 
 @dataclass
@@ -214,12 +215,20 @@ class TradeManager:
 
     # ── variant assignment (learning biases this over time) ──
     def assign_variant(self, symbol: str) -> str:
-        # FIXED RULE (scalability): EVERY symbol uses the ONE proven GoldShark exit model
-        # (GS_PROVEN) — data-derived wide SL + BE-lock + trailing with the TP removed once
-        # trailing arms. No per-symbol split exit variants; one pattern scales to any symbol.
-        # The ONLY complementary exception is BTCUSD's CryptoRTI websocket (whale-wave), which
-        # AUGMENTS entries/confidence via a separate path — it does not change this exit model.
-        # (The other variants remain defined only for historical A/B analysis of past trades.)
+        # PYRAMID_TRAIL: owner-specified per-leg trail model for configured symbols
+        # (e.g. BTCUSD) — wide broker SL + per-leg BE+trail + profit-gated leg adds.
+        # Every OTHER symbol uses the ONE proven GoldShark exit model (GS_PROVEN):
+        # data-derived wide SL + BE-lock + trailing with the TP removed once trailing
+        # arms. The BTCUSD CryptoRTI websocket AUGMENTS entries only, not this exit.
+        try:
+            from src import config
+            base = (symbol or "").upper().split("-")[0].rstrip(".")
+            pyr = [s.upper().split("-")[0].rstrip(".") for s in
+                   getattr(config, "PYRAMID_TRAIL_SYMBOLS", []) or []]
+            if base in pyr:
+                return "PYRAMID_TRAIL"
+        except Exception:
+            pass
         return "GS_PROVEN"
 
     def register(self, pos, atr_points: float, trend_aligned: bool = False) -> ManagedState:
@@ -348,6 +357,44 @@ class TradeManager:
                     st.sl = new_sl
                     self._log(st, "gs_proven_trail", new_sl)
                     return {"modify_sl": round(new_sl, 6), "remove_tp": True, "_tag": "gs_proven_trail"}
+            return None
+
+        if v == "PYRAMID_TRAIL":
+            # OWNER MODEL (BTCUSD): each leg trails INDEPENDENTLY (this is one leg's state).
+            #   * broker SL was set WIDE at entry (hard_sl_points ~3000 = full OsMA cycle);
+            #   * at +be_trigger (400) move SL to BE + be_lock (small locked profit), drop TP;
+            #   * then RATCHET the SL up in trail_step (400) increments behind best price, so
+            #     every committed leg finishes in profit. New-leg ADDING is handled by the
+            #     engine (profit-gated +add_step), not here — this arm only protects a leg.
+            try:
+                from src import config
+                be_trig = float(getattr(config, "PYRAMID_BE_TRIGGER_POINTS", 400.0))
+                be_lock = float(getattr(config, "PYRAMID_BE_LOCK_POINTS", 50.0))
+                trail_step = float(getattr(config, "PYRAMID_TRAIL_STEP_POINTS", 400.0))
+            except Exception:
+                be_trig, be_lock, trail_step = 400.0, 50.0, 400.0
+            # per-symbol personality can still override the magnitudes
+            p = self._personality(st)
+            be_trig = float(p.get("be_trigger_pts", be_trig))
+            be_lock = float(p.get("be_lock_pts", be_lock))
+            trail_step = float(p.get("trail_points", trail_step))
+            sgn = 1 if st.action == "buy" else -1
+            if not st.moved_to_be and profit_points >= be_trig:
+                be_plus = st.entry + be_lock * point * sgn
+                st.moved_to_be = True
+                st.trail_active = True
+                st.sl = be_plus
+                self._log(st, "pyramid_be_lock", be_plus)
+                return {"modify_sl": round(be_plus, 6), "remove_tp": True, "_tag": "pyramid_be"}
+            if st.trail_active:
+                # STEPPED trail: only move the stop once price advances a full trail_step
+                # beyond the last locked level (keeps the stop trail_step behind best price).
+                trail_dist = trail_step * point
+                new_sl = (st.best_price - trail_dist) if st.action == "buy" else (st.best_price + trail_dist)
+                if self._sl_improves(st, new_sl):
+                    st.sl = new_sl
+                    self._log(st, "pyramid_trail", new_sl)
+                    return {"modify_sl": round(new_sl, 6), "remove_tp": True, "_tag": "pyramid_trail"}
             return None
 
         return None

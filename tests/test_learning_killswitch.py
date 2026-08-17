@@ -32,8 +32,10 @@ def _weights_for(cache, base="BTCUSD"):
 
 
 def test_variants_standardised_to_gs_proven_only():
-    """The legacy A/B arms are removed; GS_PROVEN is the single model."""
-    assert VARIANTS == ("GS_PROVEN",), VARIANTS
+    """Legacy A/B arms removed. The only variants are the PINNED, deliberate exit
+    models: GS_PROVEN (default) and PYRAMID_TRAIL (owner per-leg model for configured
+    symbols). Neither is an exploratory arm — the exploratory pool stays empty."""
+    assert set(VARIANTS) == {"GS_PROVEN", "PYRAMID_TRAIL"}, VARIANTS
 
 
 def test_exploratory_pool_empty_when_frozen():

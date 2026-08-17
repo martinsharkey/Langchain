@@ -112,9 +112,73 @@ def test_violent_reversal_respects_wide_broker_sl():
     assert catastrophe and "close" in catastrophe and "violent" in catastrophe["close"], catastrophe
 
 
+def _pyr_state(entry=63000.0, action="buy"):
+    return ManagedState(
+        ticket=1, symbol="BTCUSD", base_symbol="BTCUSD", action=action,
+        entry=entry, volume=0.01, sl=0.0, tp=0.0, point=0.01,
+        atr_points=2328.0, variant="PYRAMID_TRAIL", opened_at=0.0, best_price=entry,
+    )
+
+
+def test_pyramid_trail_be_at_trigger():
+    """PYRAMID_TRAIL: below the BE trigger does nothing; at/after it locks BE+ and removes TP.
+    Uses the live config BE trigger so it tracks the optimised value."""
+    from src import config
+    be = float(config.PYRAMID_BE_TRIGGER_POINTS)
+    mgr = _mgr()
+    point = 0.01
+    st = _pyr_state()
+    # just below the BE trigger -> no action
+    assert mgr.evaluate(st, price=63000.0 + (be - 100) * point, point=point, spread_points=1700) is None
+    assert not st.moved_to_be
+    # at/after the BE trigger -> arms BE + removes TP
+    intent = mgr.evaluate(st, price=63000.0 + (be + 50) * point, point=point, spread_points=1700)
+    assert intent and "modify_sl" in intent and intent.get("remove_tp") is True, intent
+    assert st.moved_to_be and st.trail_active
+    assert intent["modify_sl"] > st.entry   # locked in profit
+
+
+def test_pyramid_trail_trails_and_ratchets():
+    """After BE, the stop trails trail_step behind best price and never loosens on pullback."""
+    from src import config
+    be = float(config.PYRAMID_BE_TRIGGER_POINTS)
+    trail = float(config.PYRAMID_TRAIL_STEP_POINTS)
+    mgr = _mgr()
+    point = 0.01
+    st = _pyr_state()
+    mgr.evaluate(st, price=63000.0 + (be + 50) * point, point=point, spread_points=1700)   # BE lock
+    peak = be + 1500
+    r2 = mgr.evaluate(st, price=63000.0 + peak * point, point=point, spread_points=1700)  # trail up
+    assert r2 and "modify_sl" in r2, r2
+    # stop sits ~trail_step behind the best price
+    assert abs(r2["modify_sl"] - (63000.0 + (peak - trail) * point)) < 1.0, r2
+    prev = st.sl
+    # pullback must NOT move the stop backwards (ratchet)
+    mgr.evaluate(st, price=63000.0 + (peak - 400) * point, point=point, spread_points=1700)
+    assert st.sl == prev, (prev, st.sl)
+
+
+def test_pyramid_trail_failsafe_respects_3000_sl():
+    """With the wide 3000pt broker SL, the catastrophe failsafe must not fire until
+    price overshoots 1.25x the SL — so normal adverse excursion never cuts a leg early."""
+    mgr = _mgr()
+    point = 0.01
+    st = ManagedState(
+        ticket=1, symbol="BTCUSD", base_symbol="BTCUSD", action="buy",
+        entry=63000.0, volume=0.01, sl=63000.0 - 3000 * point, tp=0.0, point=point,
+        atr_points=2328.0, variant="PYRAMID_TRAIL", opened_at=0.0, best_price=63000.0,
+    )
+    # 2400 pts adverse (normal excursion, inside the 3000 SL) -> NO cut
+    early = mgr.evaluate(st, price=63000.0 - 2400 * point, point=point, spread_points=1700)
+    assert not (early and "close" in (early or {})), early
+
+
 if __name__ == "__main__":
     test_gs_proven_below_be_trigger_does_nothing()
     test_gs_proven_locks_be_and_removes_tp()
     test_gs_proven_trail_only_tightens()
     test_violent_reversal_hard_exit_applies_to_gs_proven()
-    print("GS_PROVEN exit tests passed")
+    test_pyramid_trail_be_at_trigger()
+    test_pyramid_trail_trails_and_ratchets()
+    test_pyramid_trail_failsafe_respects_3000_sl()
+    print("GS_PROVEN + PYRAMID_TRAIL exit tests passed")
