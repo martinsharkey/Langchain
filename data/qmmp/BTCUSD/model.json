@@ -1,70 +1,227 @@
 {
   "symbol": "BTCUSD",
-  "status": "VALIDATED",
-  "validated_at": "2026-08-17",
+  "status": "ONBOARDED",
+  "onboarded_at": "2026-08-17",
   "timeframe": "H1",
-  "path_timeframe_for_sim": "M30",
-  "rationale": "M1 BTCUSD is spread-negative (move/cost 1.7x). H1 move/cost ~36x makes the OsMA edge survive real ECN cost. Validated tick/M30-path + walk-forward + native vectorbt from_order_func (two independent engines agree).",
+  "path_timeframe": "M30",
+  "cost_model": {
+    "spread_points": 1200.0,
+    "slippage_points": 100.0,
+    "commission_usd_per_lot": 6.0,
+    "gbp_per_point_per_001": 0.0001
+  },
   "entry": {
-    "signal": "OsMA H1 zero-cross",
-    "long": "osma[-2] <= 0 < osma[-1]",
-    "short": "osma[-2] >= 0 > osma[-1]",
-    "osma_params": {"fast": 12, "slow": 26, "signal": 9},
-    "notes": "Entry filters tested (bulls/bears power, ATR/EMA, forming-candle strength) are TIMEFRAME-SPECIFIC and did NOT transfer from M1; on H1 the raw OsMA cross + exit model is the validated edge. Power polarity FLIPS on H1 (extreme power = exhausted move)."
-  },
-  "exit": {
-    "model": "single basket trailing stop + early-pyramid",
-    "catastrophe_sl_points": 250000,
-    "be_trigger_points": 15850,
-    "trail_points": 15850,
-    "trail_pct_of_median_peak": 0.15,
-    "add_step_points": 15850,
-    "early_pyramid_window_frac": 0.15,
-    "max_legs": 4,
-    "new_leg_sl": "previous leg entry (break-even)",
-    "basket_trail": "single stop trails behind basket peak; all legs close together on hit or OsMA sign-flip",
-    "tp": "none (trailing only)"
-  },
-  "money_management": {
-    "account_currency": "GBP",
-    "leverage": "1:500",
-    "start_balance": 5000,
-    "sizing": "floor(balance / GBP_per_001) x 0.01 lot total, split equally (whole 0.01) across up to 4 legs, COMPOUNDING per balance",
-    "gbp_per_001_options": {"aggressive": 50, "moderate": 100, "conservative": 250},
-    "recommended_gbp_per_001": 250,
-    "broker_lot_cap": 100,
-    "parallel_accounts": "open a new account when size would exceed 100 lots (~GBP500k at GBP50/0.01)"
-  },
-  "cost_model_real_ecn": {
-    "broker": "VT Markets / Fusion Markets Raw ECN",
-    "spread_points": 1200,
-    "spread_gbp_per_001_roundturn_approx": 0.084,
-    "commission_usd_per_lot_roundturn": 6.0,
-    "slippage_points_per_fill": 100,
-    "gbp_per_point_per_001_lot": 0.00007,
-    "note": "DEMO has NO spread/slippage and hid this - always model real ECN cost."
-  },
-  "results_walk_forward": {
-    "custom_sim_basket": {"win_pct": "78-91", "usd_per_basket": "1.1-3.0", "note": "3-fold WF on M30 and M15, all folds positive OOS"},
-    "native_vectorbt_from_order_func": {"total_return_pct": 2987, "win_pct": 56.5, "sharpe": 6.6, "max_dd_pct": 7.5, "trades": 1257, "sizing": "GBP250/0.01", "period": "2024-09..2026-08 M30 path"},
-    "equity_forward_test_fresh_5000_after_frictions": {
-      "gbp50_per_001": {"end": 19938, "return_pct": 299, "maxdd_pct": 6.4},
-      "gbp100_per_001": {"end": 10108, "return_pct": 102, "maxdd_pct": 3.3},
-      "gbp250_per_001": {"end": 6679, "return_pct": 34, "maxdd_pct": 1.3}
+    "signal": "OsMA zero-cross",
+    "osma_params": {
+      "fast": 12,
+      "slow": 26,
+      "signal": 9
     }
   },
-  "caveats": [
-    "Single ~2yr window (BTC-trend-favorable).",
-    "In-sample compounded returns (+27000%) are meaningless; use OOS fresh-5000 figures.",
-    "Slippage modeled flat 100pt/fill; real slippage grows with size and in fast moves.",
-    "Swap/overnight financing NOT modeled (H1 baskets can span rollover).",
-    "M30-path fills, not tick-exact (adequate since H1 moves >> spread).",
-    "Large-size compounding limited by 100-lot/account cap -> parallel accounts (operationally heavy)."
+  "floors": {
+    "osma_mag": {
+      "Asian": 17.971,
+      "London": 15.243,
+      "NewYork": 28.439
+    },
+    "ema_align": {
+      "Asian": 5.402,
+      "London": 10.259,
+      "NewYork": 76.329
+    },
+    "bulls": {
+      "Asian": 131.151,
+      "London": 140.685,
+      "NewYork": 206.939
+    },
+    "bears": "OFF (not validated)",
+    "atr": {
+      "Asian": 632.985,
+      "London": 567.043,
+      "NewYork": 551.449
+    }
+  },
+  "floors_detail": {
+    "osma_mag": {
+      "value": {
+        "Asian": 17.971,
+        "London": 15.243,
+        "NewYork": 28.439
+      },
+      "helps": 2,
+      "folds": 2,
+      "summary": "helps 2/2 folds -> KEEP"
+    },
+    "ema_align": {
+      "value": {
+        "Asian": 5.402,
+        "London": 10.259,
+        "NewYork": 76.329
+      },
+      "helps": 2,
+      "folds": 2,
+      "summary": "helps 2/2 folds -> KEEP"
+    },
+    "bulls": {
+      "value": {
+        "Asian": 131.151,
+        "London": 140.685,
+        "NewYork": 206.939
+      },
+      "helps": 2,
+      "folds": 2,
+      "summary": "helps 2/2 folds -> KEEP"
+    },
+    "bears": {
+      "value": "OFF (not validated)",
+      "helps": 0,
+      "folds": 2,
+      "summary": "helps 0/2 folds -> OFF"
+    },
+    "atr": {
+      "value": {
+        "Asian": 632.985,
+        "London": 567.043,
+        "NewYork": 551.449
+      },
+      "helps": 2,
+      "folds": 2,
+      "summary": "helps 2/2 folds -> KEEP"
+    }
+  },
+  "exit": {
+    "sl": 628348,
+    "be": 11057,
+    "trail": 11057,
+    "add": 11057,
+    "early": 0.15,
+    "max_legs": 4
+  },
+  "per_session": {
+    "Asian": {
+      "n": 372,
+      "win": 82.3,
+      "net": 481.0,
+      "per_trade": 1.293
+    },
+    "London": {
+      "n": 206,
+      "win": 85.9,
+      "net": 238.0,
+      "per_trade": 1.155
+    },
+    "NewYork": {
+      "n": 457,
+      "win": 88.0,
+      "net": 1055.0,
+      "per_trade": 2.308
+    }
+  },
+  "money_management": {
+    "base_balance": 5000.0,
+    "gbp_per_001": 50.0,
+    "max_legs": 4,
+    "leverage": "1:500",
+    "lot_cap_per_account": 100
+  },
+  "forward_test": {
+    "base": 5000.0,
+    "final": 47890,
+    "return_pct": 858.0,
+    "annualized_pct": 4435.0,
+    "max_dd_pct": 5.7,
+    "days": 216,
+    "split": "70/30 backtest/forward"
+  },
+  "backtest": {
+    "return_pct": 39952.0,
+    "max_dd_pct": 8.2,
+    "days": 485
+  },
+  "timeframe_scan": [
+    {
+      "tf": "M1",
+      "cyc": 4381,
+      "move_cost": 1.9,
+      "win": 22.0,
+      "bt_ret": -68.0,
+      "bt_dd": 67.9,
+      "ft_ret": -54.0,
+      "ft_ann": -100.0,
+      "ft_dd": 53.7,
+      "ft_days": 14,
+      "ft_bal": 2316
+    },
+    {
+      "tf": "M5",
+      "cyc": 2239,
+      "move_cost": 6.8,
+      "win": 55.0,
+      "bt_ret": 308.0,
+      "bt_dd": 3.3,
+      "ft_ret": 15.0,
+      "ft_ann": 325.0,
+      "ft_dd": 5.8,
+      "ft_days": 35,
+      "ft_bal": 5752
+    },
+    {
+      "tf": "M15",
+      "cyc": 901,
+      "move_cost": 17.4,
+      "win": 63.0,
+      "bt_ret": 179.0,
+      "bt_dd": 3.5,
+      "ft_ret": 18.0,
+      "ft_ann": 424.0,
+      "ft_dd": 3.0,
+      "ft_days": 36,
+      "ft_bal": 5879
+    },
+    {
+      "tf": "M30",
+      "cyc": 459,
+      "move_cost": 27.1,
+      "win": 69.0,
+      "bt_ret": 86.0,
+      "bt_dd": 4.6,
+      "ft_ret": 15.0,
+      "ft_ann": 274.0,
+      "ft_dd": 2.8,
+      "ft_days": 39,
+      "ft_bal": 5757
+    },
+    {
+      "tf": "H1",
+      "cyc": 1158,
+      "move_cost": 41.0,
+      "win": 86.0,
+      "bt_ret": 39952.0,
+      "bt_dd": 8.2,
+      "ft_ret": 858.0,
+      "ft_ann": 4435.0,
+      "ft_dd": 5.7,
+      "ft_days": 216,
+      "ft_bal": 47890
+    },
+    {
+      "tf": "H4",
+      "cyc": 409,
+      "move_cost": 83.7,
+      "win": 89.0,
+      "bt_ret": 2590.0,
+      "bt_dd": 12.1,
+      "ft_ret": 294.0,
+      "ft_ann": 469.0,
+      "ft_dd": 1.5,
+      "ft_days": 288,
+      "ft_bal": 19691
+    }
   ],
-  "vectorbt_artifacts": {
-    "engine": "scripts/qmmp/vbt_ordermodel.py (from_order_func, native)",
-    "trades": "data/qmmp/BTCUSD/vbt_ordermodel_trades.parquet",
-    "stats": "data/qmmp/BTCUSD/vbt_ordermodel_stats.json",
-    "onnx_integration": "trade records + entry features exported for ONNX ML validation"
+  "overall": {
+    "cycles": 1158,
+    "win_pct": 85.8,
+    "net_gbp": 2003.0,
+    "gbp_per_trade": 1.729
   }
 }
