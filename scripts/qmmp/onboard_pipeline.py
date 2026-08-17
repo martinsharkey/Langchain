@@ -529,6 +529,14 @@ def run(symbol, spread_pts=None, comm_per_lot=6.0, slip_pts=100.0, gbp_per_001=5
                               net_gbp=round(R['usd'].sum(),0), gbp_per_trade=round(R['usd'].mean(),3)))
     _write(d, log, model)
     L(f"\nWROTE {os.path.join(d,'model.json')} + onboarding_report.md")
+    # Stage 10: generate the MT5 Expert Advisor (GoldShark_<symbol>.mq5) + optimiser ranges
+    try:
+        from scripts.qmmp.ea_generator import write_ea
+        ea_path = write_ea(model, d)
+        L(f"## Stage 10: generated MT5 EA -> {os.path.basename(ea_path)} (+ .set optimiser ranges)")
+        print(f"WROTE {ea_path} + .set")
+    except Exception as e:
+        L(f"## Stage 10: EA generation skipped ({e})")
     return model
 
 
