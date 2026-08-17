@@ -1,0 +1,279 @@
+{
+  "symbol": "XAUUSD",
+  "status": "ONBOARDED",
+  "onboarded_at": "2026-08-17",
+  "timeframe": "H1",
+  "path_timeframe": "M30",
+  "cost_model": {
+    "spread_points": 260.0,
+    "slippage_points": 100.0,
+    "commission_usd_per_lot": 6.0,
+    "gbp_per_point_per_001": 0.00074
+  },
+  "entry": {
+    "signal": "OsMA zero-cross",
+    "osma_params": {
+      "fast": 12,
+      "slow": 26,
+      "signal": 9
+    }
+  },
+  "floors": {
+    "osma_mag": {
+      "Asian": 0.286,
+      "London": 0.345,
+      "NewYork": 0.381
+    },
+    "ema_align": {
+      "Asian": 0.177,
+      "London": -0.08,
+      "NewYork": 1.365
+    },
+    "bulls": "OFF (not validated)",
+    "bears": "OFF (not validated)",
+    "atr": "OFF (not validated)"
+  },
+  "floors_detail": {
+    "osma_mag": {
+      "value": {
+        "Asian": 0.286,
+        "London": 0.345,
+        "NewYork": 0.381
+      },
+      "helps": 2,
+      "folds": 2,
+      "summary": "helps 2/2 folds -> KEEP"
+    },
+    "ema_align": {
+      "value": {
+        "Asian": 0.177,
+        "London": -0.08,
+        "NewYork": 1.365
+      },
+      "helps": 2,
+      "folds": 2,
+      "summary": "helps 2/2 folds -> KEEP"
+    },
+    "bulls": {
+      "value": "OFF (not validated)",
+      "helps": 1,
+      "folds": 2,
+      "summary": "helps 1/2 folds -> OFF"
+    },
+    "bears": {
+      "value": "OFF (not validated)",
+      "helps": 0,
+      "folds": 2,
+      "summary": "helps 0/2 folds -> OFF"
+    },
+    "atr": {
+      "value": "OFF (not validated)",
+      "helps": 1,
+      "folds": 2,
+      "summary": "helps 1/2 folds -> OFF"
+    }
+  },
+  "exit": {
+    "sl": 148200,
+    "be": 2376,
+    "trail": 2376,
+    "add": 2376,
+    "early": 0.15,
+    "max_legs": 4
+  },
+  "per_session": {
+    "Asian": {
+      "n": 237,
+      "win": 86.5,
+      "net": 555.0,
+      "per_trade": 2.341
+    },
+    "London": {
+      "n": 164,
+      "win": 83.5,
+      "net": 482.0,
+      "per_trade": 2.94
+    },
+    "NewYork": {
+      "n": 312,
+      "win": 90.4,
+      "net": 951.0,
+      "per_trade": 3.049
+    }
+  },
+  "money_management": {
+    "base_balance": 5000.0,
+    "gbp_per_001": 50.0,
+    "max_legs": 4,
+    "leverage": "1:500",
+    "lot_cap_per_account": 100,
+    "balance_sweep": {
+      "100": {
+        "final": 19777,
+        "ret_pct": 19677,
+        "maxdd": 5.8,
+        "ruined": false
+      },
+      "500": {
+        "final": 121003,
+        "ret_pct": 24101,
+        "maxdd": 5.8,
+        "ruined": false
+      },
+      "1000": {
+        "final": 250643,
+        "ret_pct": 24964,
+        "maxdd": 5.8,
+        "ruined": false
+      },
+      "5000": {
+        "final": 981427,
+        "ret_pct": 19529,
+        "maxdd": 3.2,
+        "ruined": false
+      }
+    },
+    "dream_100k": {
+      "target": 100000,
+      "base": 100,
+      "schedules": {
+        "fixed \u00a350": {
+          "p_reach_100k": 0.5,
+          "p_ruin": 0.0,
+          "median": 19605,
+          "stress_worst_first": 18755,
+          "stress_streak_ruin_pct": 0.0
+        },
+        "fixed \u00a325": {
+          "p_reach_100k": 100.0,
+          "p_ruin": 0.0,
+          "median": 103855,
+          "stress_worst_first": 105093,
+          "stress_streak_ruin_pct": 0.0
+        },
+        "taper 10->25->50": {
+          "p_reach_100k": 100.0,
+          "p_ruin": 0.0,
+          "median": 101938,
+          "stress_worst_first": 101387,
+          "stress_streak_ruin_pct": 0.0
+        },
+        "fixed \u00a310": {
+          "p_reach_100k": 100.0,
+          "p_ruin": 0.0,
+          "median": 109021,
+          "stress_worst_first": 100914,
+          "stress_streak_ruin_pct": 0.0
+        },
+        "fixed \u00a35": {
+          "p_reach_100k": 100.0,
+          "p_ruin": 0.0,
+          "median": 110603,
+          "stress_worst_first": 157922,
+          "stress_streak_ruin_pct": 0.0
+        }
+      },
+      "lowest_risk_viable": "fixed \u00a325"
+    }
+  },
+  "forward_test": {
+    "base": 5000.0,
+    "final": 981427,
+    "return_pct": 19529.0,
+    "annualized_pct": 644306.0,
+    "max_dd_pct": 3.2,
+    "days": 220,
+    "split": "70/30 backtest/forward"
+  },
+  "backtest": {
+    "return_pct": 15753.0,
+    "max_dd_pct": 10.9,
+    "days": 479
+  },
+  "timeframe_scan": [
+    {
+      "tf": "M1",
+      "cyc": 2939,
+      "move_cost": 6.9,
+      "win": 49.0,
+      "bt_ret": 148.0,
+      "bt_dd": 9.9,
+      "ft_ret": 104.0,
+      "ft_ann": 1000000.0,
+      "ft_dd": 4.8,
+      "ft_days": 14,
+      "ft_bal": 10185
+    },
+    {
+      "tf": "M5",
+      "cyc": 1550,
+      "move_cost": 19.0,
+      "win": 74.0,
+      "bt_ret": 15653.0,
+      "bt_dd": 21.2,
+      "ft_ret": 469.0,
+      "ft_ann": 1000000.0,
+      "ft_dd": 7.8,
+      "ft_days": 35,
+      "ft_bal": 28455
+    },
+    {
+      "tf": "M15",
+      "cyc": 611,
+      "move_cost": 31.7,
+      "win": 82.0,
+      "bt_ret": 1972.0,
+      "bt_dd": 6.3,
+      "ft_ret": 163.0,
+      "ft_ann": 1000000.0,
+      "ft_dd": 3.9,
+      "ft_days": 38,
+      "ft_bal": 13174
+    },
+    {
+      "tf": "M30",
+      "cyc": 295,
+      "move_cost": 33.5,
+      "win": 83.0,
+      "bt_ret": 350.0,
+      "bt_dd": 8.1,
+      "ft_ret": 63.0,
+      "ft_ann": 10074.0,
+      "ft_dd": 1.0,
+      "ft_days": 39,
+      "ft_bal": 8153
+    },
+    {
+      "tf": "H1",
+      "cyc": 793,
+      "move_cost": 46.5,
+      "win": 86.0,
+      "bt_ret": 15753.0,
+      "bt_dd": 10.9,
+      "ft_ret": 19529.0,
+      "ft_ann": 644306.0,
+      "ft_dd": 3.2,
+      "ft_days": 220,
+      "ft_bal": 981427
+    },
+    {
+      "tf": "H4",
+      "cyc": 314,
+      "move_cost": 91.2,
+      "win": 88.0,
+      "bt_ret": 1311.0,
+      "bt_dd": 22.1,
+      "ft_ret": 1626.0,
+      "ft_ann": 5688.0,
+      "ft_dd": 6.2,
+      "ft_days": 256,
+      "ft_bal": 86288
+    }
+  ],
+  "overall": {
+    "cycles": 793,
+    "win_pct": 86.3,
+    "net_gbp": 2206.0,
+    "gbp_per_trade": 2.782
+  }
+}
