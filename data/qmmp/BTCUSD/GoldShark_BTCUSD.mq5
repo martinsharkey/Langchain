@@ -14,20 +14,24 @@
 input int    OsMA_Fast = 12;
 input int    OsMA_Slow = 26;
 input int    OsMA_Signal = 9;
-input double OsmaFloor_Asian = 17.97;
-input double EmaAlign_Asian = 5.4;
-input double BullsFloor_Asian = 131.15;
-input double AtrFloor_Asian = 632.99;
-input double OsmaFloor_London = 15.24;
-input double EmaAlign_London = 10.26;
-input double BullsFloor_London = 140.69;
-input double AtrFloor_London = 567.04;
-input double OsmaFloor_NewYork = 28.44;
-input double EmaAlign_NewYork = 76.33;
-input double BullsFloor_NewYork = 206.94;
-input double AtrFloor_NewYork = 551.45;
+input double OsmaFloor_Asian = 17.971;
+input double EmaAlign_Asian = 5.402;
+input double BullsFloor_Asian = 131.151;
+input double BearsFloor_Asian = 0.0;
+input double AtrFloor_Asian = 632.985;
+input double OsmaFloor_London = 15.243;
+input double EmaAlign_London = 10.259;
+input double BullsFloor_London = 140.685;
+input double BearsFloor_London = 0.0;
+input double AtrFloor_London = 567.043;
+input double OsmaFloor_NewYork = 28.439;
+input double EmaAlign_NewYork = 76.329;
+input double BullsFloor_NewYork = 206.939;
+input double BearsFloor_NewYork = 0.0;
+input double AtrFloor_NewYork = 551.449;
 input int    HardSL_pts = 628348;
 input int    BE_pts = 11057;
+input int    BE_lock_pts = 1105;
 input int    Trail_pts = 11057;
 input int    Add_pts = 11057;
 input double EarlyFrac = 0.15;
@@ -68,12 +72,15 @@ string CurSession()
    if(h>=0  && h<9 ) return("Asian");
    return("Off");
   }
-void SessionFloors(string s, double &osma, double &ema, double &bulls, double &atr)
+void SessionFloors(string s, double &osma, double &ema, double &bulls, double &bears, double &atr)
   {
-   if(s=="Asian"){  osma=OsmaFloor_Asian;  ema=EmaAlign_Asian;  bulls=BullsFloor_Asian;  atr=AtrFloor_Asian; }
-   else if(s=="London"){ osma=OsmaFloor_London; ema=EmaAlign_London; bulls=BullsFloor_London; atr=AtrFloor_London; }
-   else { osma=OsmaFloor_NewYork; ema=EmaAlign_NewYork; bulls=BullsFloor_NewYork; atr=AtrFloor_NewYork; }
+   if(s=="Asian"){  osma=OsmaFloor_Asian;  ema=EmaAlign_Asian;  bulls=BullsFloor_Asian;  bears=BearsFloor_Asian;  atr=AtrFloor_Asian; }
+   else if(s=="London"){ osma=OsmaFloor_London; ema=EmaAlign_London; bulls=BullsFloor_London; bears=BearsFloor_London; atr=AtrFloor_London; }
+   else { osma=OsmaFloor_NewYork; ema=EmaAlign_NewYork; bulls=BullsFloor_NewYork; bears=BearsFloor_NewYork; atr=AtrFloor_NewYork; }
   }
+//--- Bulls/Bears power (MT5 iBullsPower/iBearsPower, period 13)
+double BullsP(int shift){ double v[1]; int h=iBullsPower(_Symbol,PERIOD_H1,13); if(h==INVALID_HANDLE||CopyBuffer(h,0,shift,1,v)<1){IndicatorRelease(h);return(0);} IndicatorRelease(h); return(v[0]/_Point); }
+double BearsP(int shift){ double v[1]; int h=iBearsPower(_Symbol,PERIOD_H1,13); if(h==INVALID_HANDLE||CopyBuffer(h,0,shift,1,v)<1){IndicatorRelease(h);return(0);} IndicatorRelease(h); return(v[0]/_Point); }
 
 //+------------------------------------------------------------------+
 void OnTick()
@@ -92,16 +99,19 @@ void OnTick()
    bool crossDown = (o2>=0 && o1<0);
    if(!crossUp && !crossDown) return;
 
-   double fOsma,fEma,fBulls,fAtr; SessionFloors(sess,fOsma,fEma,fBulls,fAtr);
+   double fOsma,fEma,fBulls,fBears,fAtr; SessionFloors(sess,fOsma,fEma,fBulls,fBears,fAtr);
    double osma_mag = MathAbs(o1);
    double ema_slope = EMAv(1)-EMAv(4);               // slope over 3 bars
    double ema_align = crossUp ? ema_slope : -ema_slope;
    double atr = ATRv(1)/_Point;
-   // KEEP-floor gates (0 = OFF => always passes)
+   double bulls_al = crossUp ? BullsP(1) : -BullsP(1);   // aligned power (long wants +bulls)
+   double bears_al = crossUp ? BearsP(1) : -BearsP(1);
+   // KEEP-floor gates (0 = OFF => always passes; validated floors set the non-zero gate)
    if(fOsma>0 && osma_mag < fOsma) return;
    if(fEma!=0 && ema_align < fEma) return;
    if(fAtr>0 && atr < fAtr) return;
-   // (bulls/bears power gates optional; add here if BullsFloor_* > 0)
+   if(fBulls>0 && bulls_al < fBulls) return;
+   if(fBears<0 && bears_al > fBears) return;         // bears floor is negative (deeper = stronger)
 
    OpenLeg(crossUp);
   }

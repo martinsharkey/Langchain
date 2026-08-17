@@ -156,35 +156,35 @@
         "fixed \u00a350": {
           "p_reach_100k": 0.0,
           "p_ruin": 0.0,
-          "median": 765,
+          "median": 760,
           "stress_worst_first": 725,
           "stress_streak_ruin_pct": 0.0
         },
         "fixed \u00a325": {
           "p_reach_100k": 0.0,
           "p_ruin": 0.0,
-          "median": 7503,
+          "median": 7527,
           "stress_worst_first": 7268,
           "stress_streak_ruin_pct": 0.0
         },
         "taper 10->25->50": {
           "p_reach_100k": 0.0,
           "p_ruin": 0.0,
-          "median": 18590,
+          "median": 18545,
           "stress_worst_first": 17506,
           "stress_streak_ruin_pct": 0.0
         },
         "fixed \u00a310": {
-          "p_reach_100k": 100.0,
+          "p_reach_100k": 99.9,
           "p_ruin": 0.0,
-          "median": 103673,
+          "median": 103302,
           "stress_worst_first": 101752,
           "stress_streak_ruin_pct": 0.0
         },
         "fixed \u00a35": {
           "p_reach_100k": 100.0,
           "p_ruin": 0.0,
-          "median": 103715,
+          "median": 103644,
           "stress_worst_first": "RUIN",
           "stress_streak_ruin_pct": 0.0
         }
@@ -291,5 +291,6 @@
     "win_pct": 85.8,
     "net_gbp": 2003.0,
     "gbp_per_trade": 1.729
-  }
+  },
+  "ea_verification": "PASS"
 }

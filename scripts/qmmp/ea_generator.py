@@ -34,36 +34,42 @@ def _opt_range(name, val, lo, hi, step, dtype="double"):
     return line, setl
 
 
-def build_ea(model: dict) -> tuple[str, str]:
-    """Return (mq5_source, set_file_source)."""
+def build_ea(model: dict) -> tuple[str, str, dict]:
+    """Return (mq5_source, set_file_source, param_manifest).
+    param_manifest maps each EA input name -> the exact model.json-derived value it MUST
+    equal (used by the verification test to prove EA == onboarding config)."""
     sym = model["symbol"]
     tf = model.get("timeframe", "H1"); tf_enum = TF_ENUM.get(tf, "PERIOD_H1")
     o = model.get("entry", {}).get("osma_params", {"fast": 12, "slow": 26, "signal": 9})
     fl = model.get("floors", {}); ex = model.get("exit", {})
     mm = model.get("money_management", {})
     gbp_per = float(mm.get("gbp_per_001", 50.0)); maxlegs = int(ex.get("max_legs", 4))
-    inputs = []; setlines = []
+    inputs = []; setlines = []; manifest = {}
 
     def add(name, val, lo, hi, step, dtype="double"):
-        ln, sl = _opt_range(name, val, lo, hi, step, dtype); inputs.append(ln); setlines.extend(sl)
+        ln, sl = _opt_range(name, val, lo, hi, step, dtype)
+        inputs.append(ln); setlines.extend(sl)
+        manifest[name] = int(val) if dtype == "int" else float(val)
 
     # --- entry / OsMA ---
     add("OsMA_Fast", o.get("fast", 12), 6, 18, 2, "int")
     add("OsMA_Slow", o.get("slow", 26), 18, 40, 2, "int")
     add("OsMA_Signal", o.get("signal", 9), 6, 12, 1, "int")
-    # --- per-session floors (KEEP ones -> non-zero default; OFF -> 0 default, still tunable) ---
+    # --- per-session floors: EVERY indicator the model tracks (osma/ema/bulls/bears/atr) ---
     for sname in ("Asian", "London", "NewYork"):
-        add(f"OsmaFloor_{sname}", round(_sess_floor(fl, "osma_mag", sname), 2), 0, 100, 1)
-        add(f"EmaAlign_{sname}", round(_sess_floor(fl, "ema_align", sname), 2), -50, 100, 1)
-        add(f"BullsFloor_{sname}", round(_sess_floor(fl, "bulls", sname), 2), 0, 400, 5)
-        add(f"AtrFloor_{sname}", round(_sess_floor(fl, "atr", sname), 2), 0, 2000, 25)
-    # --- exit (basket trail + early pyramid) ---
-    add("HardSL_pts", int(ex.get("sl", 250000)), 50000, 800000, 25000, "int")
-    add("BE_pts", int(ex.get("be", 15000)), 2000, 40000, 1000, "int")
-    add("Trail_pts", int(ex.get("trail", 15000)), 2000, 40000, 1000, "int")
-    add("Add_pts", int(ex.get("add", 15000)), 2000, 40000, 1000, "int")
-    add("EarlyFrac", float(ex.get("early", 0.15)), 0.05, 0.5, 0.05)
-    add("MaxLegs", maxlegs, 1, 6, 1, "int")
+        add(f"OsmaFloor_{sname}",  round(_sess_floor(fl, "osma_mag",  sname), 3), 0, 200, 1)
+        add(f"EmaAlign_{sname}",   round(_sess_floor(fl, "ema_align", sname), 3), -100, 200, 1)
+        add(f"BullsFloor_{sname}", round(_sess_floor(fl, "bulls",     sname), 3), 0, 500, 5)
+        add(f"BearsFloor_{sname}", round(_sess_floor(fl, "bears",     sname), 3), -500, 0, 5)
+        add(f"AtrFloor_{sname}",   round(_sess_floor(fl, "atr",       sname), 3), 0, 5000, 25)
+    # --- exit (basket trail + early pyramid) — every tunable exit element ---
+    add("HardSL_pts",  int(ex.get("sl", 250000)), 50000, 800000, 25000, "int")
+    add("BE_pts",      int(ex.get("be", 15000)),  2000, 40000, 1000, "int")
+    add("BE_lock_pts", int(ex.get("be_lock", max(1, int(ex.get("be", 15000) * 0.1)))), 0, 5000, 250, "int")
+    add("Trail_pts",   int(ex.get("trail", 15000)), 2000, 40000, 1000, "int")
+    add("Add_pts",     int(ex.get("add", 15000)),   2000, 40000, 1000, "int")
+    add("EarlyFrac",   float(ex.get("early", 0.15)), 0.05, 0.5, 0.05)
+    add("MaxLegs",     maxlegs, 1, 6, 1, "int")
     # --- money management ---
     add("GBP_per_001", gbp_per, 10, 250, 10)
     add("LotCapPerAccount", int(mm.get("lot_cap_per_account", 100)), 10, 100, 10, "int")
@@ -118,12 +124,15 @@ string CurSession()
    if(h>=0  && h<9 ) return("Asian");
    return("Off");
   }}
-void SessionFloors(string s, double &osma, double &ema, double &bulls, double &atr)
+void SessionFloors(string s, double &osma, double &ema, double &bulls, double &bears, double &atr)
   {{
-   if(s=="Asian"){{  osma=OsmaFloor_Asian;  ema=EmaAlign_Asian;  bulls=BullsFloor_Asian;  atr=AtrFloor_Asian; }}
-   else if(s=="London"){{ osma=OsmaFloor_London; ema=EmaAlign_London; bulls=BullsFloor_London; atr=AtrFloor_London; }}
-   else {{ osma=OsmaFloor_NewYork; ema=EmaAlign_NewYork; bulls=BullsFloor_NewYork; atr=AtrFloor_NewYork; }}
+   if(s=="Asian"){{  osma=OsmaFloor_Asian;  ema=EmaAlign_Asian;  bulls=BullsFloor_Asian;  bears=BearsFloor_Asian;  atr=AtrFloor_Asian; }}
+   else if(s=="London"){{ osma=OsmaFloor_London; ema=EmaAlign_London; bulls=BullsFloor_London; bears=BearsFloor_London; atr=AtrFloor_London; }}
+   else {{ osma=OsmaFloor_NewYork; ema=EmaAlign_NewYork; bulls=BullsFloor_NewYork; bears=BearsFloor_NewYork; atr=AtrFloor_NewYork; }}
   }}
+//--- Bulls/Bears power (MT5 iBullsPower/iBearsPower, period 13)
+double BullsP(int shift){{ double v[1]; int h=iBullsPower(_Symbol,{tf_enum},13); if(h==INVALID_HANDLE||CopyBuffer(h,0,shift,1,v)<1){{IndicatorRelease(h);return(0);}} IndicatorRelease(h); return(v[0]/_Point); }}
+double BearsP(int shift){{ double v[1]; int h=iBearsPower(_Symbol,{tf_enum},13); if(h==INVALID_HANDLE||CopyBuffer(h,0,shift,1,v)<1){{IndicatorRelease(h);return(0);}} IndicatorRelease(h); return(v[0]/_Point); }}
 
 //+------------------------------------------------------------------+
 void OnTick()
@@ -142,16 +151,19 @@ void OnTick()
    bool crossDown = (o2>=0 && o1<0);
    if(!crossUp && !crossDown) return;
 
-   double fOsma,fEma,fBulls,fAtr; SessionFloors(sess,fOsma,fEma,fBulls,fAtr);
+   double fOsma,fEma,fBulls,fBears,fAtr; SessionFloors(sess,fOsma,fEma,fBulls,fBears,fAtr);
    double osma_mag = MathAbs(o1);
    double ema_slope = EMAv(1)-EMAv(4);               // slope over 3 bars
    double ema_align = crossUp ? ema_slope : -ema_slope;
    double atr = ATRv(1)/_Point;
-   // KEEP-floor gates (0 = OFF => always passes)
+   double bulls_al = crossUp ? BullsP(1) : -BullsP(1);   // aligned power (long wants +bulls)
+   double bears_al = crossUp ? BearsP(1) : -BearsP(1);
+   // KEEP-floor gates (0 = OFF => always passes; validated floors set the non-zero gate)
    if(fOsma>0 && osma_mag < fOsma) return;
    if(fEma!=0 && ema_align < fEma) return;
    if(fAtr>0 && atr < fAtr) return;
-   // (bulls/bears power gates optional; add here if BullsFloor_* > 0)
+   if(fBulls>0 && bulls_al < fBulls) return;
+   if(fBears<0 && bears_al > fBears) return;         // bears floor is negative (deeper = stronger)
 
    OpenLeg(crossUp);
   }}
@@ -215,19 +227,42 @@ double AvgEntry(){{ double s=0; int n=0; for(int i=PositionsTotal()-1;i>=0;i--){
 void ModifyAllSL(double sl){{ for(int i=PositionsTotal()-1;i>=0;i--){{ ulong t=PositionGetTicket(i); if(t>0 && PositionGetString(POSITION_SYMBOL)==_Symbol){{ MqlTradeRequest r; MqlTradeResult res; ZeroMemory(r); r.action=TRADE_ACTION_SLTP; r.position=t; r.symbol=_Symbol; r.sl=sl; r.tp=0; OrderSend(r,res); }} }} }}
 //+------------------------------------------------------------------+
 '''
-    set_hdr = f"; GoldShark_{sym}.set — MT5 Strategy Tester optimiser ranges (auto-generated)\n; F=1 enables optimisation; 1=start 2=step 3=stop\n"
+    set_hdr = f"; GoldShark_{sym}.set -- MT5 Strategy Tester optimiser ranges (auto-generated)\n; F=1 enables optimisation; 1=start 2=step 3=stop\n"
     set_src = set_hdr + "\n".join(setlines) + "\n"
-    return mq5, set_src
+    return mq5, set_src, manifest
+
+
+def verify_ea(model: dict, mq5_path: str) -> list:
+    """Parse the generated .mq5 `input` defaults and assert each equals the value the
+    onboarding model.json dictates. Returns list of mismatch strings ([] == exact match)."""
+    _, _, manifest = build_ea(model)
+    import re
+    src = open(mq5_path, encoding="utf-8").read()
+    got = {}
+    for m in re.finditer(r"^input\s+(?:int|double)\s+(\w+)\s*=\s*([-\d.]+);", src, re.M):
+        got[m.group(1)] = float(m.group(2))
+    problems = []
+    for name, want in manifest.items():
+        if name not in got:
+            problems.append(f"{name}: MISSING from EA (expected {want})")
+        elif abs(got[name] - float(want)) > 1e-6:
+            problems.append(f"{name}: EA={got[name]} != model={want}")
+    for name in got:
+        if name not in manifest:
+            problems.append(f"{name}: EA input has NO model.json source (undocumented)")
+    return problems
 
 
 def write_ea(model: dict, out_dir: str) -> str:
     sym = model["symbol"]
-    mq5, setsrc = build_ea(model)
+    mq5, setsrc, manifest = build_ea(model)
     os.makedirs(out_dir, exist_ok=True)
     mq5_path = os.path.join(out_dir, f"GoldShark_{sym}.mq5")
     set_path = os.path.join(out_dir, f"GoldShark_{sym}.set")
+    man_path = os.path.join(out_dir, f"GoldShark_{sym}.params.json")
     with open(mq5_path, "w", encoding="utf-8") as f: f.write(mq5)
     with open(set_path, "w", encoding="utf-8") as f: f.write(setsrc)
+    with open(man_path, "w", encoding="utf-8") as f: json.dump(manifest, f, indent=2)
     return mq5_path
 
 
