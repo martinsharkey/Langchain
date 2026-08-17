@@ -26,8 +26,8 @@ PT = 0.01
 SPREAD_PTS = 1200.0; SLIP_PTS = 100.0; COMM_PER_LOT = 6.0
 GBP_PER_PT_PER_LOT = 0.007
 
-# Validated params (points)
-SL_PTS = 250000.0; BE_PTS = 15850.0; TRAIL_PTS = 15850.0; ADD_PTS = 15850.0
+# Validated params (points) — from data/qmmp/BTCUSD/model.json (pipeline output, 2026-08-17)
+SL_PTS = 628348.0; BE_PTS = 11057.0; TRAIL_PTS = 11057.0; ADD_PTS = 11057.0
 EARLY_FRAC = 0.15; MAX_LEGS = 4; PER_GBP = 250.0   # conservative engine sizing.
 # NOTE: this native vbt engine is the ONNX-feeding trade-record engine on ONE historical
 # path (compounding, no ruin-stop) -> it shows the LUCKY-PATH figure and a large max-DD.

@@ -27,7 +27,7 @@ GBP_PER_PT_PER_LOT = 0.007        # £/point/1.0 lot (from account: £0.07 per 1
 COMM_PER_LOT = 6.0                # $ round-turn per 1.0 lot
 
 
-def build(symbol="BTCUSD", tf="H1", trail_pct=0.15, sl_pts=250000):
+def build(symbol="BTCUSD", tf="H1", trail_pct=0.15, sl_pts=628348):
     d = os.path.join(D, symbol.upper())
     df = pl.read_parquet(os.path.join(d, f"{tf}.parquet")).sort("time").to_pandas()
     df = df.set_index("time")

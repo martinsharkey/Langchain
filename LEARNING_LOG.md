@@ -3,6 +3,214 @@
 > Auto-generated digest of what the self-learning loop changed and why.
 > Most-recent-first. Reporting only — never gates a live decision (#45.1).
 
+- **2026-08-17 18:34** [REVERT] `BTCUSD` reverted to best-known config -- why: live expectancy degraded vs best-known -- metric: restored sl_atr 1.62 tp_rr 2.0
+- **2026-08-17 18:18** [REVERT] `BTCUSD` reverted to best-known config -- why: live expectancy degraded vs best-known -- metric: restored sl_atr 1.62 tp_rr 2.0
+- **2026-08-17 18:03** [REVERT] `BTCUSD` reverted to best-known config -- why: live expectancy degraded vs best-known -- metric: restored sl_atr 1.62 tp_rr 2.0
+- **2026-08-17 17:45** [REVERT] `BTCUSD` reverted to best-known config -- why: live expectancy degraded vs best-known -- metric: restored sl_atr 1.62 tp_rr 2.0
+- **2026-08-17 17:30** [REVERT] `BTCUSD` reverted to best-known config -- why: live expectancy degraded vs best-known -- metric: restored sl_atr 1.62 tp_rr 2.0
+- **2026-08-17 17:15** [REVERT] `BTCUSD` reverted to best-known config -- why: live expectancy degraded vs best-known -- metric: restored sl_atr 1.62 tp_rr 2.0
+- **2026-08-17 17:10** [REVERT] `XAUUSD` reverted to best-known config -- why: live expectancy degraded vs best-known -- metric: restored sl_atr 0.8 tp_rr 2.0
+- **2026-08-17 16:59** [REVERT] `BTCUSD` reverted to best-known config -- why: live expectancy degraded vs best-known -- metric: restored sl_atr 1.62 tp_rr 2.0
+- **2026-08-17 16:42** [REVERT] `BTCUSD` reverted to best-known config -- why: live expectancy degraded vs best-known -- metric: restored sl_atr 1.62 tp_rr 2.0
+- **2026-08-17 16:27** [REVERT] `BTCUSD` reverted to best-known config -- why: live expectancy degraded vs best-known -- metric: restored sl_atr 1.62 tp_rr 2.0
+- **2026-08-17 16:12** [REVERT] `BTCUSD` reverted to best-known config -- why: live expectancy degraded vs best-known -- metric: restored sl_atr 1.62 tp_rr 2.0
+- **2026-08-17 15:56** [REVERT] `BTCUSD` reverted to best-known config -- why: live expectancy degraded vs best-known -- metric: restored sl_atr 1.62 tp_rr 2.0
+- **2026-08-17 15:39** [REVERT] `BTCUSD` reverted to best-known config -- why: live expectancy degraded vs best-known -- metric: restored sl_atr 1.62 tp_rr 2.0
+- **2026-08-17 15:29** [REVERT] `BTCUSD` reverted to best-known config -- why: live expectancy degraded vs best-known -- metric: restored sl_atr 1.62 tp_rr 2.0
+- **2026-08-17 15:24** [REVERT] `BTCUSD` reverted to best-known config -- why: live expectancy degraded vs best-known -- metric: restored sl_atr 1.62 tp_rr 2.0
+- **2026-08-17 14:08** [EXIT-LOCK] `BTCUSD` exit set sl_atr 1.58 tp_rr 0.9 -- why: robust -- metric: recent expectancy -0.1547 (n=30)
+- **2026-08-17 13:49** [EXIT-LOCK] `BTCUSD` exit set sl_atr 1.66 tp_rr 0.8 -- why: excursion -- metric: recent expectancy -0.1547 (n=30)
+- **2026-08-17 08:17** [EXIT-LOCK] `BTCUSD` exit set sl_atr 1.58 tp_rr 1.06 -- why: robust -- metric: recent expectancy -0.144 (n=30)
+- **2026-08-17 07:53** [EXIT-LOCK] `BTCUSD` exit set sl_atr 1.67 tp_rr 0.81 -- why: excursion -- metric: recent expectancy -0.144 (n=30)
+- **2026-08-17 07:22** [EXIT-LOCK] `BTCUSD` exit set sl_atr 1.67 tp_rr 0.8 -- why: excursion -- metric: recent expectancy -0.144 (n=30)
+- **2026-08-17 06:15** [REVERT] `GER40` reverted to best-known config -- why: live expectancy degraded vs best-known -- metric: restored sl_atr 0.8 tp_rr 2.0
+- **2026-08-17 06:00** [REVERT] `GER40` reverted to best-known config -- why: live expectancy degraded vs best-known -- metric: restored sl_atr 0.8 tp_rr 2.0
+- **2026-08-17 05:45** [REVERT] `GER40` reverted to best-known config -- why: live expectancy degraded vs best-known -- metric: restored sl_atr 0.8 tp_rr 2.0
+- **2026-08-17 05:28** [REVERT] `GER40` reverted to best-known config -- why: live expectancy degraded vs best-known -- metric: restored sl_atr 0.8 tp_rr 2.0
+- **2026-08-17 05:11** [REVERT] `GER40` reverted to best-known config -- why: live expectancy degraded vs best-known -- metric: restored sl_atr 0.8 tp_rr 2.0
+- **2026-08-17 04:55** [REVERT] `GER40` reverted to best-known config -- why: live expectancy degraded vs best-known -- metric: restored sl_atr 0.8 tp_rr 2.0
+- **2026-08-17 04:40** [REVERT] `GER40` reverted to best-known config -- why: live expectancy degraded vs best-known -- metric: restored sl_atr 0.8 tp_rr 2.0
+- **2026-08-17 04:24** [REVERT] `GER40` reverted to best-known config -- why: live expectancy degraded vs best-known -- metric: restored sl_atr 0.8 tp_rr 2.0
+- **2026-08-17 04:05** [REVERT] `GER40` reverted to best-known config -- why: live expectancy degraded vs best-known -- metric: restored sl_atr 0.8 tp_rr 2.0
+- **2026-08-17 03:50** [REVERT] `GER40` reverted to best-known config -- why: live expectancy degraded vs best-known -- metric: restored sl_atr 0.8 tp_rr 2.0
+- **2026-08-17 03:35** [REVERT] `GER40` reverted to best-known config -- why: live expectancy degraded vs best-known -- metric: restored sl_atr 0.8 tp_rr 2.0
+- **2026-08-17 03:19** [REVERT] `GER40` reverted to best-known config -- why: live expectancy degraded vs best-known -- metric: restored sl_atr 0.8 tp_rr 2.0
+- **2026-08-17 03:07** [REVERT] `GER40` reverted to best-known config -- why: live expectancy degraded vs best-known -- metric: restored sl_atr 0.8 tp_rr 2.0
+- **2026-08-17 03:00** [REVERT] `GER40` reverted to best-known config -- why: live expectancy degraded vs best-known -- metric: restored sl_atr 0.8 tp_rr 2.0
+- **2026-08-17 01:26** [EXIT-LOCK] `BTCUSD` exit set sl_atr 1.58 tp_rr 0.92 -- why: robust -- metric: recent expectancy -0.1293 (n=30)
+- **2026-08-17 01:01** [EXIT-LOCK] `BTCUSD` exit set sl_atr 1.58 tp_rr 0.92 -- why: excursion -- metric: recent expectancy -0.1293 (n=30)
+- **2026-08-17 00:17** [EXIT-LOCK] `BTCUSD` exit set sl_atr 1.59 tp_rr 0.92 -- why: robust -- metric: recent expectancy -0.1293 (n=30)
+- **2026-08-16 23:51** [EXIT-LOCK] `BTCUSD` exit set sl_atr 1.68 tp_rr 0.83 -- why: excursion -- metric: recent expectancy -0.143 (n=30)
+- **2026-08-16 22:42** [EXIT-LOCK] `BTCUSD` exit set sl_atr 1.59 tp_rr 0.91 -- why: robust -- metric: recent expectancy -0.1307 (n=30)
+- **2026-08-16 22:16** [EXIT-LOCK] `BTCUSD` exit set sl_atr 1.69 tp_rr 0.81 -- why: excursion -- metric: recent expectancy -0.1307 (n=30)
+- **2026-08-16 18:47** [EXIT-LOCK] `BTCUSD` exit set sl_atr 1.6 tp_rr 0.91 -- why: robust -- metric: recent expectancy -0.1027 (n=30)
+- **2026-08-16 18:27** [EXIT-LOCK] `BTCUSD` exit set sl_atr 1.7 tp_rr 0.82 -- why: excursion -- metric: recent expectancy -0.1027 (n=30)
+- **2026-08-16 18:00** [EXIT-LOCK] `BTCUSD` exit set sl_atr 1.85 tp_rr 0.76 -- why: robust -- metric: recent expectancy -0.1027 (n=30)
+- **2026-08-16 17:28** [EXIT-LOCK] `BTCUSD` exit set sl_atr 1.7 tp_rr 0.82 -- why: excursion -- metric: recent expectancy -0.1027 (n=30)
+- **2026-08-16 17:04** [REVERT] `BTCUSD` reverted to best-known config -- why: live expectancy degraded vs best-known -- metric: restored sl_atr 1.62 tp_rr 2.0
+- **2026-08-16 16:47** [REVERT] `BTCUSD` reverted to best-known config -- why: live expectancy degraded vs best-known -- metric: restored sl_atr 1.62 tp_rr 2.0
+- **2026-08-16 16:30** [REVERT] `BTCUSD` reverted to best-known config -- why: live expectancy degraded vs best-known -- metric: restored sl_atr 1.62 tp_rr 2.0
+- **2026-08-16 16:15** [REVERT] `BTCUSD` reverted to best-known config -- why: live expectancy degraded vs best-known -- metric: restored sl_atr 1.62 tp_rr 2.0
+- **2026-08-16 16:00** [REVERT] `BTCUSD` reverted to best-known config -- why: live expectancy degraded vs best-known -- metric: restored sl_atr 1.62 tp_rr 2.0
+- **2026-08-16 15:42** [REVERT] `BTCUSD` reverted to best-known config -- why: live expectancy degraded vs best-known -- metric: restored sl_atr 1.62 tp_rr 2.0
+- **2026-08-16 15:26** [REVERT] `BTCUSD` reverted to best-known config -- why: live expectancy degraded vs best-known -- metric: restored sl_atr 1.62 tp_rr 2.0
+- **2026-08-16 15:10** [REVERT] `BTCUSD` reverted to best-known config -- why: live expectancy degraded vs best-known -- metric: restored sl_atr 1.62 tp_rr 2.0
+- **2026-08-16 14:55** [REVERT] `BTCUSD` reverted to best-known config -- why: live expectancy degraded vs best-known -- metric: restored sl_atr 1.62 tp_rr 2.0
+- **2026-08-16 14:38** [REVERT] `BTCUSD` reverted to best-known config -- why: live expectancy degraded vs best-known -- metric: restored sl_atr 1.62 tp_rr 2.0
+- **2026-08-16 14:22** [REVERT] `BTCUSD` reverted to best-known config -- why: live expectancy degraded vs best-known -- metric: restored sl_atr 1.62 tp_rr 2.0
+- **2026-08-16 14:06** [REVERT] `BTCUSD` reverted to best-known config -- why: live expectancy degraded vs best-known -- metric: restored sl_atr 1.62 tp_rr 2.0
+- **2026-08-16 13:51** [REVERT] `BTCUSD` reverted to best-known config -- why: live expectancy degraded vs best-known -- metric: restored sl_atr 1.62 tp_rr 2.0
+- **2026-08-16 13:34** [REVERT] `BTCUSD` reverted to best-known config -- why: live expectancy degraded vs best-known -- metric: restored sl_atr 1.62 tp_rr 2.0
+- **2026-08-16 13:17** [REVERT] `BTCUSD` reverted to best-known config -- why: live expectancy degraded vs best-known -- metric: restored sl_atr 1.62 tp_rr 2.0
+- **2026-08-16 13:02** [REVERT] `BTCUSD` reverted to best-known config -- why: live expectancy degraded vs best-known -- metric: restored sl_atr 1.62 tp_rr 2.0
+- **2026-08-16 12:47** [REVERT] `BTCUSD` reverted to best-known config -- why: live expectancy degraded vs best-known -- metric: restored sl_atr 1.62 tp_rr 2.0
+- **2026-08-16 12:30** [REVERT] `BTCUSD` reverted to best-known config -- why: live expectancy degraded vs best-known -- metric: restored sl_atr 1.62 tp_rr 2.0
+- **2026-08-16 12:13** [REVERT] `BTCUSD` reverted to best-known config -- why: live expectancy degraded vs best-known -- metric: restored sl_atr 1.62 tp_rr 2.0
+- **2026-08-16 12:03** [REVERT] `BTCUSD` reverted to best-known config -- why: live expectancy degraded vs best-known -- metric: restored sl_atr 1.62 tp_rr 2.0
+- **2026-08-16 11:58** [REVERT] `BTCUSD` reverted to best-known config -- why: live expectancy degraded vs best-known -- metric: restored sl_atr 1.62 tp_rr 2.0
+- **2026-08-16 10:49** [EXIT-LOCK] `BTCUSD` exit set sl_atr 2.06 tp_rr 0.93 -- why: robust -- metric: recent expectancy -0.105 (n=30)
+- **2026-08-16 10:29** [EXIT-LOCK] `BTCUSD` exit set sl_atr 1.63 tp_rr 0.86 -- why: excursion -- metric: recent expectancy -0.105 (n=30)
+- **2026-08-16 08:43** [EXIT-LOCK] `BTCUSD` exit set sl_atr 2.06 tp_rr 0.93 -- why: robust -- metric: recent expectancy -0.265 (n=2)
+- **2026-08-16 08:18** [EXIT-LOCK] `BTCUSD` exit set sl_atr 1.61 tp_rr 0.85 -- why: excursion -- metric: recent expectancy -0.27 (n=1)
+- **2026-08-16 07:56** [EXIT-LOCK] `BTCUSD` exit set sl_atr 2.06 tp_rr 0.93 -- why: robust -- metric: recent expectancy -0.27 (n=1)
+- **2026-08-16 07:40** [EXIT-LOCK] `BTCUSD` exit set sl_atr 1.62 tp_rr 0.85 -- why: excursion -- metric: recent expectancy -0.27 (n=1)
+- **2026-08-16 07:03** [EXIT-LOCK] `BTCUSD` exit set sl_atr 2.06 tp_rr 0.93 -- why: robust -- metric: recent expectancy -0.27 (n=1)
+- **2026-08-16 06:48** [EXIT-LOCK] `BTCUSD` exit set sl_atr 1.63 tp_rr 0.86 -- why: excursion -- metric: recent expectancy -0.27 (n=1)
+- **2026-08-16 06:22** [REVERT] `BTCUSD` reverted to best-known config -- why: live expectancy degraded vs best-known -- metric: restored sl_atr 0.8 tp_rr 2.0
+- **2026-08-16 06:06** [REVERT] `BTCUSD` reverted to best-known config -- why: live expectancy degraded vs best-known -- metric: restored sl_atr 0.8 tp_rr 2.0
+- **2026-08-16 05:49** [REVERT] `BTCUSD` reverted to best-known config -- why: live expectancy degraded vs best-known -- metric: restored sl_atr 0.8 tp_rr 2.0
+- **2026-08-16 05:34** [REVERT] `BTCUSD` reverted to best-known config -- why: live expectancy degraded vs best-known -- metric: restored sl_atr 0.8 tp_rr 2.0
+- **2026-08-16 05:19** [REVERT] `BTCUSD` reverted to best-known config -- why: live expectancy degraded vs best-known -- metric: restored sl_atr 0.8 tp_rr 2.0
+- **2026-08-16 05:03** [REVERT] `BTCUSD` reverted to best-known config -- why: live expectancy degraded vs best-known -- metric: restored sl_atr 0.8 tp_rr 2.0
+- **2026-08-16 04:47** [REVERT] `BTCUSD` reverted to best-known config -- why: live expectancy degraded vs best-known -- metric: restored sl_atr 0.8 tp_rr 2.0
+- **2026-08-16 04:32** [REVERT] `BTCUSD` reverted to best-known config -- why: live expectancy degraded vs best-known -- metric: restored sl_atr 0.8 tp_rr 2.0
+- **2026-08-16 04:17** [REVERT] `BTCUSD` reverted to best-known config -- why: live expectancy degraded vs best-known -- metric: restored sl_atr 0.8 tp_rr 2.0
+- **2026-08-16 04:01** [REVERT] `BTCUSD` reverted to best-known config -- why: live expectancy degraded vs best-known -- metric: restored sl_atr 0.8 tp_rr 2.0
+- **2026-08-16 03:44** [REVERT] `BTCUSD` reverted to best-known config -- why: live expectancy degraded vs best-known -- metric: restored sl_atr 0.8 tp_rr 2.0
+- **2026-08-16 03:29** [REVERT] `BTCUSD` reverted to best-known config -- why: live expectancy degraded vs best-known -- metric: restored sl_atr 0.8 tp_rr 2.0
+- **2026-08-16 03:14** [REVERT] `BTCUSD` reverted to best-known config -- why: live expectancy degraded vs best-known -- metric: restored sl_atr 0.8 tp_rr 2.0
+- **2026-08-16 02:58** [REVERT] `BTCUSD` reverted to best-known config -- why: live expectancy degraded vs best-known -- metric: restored sl_atr 0.8 tp_rr 2.0
+- **2026-08-16 02:42** [REVERT] `BTCUSD` reverted to best-known config -- why: live expectancy degraded vs best-known -- metric: restored sl_atr 0.8 tp_rr 2.0
+- **2026-08-16 02:27** [REVERT] `BTCUSD` reverted to best-known config -- why: live expectancy degraded vs best-known -- metric: restored sl_atr 0.8 tp_rr 2.0
+- **2026-08-16 02:11** [REVERT] `BTCUSD` reverted to best-known config -- why: live expectancy degraded vs best-known -- metric: restored sl_atr 0.8 tp_rr 2.0
+- **2026-08-16 01:56** [REVERT] `BTCUSD` reverted to best-known config -- why: live expectancy degraded vs best-known -- metric: restored sl_atr 0.8 tp_rr 2.0
+- **2026-08-16 01:39** [REVERT] `BTCUSD` reverted to best-known config -- why: live expectancy degraded vs best-known -- metric: restored sl_atr 0.8 tp_rr 2.0
+- **2026-08-16 01:23** [REVERT] `BTCUSD` reverted to best-known config -- why: live expectancy degraded vs best-known -- metric: restored sl_atr 0.8 tp_rr 2.0
+- **2026-08-16 01:20** [EXIT-LOCK] `BTCUSD` exit set sl_atr 2.08 tp_rr 0.98 -- why: robust -- metric: recent expectancy -0.27 (n=1)
+- **2026-08-16 01:05** [REVERT] `BTCUSD` reverted to best-known config -- why: live expectancy degraded vs best-known -- metric: restored sl_atr 0.8 tp_rr 2.0
+- **2026-08-16 00:53** [EXIT-LOCK] `BTCUSD` exit set sl_atr 1.82 tp_rr 0.83 -- why: excursion -- metric: recent expectancy -0.27 (n=1)
+- **2026-08-16 00:47** [REVERT] `BTCUSD` reverted to best-known config -- why: live expectancy degraded vs best-known -- metric: restored sl_atr 0.8 tp_rr 2.0
+- **2026-08-16 00:31** [REVERT] `BTCUSD` reverted to best-known config -- why: live expectancy degraded vs best-known -- metric: restored sl_atr 0.8 tp_rr 2.0
+- **2026-08-16 00:16** [REVERT] `BTCUSD` reverted to best-known config -- why: live expectancy degraded vs best-known -- metric: restored sl_atr 0.8 tp_rr 2.0
+- **2026-08-16 00:01** [REVERT] `BTCUSD` reverted to best-known config -- why: live expectancy degraded vs best-known -- metric: restored sl_atr 0.8 tp_rr 2.0
+- **2026-08-15 23:50** [REVERT] `BTCUSD` reverted to best-known config -- why: live expectancy degraded vs best-known -- metric: restored sl_atr 0.8 tp_rr 2.0
+- **2026-08-15 23:45** [REVERT] `BTCUSD` reverted to best-known config -- why: live expectancy degraded vs best-known -- metric: restored sl_atr 0.8 tp_rr 2.0
+- **2026-08-15 22:31** [EXIT-LOCK] `BTCUSD` exit set sl_atr 1.84 tp_rr 0.86 -- why: robust -- metric: recent expectancy 0.0 (n=0)
+- **2026-08-15 22:14** [EXIT-LOCK] `BTCUSD` exit set sl_atr 1.69 tp_rr 1.02 -- why: excursion -- metric: recent expectancy 0.0 (n=0)
+- **2026-08-07 22:05** [EXIT-LOCK] `BTCUSD` exit set sl_atr 1.83 tp_rr 1.06 -- why: robust -- metric: recent expectancy -0.0923 (n=30)
+- **2026-08-07 21:49** [EXIT-LOCK] `BTCUSD` exit set sl_atr 1.67 tp_rr 0.83 -- why: excursion -- metric: recent expectancy -0.0923 (n=30)
+- **2026-08-07 21:07** [EXIT-LOCK] `BTCUSD` exit set sl_atr 1.83 tp_rr 1.06 -- why: robust -- metric: recent expectancy -0.1163 (n=30)
+- **2026-08-07 20:52** [EXIT-LOCK] `BTCUSD` exit set sl_atr 1.67 tp_rr 0.82 -- why: excursion -- metric: recent expectancy -0.1163 (n=30)
+- **2026-08-07 20:15** [EXIT-LOCK] `BTCUSD` exit set sl_atr 1.67 tp_rr 0.82 -- why: excursion -- metric: recent expectancy -0.1163 (n=30)
+- **2026-08-07 19:44** [EXIT-LOCK] `BTCUSD` exit set sl_atr 1.68 tp_rr 0.82 -- why: excursion -- metric: recent expectancy -0.1163 (n=30)
+- **2026-08-07 19:16** [REVERT] `BTCUSD` reverted to best-known config -- why: live expectancy degraded vs best-known -- metric: restored sl_atr 0.8 tp_rr 2.0
+- **2026-08-07 19:00** [REVERT] `BTCUSD` reverted to best-known config -- why: live expectancy degraded vs best-known -- metric: restored sl_atr 0.8 tp_rr 2.0
+- **2026-08-07 18:45** [REVERT] `BTCUSD` reverted to best-known config -- why: live expectancy degraded vs best-known -- metric: restored sl_atr 0.8 tp_rr 2.0
+- **2026-08-07 18:28** [REVERT] `BTCUSD` reverted to best-known config -- why: live expectancy degraded vs best-known -- metric: restored sl_atr 0.8 tp_rr 2.0
+- **2026-08-07 18:12** [REVERT] `BTCUSD` reverted to best-known config -- why: live expectancy degraded vs best-known -- metric: restored sl_atr 0.8 tp_rr 2.0
+- **2026-08-07 18:02** [REVERT] `BTCUSD` reverted to best-known config -- why: live expectancy degraded vs best-known -- metric: restored sl_atr 0.8 tp_rr 2.0
+- **2026-08-07 17:57** [REVERT] `BTCUSD` reverted to best-known config -- why: live expectancy degraded vs best-known -- metric: restored sl_atr 0.8 tp_rr 2.0
+- **2026-08-07 16:44** [EXIT-LOCK] `BTCUSD` exit set sl_atr 1.84 tp_rr 0.92 -- why: robust -- metric: recent expectancy -0.1233 (n=30)
+- **2026-08-07 16:38** [EXIT-LOCK] `BTCUSD` exit set sl_atr 1.68 tp_rr 0.84 -- why: excursion -- metric: recent expectancy -0.1233 (n=30)
+- **2026-08-07 16:17** [EXIT-LOCK] `BTCUSD` exit set sl_atr 1.68 tp_rr 0.82 -- why: excursion -- metric: recent expectancy -0.1233 (n=30)
+- **2026-08-07 15:55** [EXIT-LOCK] `BTCUSD` exit set sl_atr 1.59 tp_rr 0.91 -- why: robust -- metric: recent expectancy -0.1233 (n=30)
+- **2026-08-07 15:41** [EXIT-LOCK] `BTCUSD` exit set sl_atr 1.69 tp_rr 0.81 -- why: excursion -- metric: recent expectancy -0.1233 (n=30)
+- **2026-08-07 15:20** [EXIT-LOCK] `BTCUSD` exit set sl_atr 1.59 tp_rr 0.91 -- why: robust -- metric: recent expectancy -0.1233 (n=30)
+- **2026-08-07 15:04** [EXIT-LOCK] `BTCUSD` exit set sl_atr 1.69 tp_rr 0.82 -- why: excursion -- metric: recent expectancy -0.1233 (n=30)
+- **2026-08-07 13:18** [EXIT-LOCK] `BTCUSD` exit set sl_atr 2.09 tp_rr 0.92 -- why: robust -- metric: recent expectancy -0.1233 (n=30)
+- **2026-08-07 13:02** [EXIT-LOCK] `BTCUSD` exit set sl_atr 1.68 tp_rr 0.83 -- why: excursion -- metric: recent expectancy -0.1233 (n=30)
+- **2026-08-07 12:47** [REVERT] `XAUUSD` reverted to best-known config -- why: live expectancy degraded vs best-known -- metric: restored sl_atr 0.8 tp_rr 2.0
+- **2026-08-07 12:43** [EXIT-LOCK] `BTCUSD` exit set sl_atr 1.68 tp_rr 0.83 -- why: excursion -- metric: recent expectancy -0.1233 (n=30)
+- **2026-08-07 12:30** [REVERT] `XAUUSD` reverted to best-known config -- why: live expectancy degraded vs best-known -- metric: restored sl_atr 0.8 tp_rr 2.0
+- **2026-08-07 12:26** [EXIT-LOCK] `BTCUSD` exit set sl_atr 1.69 tp_rr 0.82 -- why: excursion -- metric: recent expectancy -0.1233 (n=30)
+- **2026-08-07 12:12** [REVERT] `XAUUSD` reverted to best-known config -- why: live expectancy degraded vs best-known -- metric: restored sl_atr 0.8 tp_rr 2.0
+- **2026-08-07 12:00** [EXIT-LOCK] `BTCUSD` exit set sl_atr 1.84 tp_rr 0.76 -- why: robust -- metric: recent expectancy -0.1413 (n=30)
+- **2026-08-07 11:50** [EXIT-LOCK] `BTCUSD` exit set sl_atr 1.69 tp_rr 0.82 -- why: excursion -- metric: recent expectancy -0.1413 (n=30)
+- **2026-08-07 11:37** [REVERT] `XAUUSD` reverted to best-known config -- why: live expectancy degraded vs best-known -- metric: restored sl_atr 0.8 tp_rr 2.0
+- **2026-08-07 11:22** [EXIT-LOCK] `BTCUSD` exit set sl_atr 1.84 tp_rr 0.76 -- why: robust -- metric: recent expectancy -0.1467 (n=30)
+- **2026-08-07 11:05** [EXIT-LOCK] `BTCUSD` exit set sl_atr 1.69 tp_rr 0.82 -- why: excursion -- metric: recent expectancy -0.1467 (n=30)
+- **2026-08-07 10:52** [REVERT] `XAUUSD` reverted to best-known config -- why: live expectancy degraded vs best-known -- metric: restored sl_atr 0.8 tp_rr 2.0
+- **2026-08-07 10:43** [EXIT-LOCK] `BTCUSD` exit set sl_atr 1.59 tp_rr 0.76 -- why: robust -- metric: recent expectancy -0.138 (n=30)
+- **2026-08-07 10:30** [EXIT-LOCK] `BTCUSD` exit set sl_atr 1.69 tp_rr 0.82 -- why: excursion -- metric: recent expectancy -0.138 (n=30)
+- **2026-08-07 10:17** [REVERT] `XAUUSD` reverted to best-known config -- why: live expectancy degraded vs best-known -- metric: restored sl_atr 0.8 tp_rr 2.0
+- **2026-08-07 09:53** [EXIT-LOCK] `BTCUSD` exit set sl_atr 1.58 tp_rr 0.76 -- why: robust -- metric: recent expectancy -0.138 (n=30)
+- **2026-08-07 09:40** [EXIT-LOCK] `BTCUSD` exit set sl_atr 1.67 tp_rr 0.82 -- why: excursion -- metric: recent expectancy -0.138 (n=30)
+- **2026-08-07 09:25** [REVERT] `XAUUSD` reverted to best-known config -- why: live expectancy degraded vs best-known -- metric: restored sl_atr 0.8 tp_rr 2.0
+- **2026-08-07 07:35** [EXIT-LOCK] `BTCUSD` exit set sl_atr 1.58 tp_rr 0.91 -- why: robust -- metric: recent expectancy -0.138 (n=30)
+- **2026-08-07 07:27** [EXIT-LOCK] `BTCUSD` exit set sl_atr 1.66 tp_rr 0.81 -- why: excursion -- metric: recent expectancy -0.138 (n=30)
+- **2026-08-07 07:11** [REVERT] `XAUUSD` reverted to best-known config -- why: live expectancy degraded vs best-known -- metric: restored sl_atr 0.8 tp_rr 2.0
+- **2026-08-07 06:36** [REVERT] `XAUUSD` reverted to best-known config -- why: live expectancy degraded vs best-known -- metric: restored sl_atr 0.8 tp_rr 2.0
+- **2026-08-07 01:41** [REVERT] `XAUUSD` reverted to best-known config -- why: live expectancy degraded vs best-known -- metric: restored sl_atr 0.8 tp_rr 2.0
+- **2026-08-07 01:36** [REVERT] `XAUUSD` reverted to best-known config -- why: live expectancy degraded vs best-known -- metric: restored sl_atr 0.8 tp_rr 2.0
+- **2026-08-07 01:31** [REVERT] `XAUUSD` reverted to best-known config -- why: live expectancy degraded vs best-known -- metric: restored sl_atr 0.8 tp_rr 2.0
+- **2026-08-07 01:26** [REVERT] `XAUUSD` reverted to best-known config -- why: live expectancy degraded vs best-known -- metric: restored sl_atr 0.8 tp_rr 2.0
+- **2026-08-07 01:20** [REVERT] `XAUUSD` reverted to best-known config -- why: live expectancy degraded vs best-known -- metric: restored sl_atr 0.8 tp_rr 2.0
+- **2026-08-07 01:14** [REVERT] `XAUUSD` reverted to best-known config -- why: live expectancy degraded vs best-known -- metric: restored sl_atr 0.8 tp_rr 2.0
+- **2026-08-07 01:08** [REVERT] `XAUUSD` reverted to best-known config -- why: live expectancy degraded vs best-known -- metric: restored sl_atr 0.8 tp_rr 2.0
+- **2026-08-07 01:03** [REVERT] `XAUUSD` reverted to best-known config -- why: live expectancy degraded vs best-known -- metric: restored sl_atr 0.8 tp_rr 2.0
+- **2026-08-07 00:58** [REVERT] `XAUUSD` reverted to best-known config -- why: live expectancy degraded vs best-known -- metric: restored sl_atr 0.8 tp_rr 2.0
+- **2026-08-07 00:53** [REVERT] `XAUUSD` reverted to best-known config -- why: live expectancy degraded vs best-known -- metric: restored sl_atr 0.8 tp_rr 2.0
+- **2026-08-07 00:48** [REVERT] `XAUUSD` reverted to best-known config -- why: live expectancy degraded vs best-known -- metric: restored sl_atr 0.8 tp_rr 2.0
+- **2026-08-07 00:43** [REVERT] `XAUUSD` reverted to best-known config -- why: live expectancy degraded vs best-known -- metric: restored sl_atr 0.8 tp_rr 2.0
+- **2026-08-07 00:37** [REVERT] `XAUUSD` reverted to best-known config -- why: live expectancy degraded vs best-known -- metric: restored sl_atr 0.8 tp_rr 2.0
+- **2026-08-07 00:33** [EXIT-LOCK] `BTCUSD` exit set sl_atr 1.84 tp_rr 0.71 -- why: robust -- metric: recent expectancy -0.138 (n=30)
+- **2026-08-07 00:31** [REVERT] `XAUUSD` reverted to best-known config -- why: live expectancy degraded vs best-known -- metric: restored sl_atr 0.8 tp_rr 2.0
+- **2026-08-07 00:24** [REVERT] `XAUUSD` reverted to best-known config -- why: live expectancy degraded vs best-known -- metric: restored sl_atr 0.8 tp_rr 2.0
+- **2026-08-07 00:18** [REVERT] `XAUUSD` reverted to best-known config -- why: live expectancy degraded vs best-known -- metric: restored sl_atr 0.8 tp_rr 2.0
+- **2026-08-07 00:15** [EXIT-LOCK] `BTCUSD` exit set sl_atr 1.59 tp_rr 0.86 -- why: excursion -- metric: recent expectancy -0.138 (n=30)
+- **2026-08-07 00:12** [REVERT] `XAUUSD` reverted to best-known config -- why: live expectancy degraded vs best-known -- metric: restored sl_atr 0.8 tp_rr 2.0
+- **2026-08-07 00:06** [REVERT] `XAUUSD` reverted to best-known config -- why: live expectancy degraded vs best-known -- metric: restored sl_atr 0.8 tp_rr 2.0
+- **2026-08-07 00:01** [REVERT] `XAUUSD` reverted to best-known config -- why: live expectancy degraded vs best-known -- metric: restored sl_atr 0.8 tp_rr 2.0
+- **2026-08-06 23:55** [REVERT] `XAUUSD` reverted to best-known config -- why: live expectancy degraded vs best-known -- metric: restored sl_atr 0.8 tp_rr 2.0
+- **2026-08-06 23:50** [REVERT] `XAUUSD` reverted to best-known config -- why: live expectancy degraded vs best-known -- metric: restored sl_atr 0.8 tp_rr 2.0
+- **2026-08-06 23:45** [REVERT] `XAUUSD` reverted to best-known config -- why: live expectancy degraded vs best-known -- metric: restored sl_atr 0.8 tp_rr 2.0
+- **2026-08-06 23:40** [REVERT] `XAUUSD` reverted to best-known config -- why: live expectancy degraded vs best-known -- metric: restored sl_atr 0.8 tp_rr 2.0
+- **2026-08-06 23:35** [REVERT] `XAUUSD` reverted to best-known config -- why: live expectancy degraded vs best-known -- metric: restored sl_atr 0.8 tp_rr 2.0
+- **2026-08-06 23:30** [REVERT] `XAUUSD` reverted to best-known config -- why: live expectancy degraded vs best-known -- metric: restored sl_atr 0.8 tp_rr 2.0
+- **2026-08-06 23:25** [REVERT] `XAUUSD` reverted to best-known config -- why: live expectancy degraded vs best-known -- metric: restored sl_atr 0.8 tp_rr 2.0
+- **2026-08-06 23:20** [REVERT] `XAUUSD` reverted to best-known config -- why: live expectancy degraded vs best-known -- metric: restored sl_atr 0.8 tp_rr 2.0
+- **2026-08-06 23:15** [REVERT] `XAUUSD` reverted to best-known config -- why: live expectancy degraded vs best-known -- metric: restored sl_atr 0.8 tp_rr 2.0
+- **2026-08-06 23:10** [REVERT] `XAUUSD` reverted to best-known config -- why: live expectancy degraded vs best-known -- metric: restored sl_atr 0.8 tp_rr 2.0
+- **2026-08-06 23:04** [REVERT] `XAUUSD` reverted to best-known config -- why: live expectancy degraded vs best-known -- metric: restored sl_atr 0.8 tp_rr 2.0
+- **2026-08-06 22:59** [REVERT] `XAUUSD` reverted to best-known config -- why: live expectancy degraded vs best-known -- metric: restored sl_atr 0.8 tp_rr 2.0
+- **2026-08-06 22:54** [REVERT] `XAUUSD` reverted to best-known config -- why: live expectancy degraded vs best-known -- metric: restored sl_atr 0.8 tp_rr 2.0
+- **2026-08-06 22:48** [REVERT] `XAUUSD` reverted to best-known config -- why: live expectancy degraded vs best-known -- metric: restored sl_atr 0.8 tp_rr 2.0
+- **2026-08-06 22:43** [REVERT] `XAUUSD` reverted to best-known config -- why: live expectancy degraded vs best-known -- metric: restored sl_atr 0.8 tp_rr 2.0
+- **2026-08-06 22:38** [REVERT] `XAUUSD` reverted to best-known config -- why: live expectancy degraded vs best-known -- metric: restored sl_atr 0.8 tp_rr 2.0
+- **2026-08-06 22:33** [REVERT] `XAUUSD` reverted to best-known config -- why: live expectancy degraded vs best-known -- metric: restored sl_atr 0.8 tp_rr 2.0
+- **2026-08-06 22:28** [REVERT] `XAUUSD` reverted to best-known config -- why: live expectancy degraded vs best-known -- metric: restored sl_atr 0.8 tp_rr 2.0
+- **2026-08-06 22:23** [REVERT] `XAUUSD` reverted to best-known config -- why: live expectancy degraded vs best-known -- metric: restored sl_atr 0.8 tp_rr 2.0
+- **2026-08-06 22:18** [REVERT] `XAUUSD` reverted to best-known config -- why: live expectancy degraded vs best-known -- metric: restored sl_atr 0.8 tp_rr 2.0
+- **2026-08-06 22:13** [EXIT-LOCK] `BTCUSD` exit set sl_atr 1.58 tp_rr 0.86 -- why: robust -- metric: recent expectancy -0.138 (n=30)
+- **2026-08-06 22:12** [REVERT] `XAUUSD` reverted to best-known config -- why: live expectancy degraded vs best-known -- metric: restored sl_atr 0.8 tp_rr 2.0
+- **2026-08-06 22:06** [EXIT-LOCK] `BTCUSD` exit set sl_atr 1.67 tp_rr 0.72 -- why: excursion -- metric: recent expectancy -0.138 (n=30)
+- **2026-08-06 22:06** [REVERT] `XAUUSD` reverted to best-known config -- why: live expectancy degraded vs best-known -- metric: restored sl_atr 0.8 tp_rr 2.0
+- **2026-08-06 22:00** [REVERT] `XAUUSD` reverted to best-known config -- why: live expectancy degraded vs best-known -- metric: restored sl_atr 0.8 tp_rr 2.0
+- **2026-08-06 21:55** [REVERT] `XAUUSD` reverted to best-known config -- why: live expectancy degraded vs best-known -- metric: restored sl_atr 0.8 tp_rr 2.0
+- **2026-08-06 21:03** [REVERT] `BTCUSD` reverted to best-known config -- why: live expectancy degraded vs best-known -- metric: restored sl_atr 0.8 tp_rr 2.0
+- **2026-08-06 19:45** [REVERT] `BTCUSD` reverted to best-known config -- why: live expectancy degraded vs best-known -- metric: restored sl_atr 0.8 tp_rr 2.0
+- **2026-08-06 18:29** [REVERT] `BTCUSD` reverted to best-known config -- why: live expectancy degraded vs best-known -- metric: restored sl_atr 0.8 tp_rr 2.0
+- **2026-08-06 17:12** [REVERT] `BTCUSD` reverted to best-known config -- why: live expectancy degraded vs best-known -- metric: restored sl_atr 0.8 tp_rr 2.0
+- **2026-08-06 16:56** [REVERT] `XAUUSD` reverted to best-known config -- why: live expectancy degraded vs best-known -- metric: restored sl_atr 0.8 tp_rr 2.0
+- **2026-08-06 15:51** [REVERT] `BTCUSD` reverted to best-known config -- why: live expectancy degraded vs best-known -- metric: restored sl_atr 0.8 tp_rr 2.0
+- **2026-08-06 14:33** [REVERT] `BTCUSD` reverted to best-known config -- why: live expectancy degraded vs best-known -- metric: restored sl_atr 0.8 tp_rr 2.0
+- **2026-08-06 13:14** [REVERT] `BTCUSD` reverted to best-known config -- why: live expectancy degraded vs best-known -- metric: restored sl_atr 0.8 tp_rr 2.0
+- **2026-08-06 11:57** [REVERT] `BTCUSD` reverted to best-known config -- why: live expectancy degraded vs best-known -- metric: restored sl_atr 0.8 tp_rr 2.0
+- **2026-08-06 10:49** [REVERT] `XAUUSD` reverted to best-known config -- why: live expectancy degraded vs best-known -- metric: restored sl_atr 0.8 tp_rr 2.0
+- **2026-08-06 10:37** [REVERT] `BTCUSD` reverted to best-known config -- why: live expectancy degraded vs best-known -- metric: restored sl_atr 0.8 tp_rr 2.0
+- **2026-08-06 09:19** [REVERT] `BTCUSD` reverted to best-known config -- why: live expectancy degraded vs best-known -- metric: restored sl_atr 0.8 tp_rr 2.0
+- **2026-08-06 06:43** [EXIT-LOCK] `BTCUSD` exit set sl_atr 1.58 tp_rr 0.88 -- why: robust -- metric: recent expectancy -0.1487 (n=30)
+- **2026-08-06 06:32** [EXIT-LOCK] `BTCUSD` exit set sl_atr 1.66 tp_rr 0.75 -- why: excursion -- metric: recent expectancy -0.1487 (n=30)
 - **2026-08-05 21:20** [EXIT-LOCK] `BTCUSD` exit set sl_atr 1.83 tp_rr 0.88 -- why: robust -- metric: recent expectancy -0.1487 (n=30)
 - **2026-08-05 21:11** [EXIT-LOCK] `BTCUSD` exit set sl_atr 1.66 tp_rr 0.75 -- why: excursion -- metric: recent expectancy -0.1487 (n=30)
 - **2026-08-05 20:56** [EXIT-LOCK] `BTCUSD` exit set sl_atr 1.82 tp_rr 0.88 -- why: robust -- metric: recent expectancy -0.1487 (n=30)

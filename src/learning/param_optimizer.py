@@ -128,24 +128,21 @@ SYMBOL_BASELINES = {
     # non-zero STARTING baseline for the optimizer to refine, not a proven-profitable
     # config. ATR-normalized floors so they scale with the symbol's volatility.
     "BTCUSD": {
-        # OWNER PYRAMID_TRAIL model pinned into the BASELINE so the learning loops
-        # (checkpointer/FREQ-REVERT/optimizer) cannot silently wipe it back to the strict
-        # placeholder floors + tight stop. Entry floors from the 236-sample frequency
-        # analysis (osma>=0.15, dom>=0.5, runway_min=0; magnitude bulls/bears floors OFF).
-        # EXITS = WALK-FORWARD VALIDATED + REVERSAL-AWARE (2026-08-17, 45d/782 trades):
-        # trail=2200pt = BTCUSD's MEASURED median intra-cycle pullback (raw net-points opt
-        # picked 200pt = 10x too tight, a trend-overfit that whipsaws in chop). BE=4500
-        # (lock once move real), add-leg +2500 (leg-1 cushion covers cost). Walk-forward
-        # stable across folds. Leg-1 broker SL 6000pt (survives median/75th adverse pre-BE).
+        # OWNER PYRAMID_TRAIL model pinned into the BASELINE so the learning loops cannot
+        # wipe it. Entry floors from frequency analysis (osma>=0.15, dom>=0.5, runway_min=0).
+        # EXITS = PIPELINE OUTPUT (data/qmmp/BTCUSD/model.json, 2026-08-17, cost-aware;
+        # native vectorbt + custom sim agree). BTCUSD trades H1; H1 cycle moves are ~70k+
+        # pts so exits are LARGE. DO NOT hand-edit — re-run the pipeline.
         "osma_fast": 12, "osma_slow": 26, "osma_signal": 9, "ema_period": 13,
-        "atr_period": 14, "min_ema_slope": 0.05, "atr_min": 0.0, "atr_max": 0.0,
-        "osma_min_long": 0.15, "bulls_min_long": 0.0, "bears_min_long": 0.0,
-        "osma_max_short": -0.15, "bulls_max_short": 0.0, "bears_max_short": 0.0,
-        "dom_min": 0.5, "runway_min": 0.0, "max_stretch_atr": 0.0,
+        "atr_period": 14, "min_ema_slope": 0.0, "atr_min": 0.0, "atr_max": 0.0,
+        "osma_min_long": 0.0, "bulls_min_long": 0.0, "bears_min_long": 0.0,
+        "osma_max_short": 0.0, "bulls_max_short": 0.0, "bears_max_short": 0.0,
+        "dom_min": 0.0, "runway_min": 0.0, "max_stretch_atr": 0.0, "atr_min_rel": 0.0,
         "max_momentum_age": 26, "rsi_long_max": 100.0, "rsi_short_min": 0.0,
-        "sl_atr": 1.62, "tp_rr": 2.0, "min_confluence": 3,
-        "hard_sl_points": 6000.0, "safety_tp_points": 18000.0,
-        "be_trigger_pts": 4500.0, "be_lock_pts": 400.0, "trail_points": 2200.0,
+        "macd_min_long": 0.0, "macd_max_short": 0.0,
+        "sl_atr": 1.62, "tp_rr": 2.0, "min_confluence": 1,
+        "hard_sl_points": 628348.0, "safety_tp_points": 628348.0,
+        "be_trigger_pts": 11057.0, "be_lock_pts": 1105.0, "trail_points": 11057.0,
     },
     "GER40": {
         "osma_fast": 12, "osma_slow": 26, "osma_signal": 9, "ema_period": 13,

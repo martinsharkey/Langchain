@@ -22,7 +22,7 @@ Requires: data/qmmp/<SYM>/{M1,M5,M15,M30,H1,H4}.parquet (scripts.qmmp.ingest) an
 fine intra-cycle fills, a finer path TF. All net figures in GBP on 0.01 lot.
 """
 from __future__ import annotations
-import sys, os, json, argparse, statistics as st
+import sys, os, json, argparse, statistics as st, subprocess
 from datetime import datetime, timezone
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 import numpy as np, pandas as pd, polars as pl, bisect
@@ -52,6 +52,13 @@ def session_of(ep: int) -> str:
     if 7 <= h < 16: return "London"
     if 0 <= h < 9: return "Asian"
     return "Off"
+
+
+def _sess_floor(floors, key, session, default=0.0):
+    v = floors.get(key)
+    if isinstance(v, dict):
+        return float(v.get(session, default) or default)
+    return default
 
 
 @njit(cache=True)
@@ -246,7 +253,7 @@ def exit_from_peaks(df, cyc, pt, early_frac, max_legs):
     H, Lo, C = df["high"].values, df["low"].values, df["close"].values
     peaks = [((H[a:b+1].max()-C[a])/pt if il else (C[a]-Lo[a:b+1].min())/pt) for a, il, b in cyc]
     med = st.median(peaks) if peaks else 1000
-    sl = int(sorted(peaks, reverse=True)[max(0, int(len(peaks)*0.1))] * 2.0) if peaks else 250000
+    sl = int(sorted(peaks, reverse=True)[max(0, int(len(peaks)*0.1))] * 2.0) if peaks else 628348
     return dict(sl=max(sl, int(med*2)), be=int(0.15*med), trail=int(0.15*med),
                 add=int(0.15*med), early=early_frac, max_legs=max_legs), med
 
@@ -508,7 +515,19 @@ def run(symbol, spread_pts=None, comm_per_lot=6.0, slip_pts=100.0, gbp_per_001=5
     dream_pick = viable_dream[0][0] if viable_dream else None
     L(f"       -> lowest-risk viable-for-£100k schedule: {dream_pick or 'NONE (dream not viable at these sizings)'}")
 
+    # load existing model to preserve/increment build counter
+    model_path = os.path.join(d, "model.json")
+    existing = {}
+    if os.path.exists(model_path):
+        try:
+            existing = json.load(open(model_path, encoding="utf-8"))
+        except Exception:
+            existing = {}
+    prev_build = int(existing.get("build", 0) or 0)
+    build = prev_build + 1
+
     model = dict(symbol=base, status="ONBOARDED", onboarded_at=str(datetime.now(timezone.utc).date()),
+                 build=build,
                  timeframe=TF, path_timeframe=PATH_TF_FOR.get(TF, TF),
                  cost_model=dict(spread_points=spread_pts, slippage_points=slip_pts,
                                  commission_usd_per_lot=comm_per_lot, gbp_per_point_per_001=gbp_pt),
@@ -531,9 +550,15 @@ def run(symbol, spread_pts=None, comm_per_lot=6.0, slip_pts=100.0, gbp_per_001=5
     L(f"\nWROTE {os.path.join(d,'model.json')} + onboarding_report.md")
     # Stage 10: generate the MT5 Expert Advisor (GoldShark_<symbol>.mq5) + optimiser ranges
     try:
-        from scripts.qmmp.ea_generator import write_ea, verify_ea
+        from scripts.qmmp.ea_generator import write_ea, verify_ea, build_ea
         ea_path = write_ea(model, d)
         L(f"## Stage 10: generated MT5 EA -> {os.path.basename(ea_path)} (+ .set optimiser ranges, .params.json)")
+        # compute config version hash from the actual manifest build_ea produced
+        _, _, manifest_for_hash = build_ea(model)
+        import hashlib as _hl2
+        cfg_hash = _hl2.sha256((base + TF + json.dumps(manifest_for_hash, sort_keys=True)).encode()).hexdigest()[:12]
+        model["config_version"] = cfg_hash
+        _write(d, log, model)   # persist updated model with config_version
         # Stage 11: VERIFY the EA exactly reflects the onboarding config (fail loudly on drift)
         problems = verify_ea(model, ea_path)
         if problems:
@@ -543,11 +568,195 @@ def run(symbol, spread_pts=None, comm_per_lot=6.0, slip_pts=100.0, gbp_per_001=5
         else:
             L(f"## Stage 11: EA VERIFICATION PASSED -- all EA inputs exactly match model.json")
         model["ea_verification"] = "PASS" if not problems else problems
-        _write(d, log, model)   # persist verification result
+        _write(d, log, model)   # persist verification result + updated build counter
         print(f"WROTE {ea_path} + .set  | EA verify: {'PASS' if not problems else 'FAIL '+str(len(problems))}")
+        # Stage 12: COMPILE the EA via MetaEditor64 (only if verification passed)
+        if not problems:
+            compile_ok = _compile_ea(ea_path, base, build)
+            # Stage 13: run MT5 Strategy Tester to validate backtest/forward results
+            if compile_ok:
+                _run_mt5_validation(base, TF, model, bt, ft)
     except Exception as e:
-        L(f"## Stage 10/11: EA generation/verification skipped ({e})")
+        L(f"## Stage 10/11/12/13: EA generation/verification/compilation/validation skipped ({e})")
     return model
+
+
+def _compile_ea(mq5_path: str, symbol: str, build: int):
+    """Stage 12: compile the MQ5 EA using MetaEditor64.exe. Writes compile.log alongside
+    the .mq5. Returns True on success, False on failure. FAILS LOUD on warnings."""
+    import subprocess as _sp
+    base_dir = os.path.dirname(mq5_path)
+    mq5_name = os.path.basename(mq5_path)
+    log_path = os.path.join(base_dir, "compile.log")
+    # locate MetaEditor64.exe: prefer the workspace MT5 folder, then PATH
+    _this_dir = os.path.dirname(os.path.abspath(__file__))
+    _workspace = os.path.dirname(os.path.dirname(os.path.dirname(_this_dir)))
+    candidates = [
+        os.path.join(_workspace, "MT5", "VT Markets (Pty) MT5 Terminal", "MetaEditor64.exe"),
+        "MetaEditor64.exe",
+    ]
+    metaeditor = None
+    for c in candidates:
+        if os.path.isfile(c):
+            metaeditor = c; break
+    if metaeditor is None:
+        print(f"  [Stage 12] COMPILE SKIPPED -- MetaEditor64.exe not found"); return False
+    cmd = [metaeditor, "/compile", mq5_path, "/log", log_path, "/nologo"]
+    try:
+        res = _sp.run(cmd, capture_output=True, text=True, timeout=120)
+        ex5_name = f"GoldShark_{symbol}.ex5"
+        ex5_path = os.path.join(base_dir, ex5_name)
+        # parse compile.log for errors/warnings (UTF-16 or UTF-8)
+        log_text = ""
+        if os.path.exists(log_path):
+            try:
+                with open(log_path, "rb") as f:
+                    raw = f.read()
+                if raw.startswith(b'\xff\xfe') or raw.startswith(b'\xfe\xff'):
+                    log_text = raw.decode('utf-16')
+                else:
+                    log_text = raw.decode('utf-8', errors='replace')
+            except Exception:
+                log_text = ""
+        # parse result line: "Result: 0 errors, 0 warnings, ..."
+        import re
+        result_m = re.search(r"Result:\s*(\d+)\s*errors?,\s*(\d+)\s*warnings?", log_text, re.IGNORECASE)
+        if result_m:
+            err_ct = int(result_m.group(1))
+            warn_ct = int(result_m.group(2))
+        else:
+            err_ct = 1 if "error" in log_text.lower() and "0 errors" not in log_text.lower() else 0
+            warn_ct = 1 if "warning" in log_text.lower() and "0 warnings" not in log_text.lower() else 0
+        ex5_exists = os.path.isfile(ex5_path)
+        ok = (res.returncode == 0) and ex5_exists and (err_ct == 0) and (warn_ct == 0)
+        if not ok:
+            reason = []
+            if res.returncode != 0: reason.append(f"rc={res.returncode}")
+            if not ex5_exists: reason.append("no ex5")
+            if err_ct: reason.append(f"{err_ct} errors")
+            if warn_ct: reason.append(f"{warn_ct} warnings")
+            print(f"  [Stage 12] COMPILE FAILED -- {'; '.join(reason)}")
+            print(f"       compile.log tail:\n{chr(10).join(log_text.strip().splitlines()[-20:])}")
+        else:
+            print(f"  [Stage 12] COMPILE OK -- build={build} -> {ex5_name}")
+        # Stage 12b: copy compiled EX5 to MT5 Experts folder
+        if ok:
+            _deploy_ea(base_dir, symbol, build)
+        return ok
+    except Exception as e:
+        print(f"  [Stage 12] COMPILE ERROR: {e}"); return False
+
+
+def _deploy_ea(base_dir: str, symbol: str, build: int):
+    """Copy the compiled EX5 + .set to the workspace MT5 Experts folder (Strategy Tester
+    reads EAs from MQL5/Experts/, not Advisors/)."""
+    _this_dir = os.path.dirname(os.path.abspath(__file__))
+    _workspace = os.path.dirname(os.path.dirname(os.path.dirname(_this_dir)))
+    experts_dir = os.path.join(_workspace, "MT5", "VT Markets (Pty) MT5 Terminal", "Bases", "Default", "MQL5", "Experts")
+    os.makedirs(experts_dir, exist_ok=True)
+    ex5_src = os.path.join(base_dir, f"GoldShark_{symbol}.ex5")
+    set_src = os.path.join(base_dir, f"GoldShark_{symbol}.set")
+    # copy to MQL5/Experts/ with build number so multiple builds coexist
+    ver_name = f"GoldShark_{symbol}_build{build:03d}.ex5"
+    ex5_dst = os.path.join(experts_dir, ver_name)
+    set_dst = os.path.join(experts_dir, f"GoldShark_{symbol}_build{build:03d}.set")
+    try:
+        import shutil
+        shutil.copy2(ex5_src, ex5_dst)
+        if os.path.isfile(set_src):
+            shutil.copy2(set_src, set_dst)
+        print(f"  [Stage 12b] DEPLOYED -> {ex5_dst}")
+    except Exception as e:
+        print(f"  [Stage 12b] DEPLOY ERROR: {e}")
+
+
+def _run_mt5_validation(symbol: str, tf: str, model: dict, R_backtest: pd.DataFrame, R_forward: pd.DataFrame):
+    """Stage 13: run MT5 Strategy Tester to validate the pipeline's backtest/forward results.
+    Generates .ini configs, launches metatester64.exe, and parses the HTML report."""
+    _this_dir = os.path.dirname(os.path.abspath(__file__))
+    _workspace = os.path.dirname(os.path.dirname(os.path.dirname(_this_dir)))
+    mt5_dir = os.path.join(_workspace, "MT5", "VT Markets (Pty) MT5 Terminal")
+    tester_profiles = os.path.join(mt5_dir, "Bases", "Default", "MQL5", "Profiles", "Tester")
+    os.makedirs(tester_profiles, exist_ok=True)
+    ini_path = os.path.join(tester_profiles, f"GoldShark_{symbol}_validate.ini")
+    # locate metatester64.exe
+    metatester = None
+    for c in [os.path.join(mt5_dir, "metatester64.exe"), "metatester64.exe"]:
+        if os.path.isfile(c):
+            metatester = c; break
+    if metatester is None:
+        print(f"  [Stage 13] VALIDATION SKIPPED -- metatester64.exe not found"); return
+    # build .ini for 70/30 backtest + forward
+    ex = model.get("exit", {})
+    fl = model.get("floors", {})
+    o = model.get("entry", {}).get("osma_params", {})
+    ini = _build_tester_ini(symbol, tf, model, R_backtest, R_forward)
+    with open(ini_path, "w", encoding="utf-8") as f:
+        f.write(ini)
+    print(f"  [Stage 13] TESTER CONFIG -> {ini_path}")
+    # launch metatester64
+    cmd = [metatester, f"/ini:{ini_path}"]
+    try:
+        res = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
+        print(f"  [Stage 13] TESTER rc={res.returncode}")
+        if res.stdout:
+            print(f"       stdout: {res.stdout[:500]}")
+        if res.stderr:
+            print(f"       stderr: {res.stderr[:500]}")
+    except Exception as e:
+        print(f"  [Stage 13] TESTER ERROR: {e}")
+
+
+def _build_tester_ini(symbol: str, tf: str, model: dict, R_bt: pd.DataFrame, R_ft: pd.DataFrame) -> str:
+    """Generate a MT5 Strategy Tester .ini for 70/30 backtest+forward validation."""
+    ex = model.get("exit", {}); fl = model.get("floors", {})
+    o = model.get("entry", {}).get("osma_params", {})
+    mm = model.get("money_management", {})
+    bt_start = pd.Timestamp(R_bt["t"].iloc[0], unit="s").strftime("%Y.%m.%d") if len(R_bt) else "2024.01.01"
+    bt_end   = pd.Timestamp(R_bt["t"].iloc[-1], unit="s").strftime("%Y.%m.%d") if len(R_bt) else "2024.12.31"
+    ft_start = pd.Timestamp(R_ft["t"].iloc[0], unit="s").strftime("%Y.%m.%d") if len(R_ft) else "2025.01.01"
+    ft_end   = pd.Timestamp(R_ft["t"].iloc[-1], unit="s").strftime("%Y.%m.%d") if len(R_ft) else "2025.06.30"
+    # use forward mode 2 (backtest+forward) with split date
+    forward_date = ft_start
+    deposit = mm.get("base_balance", 5000.0)
+    gbp_per = mm.get("gbp_per_001", 50.0)
+    # input parameters
+    inputs = []
+    def inp(name, val): inputs.append(f"{name}={val}")
+    inp("OsMA_Fast", o.get("fast", 12)); inp("OsMA_Slow", o.get("slow", 26)); inp("OsMA_Signal", o.get("signal", 9))
+    for s in ("Asian", "London", "NewYork"):
+        inp(f"OsmaFloor_{s}", round(_sess_floor(fl, "osma_mag", s), 3))
+        inp(f"EmaAlign_{s}", round(_sess_floor(fl, "ema_align", s), 3))
+        inp(f"BullsFloor_{s}", round(_sess_floor(fl, "bulls", s), 3))
+        inp(f"BearsFloor_{s}", round(_sess_floor(fl, "bears", s), 3))
+        inp(f"AtrFloor_{s}", round(_sess_floor(fl, "atr", s), 3))
+    inp("HardSL_pts", int(ex.get("sl", 628348))); inp("BE_pts", int(ex.get("be", 11057)))
+    inp("BE_lock_pts", int(ex.get("be_lock", 1105))); inp("Trail_pts", int(ex.get("trail", 11057)))
+    inp("Add_pts", int(ex.get("add", 11057))); inp("EarlyFrac", float(ex.get("early", 0.15)))
+    inp("MaxLegs", int(ex.get("max_legs", 4))); inp("GBP_per_001", float(gbp_per))
+    inp("LotCapPerAccount", int(mm.get("lot_cap_per_account", 100)))
+    param_block = "\n".join(inputs)
+    return f"""[Tester]
+Expert=GoldShark_{symbol}
+ExpertParameters=
+Symbol={symbol}
+Period={tf}
+Model=2
+Optimization=0
+OptimizationMode=0
+ForwardMode=2
+FromDate={bt_start}
+ToDate={ft_end}
+ForwardDate={forward_date}
+Deposit={deposit}
+Currency=GBP
+ProfitInPips=0
+Leverage=500
+OptimizationCriterion=0
+ShutdownTerminal=0
+ReplaceExpertParameters=1
+{param_block}
+"""
 
 
 def _validate_floor(R, ind, folds=3):

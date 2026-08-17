@@ -1900,13 +1900,12 @@ class ScalpEngine:
         return False
 
     def _maybe_add_pyramid_legs(self):
-        """OWNER PYRAMID model (PYRAMID_TRAIL symbols, e.g. BTCUSD): add a NEW aligned
-        leg once price has advanced +PYRAMID_ADD_STEP_POINTS beyond the MOST-ADVANCED
-        existing leg's entry AND the entry direction still holds. Equal per-leg size
-        (the normal per-position lot); each new leg is a separate position managed with
-        its OWN BE+trail (PYRAMID_TRAIL variant), so every committed leg finishes in
-        profit. No hard cap by default (PYRAMID_TRAIL_MAX_LEGS=0); the per-leg trailing
-        stop + wide broker SL end the run. Only fires in live modes."""
+        """OWNER PYRAMID model (validated on H1 BTCUSD, QMMP 2026-08-17): add a NEW aligned
+        leg once price has advanced +PYRAMID_ADD_STEP_POINTS beyond the most-advanced leg
+        AND the entry direction still holds AND we are still EARLY in the OsMA cycle (within
+        PYRAMID_EARLY_FRAC of the cycle) — late adds get caught in the hard intra-cycle
+        reversal, which is why early-only pyramiding validated and unrestricted did not.
+        Capped at PYRAMID_TRAIL_MAX_LEGS (4). new leg SL = prior leg entry. Live modes only."""
         if not config.is_live_mode():
             return
         pyr_syms = [s.upper().split("-")[0].rstrip(".")
@@ -1915,6 +1914,7 @@ class ScalpEngine:
             return
         add_step = float(getattr(config, "PYRAMID_ADD_STEP_POINTS", 200.0))
         max_legs = int(getattr(config, "PYRAMID_TRAIL_MAX_LEGS", 0) or 0)
+        early_frac = float(getattr(config, "PYRAMID_EARLY_FRAC", 0.15))
         # group open legs by (base, action)
         groups = {}
         for ticket, pos in self.open_positions.items():
@@ -1926,6 +1926,11 @@ class ScalpEngine:
                 continue
             adapter = self.adapters.get(base)
             if adapter is None or adapter.spec is None:
+                continue
+            # EARLY-ONLY gate: only add legs while still within the first `early_frac` of
+            # the current OsMA cycle. Estimate cycle age from the oldest leg's open time vs
+            # the symbol's median cycle length on its entry timeframe.
+            if not self._pyramid_within_early_window(base, adapter, legs, early_frac):
                 continue
             pt = adapter.spec.point or 0.01
             # the most-advanced leg entry in the trade direction (highest for buy,
@@ -1956,11 +1961,44 @@ class ScalpEngine:
                 pass
             self._place_pyramid_leg(base, adapter, action, px, pt, len(legs))
 
+    def _pyramid_within_early_window(self, base, adapter, legs, early_frac) -> bool:
+        """True if the basket is still within the first `early_frac` of the current OsMA
+        cycle (so we only pyramid the early thrust, not late into the reversal). Estimates
+        cycle age from the oldest leg's open time vs the entry-timeframe bar duration and a
+        typical cycle length (~12 bars on H1). Conservative: on any error, allow (returns
+        True) so we don't silently block — the add-step + max-legs still bound it."""
+        try:
+            from datetime import datetime, timezone
+            resolved = adapter.resolved_symbol
+            tf = config.entry_timeframe_for(resolved)
+            tf_secs = {"M1":60,"M5":300,"M15":900,"M30":1800,"H1":3600,"H4":14400}.get(tf, 900)
+            typical_cycle_bars = 12          # median H1 OsMA cycle length (QMMP measured)
+            early_secs = early_frac * typical_cycle_bars * tf_secs
+            opened = []
+            for p in legs:
+                try:
+                    opened.append(datetime.fromisoformat(str(p.opened_at)))
+                except Exception:
+                    pass
+            if not opened:
+                return True
+            oldest = min(opened)
+            if oldest.tzinfo is None:
+                oldest = oldest.replace(tzinfo=timezone.utc)
+            age = (datetime.now(timezone.utc) - oldest).total_seconds()
+            within = age <= early_secs
+            if not within:
+                logger.info(f"[PYRAMID] {base}: cycle age {age/60:.0f}m > early window "
+                            f"{early_secs/60:.0f}m -> no more legs (early-only)")
+            return within
+        except Exception:
+            return True
+
     def _pyramid_direction_holds(self, base, adapter, action) -> bool:
         """True if the live OsMA_Confluence signal still favours `action` for this symbol."""
         try:
             resolved = adapter.resolved_symbol
-            rates = adapter.get_rates(timeframe=config.ENTRY_TIMEFRAME, count=300)
+            rates = adapter.get_rates(timeframe=config.entry_timeframe_for(resolved), count=300)
             if not rates:
                 return False
             ind = compute_full_indicators(rates, self._tuned_params(resolved))
@@ -2526,9 +2564,28 @@ class ScalpEngine:
                             params.pop(gk, None)
         except Exception:
             pass
+        # ── H1/PYRAMID_TRAIL symbols: NULL OUT all M1-scale strength floors ──
+        # BTCUSD trades H1 where indicator scale is ~10-15x M1 (osma ~30/atr ~222 vs
+        # ~2/~17). Every learned/discovered strength floor (osma/bulls/bears/dom/macd/
+        # ema-slope/atr) was modelled on M1 and is meaningless or blocking on H1
+        # (observed: osma_min ATR-normalised produced a ~4900 floor that blocks all H1
+        # entries). The VALIDATED H1 model (data/qmmp/<sym>/model.json) enters on the BARE
+        # OsMA cross — no strength floors. So for these symbols, force the strength gates
+        # OFF here, AFTER all overlays, regardless of their (M1) source.
+        try:
+            pyr = [s.upper().split("-")[0].rstrip(".") for s in
+                   (getattr(config, "PYRAMID_TRAIL_SYMBOLS", []) or [])]
+            if resolved_symbol.upper().split("-")[0].rstrip(".") in pyr:
+                for gk in ("osma_min_long", "osma_max_short", "bulls_min_long",
+                           "bears_max_short", "bears_min_long", "bulls_max_short",
+                           "macd_min_long", "macd_max_short", "dom_min", "runway_min",
+                           "min_ema_slope", "atr_min", "atr_min_rel", "max_stretch_atr",
+                           "price_stretch_mult"):
+                    params[gk] = 0.0
+                params["min_confluence"] = 1
+        except Exception:
+            pass
         return params
-
-    def _maybe_run_adaptive(self):
         """Run the adaptive intelligence loop in a background thread (non-blocking)."""
 
         def _work():

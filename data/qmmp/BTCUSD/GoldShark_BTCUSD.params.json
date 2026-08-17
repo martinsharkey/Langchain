@@ -25,5 +25,6 @@
   "EarlyFrac": 0.15,
   "MaxLegs": 4,
   "GBP_per_001": 50.0,
-  "LotCapPerAccount": 100
+  "LotCapPerAccount": 100,
+  "Magic": 880011
 }

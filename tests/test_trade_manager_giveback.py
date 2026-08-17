@@ -147,7 +147,7 @@ def test_pyramid_trail_trails_and_ratchets():
     point = 0.01
     st = _pyr_state()
     mgr.evaluate(st, price=63000.0 + (be + 50) * point, point=point, spread_points=1700)   # BE lock
-    peak = be + 1500
+    peak = be + trail + 2000
     r2 = mgr.evaluate(st, price=63000.0 + peak * point, point=point, spread_points=1700)  # trail up
     assert r2 and "modify_sl" in r2, r2
     # stop sits ~trail_step behind the best price
