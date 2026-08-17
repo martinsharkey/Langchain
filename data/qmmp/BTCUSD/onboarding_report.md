@@ -30,3 +30,17 @@
 ## Stage 8: Exit config (from winners' movement on H1): {'sl': 628348, 'be': 11057, 'trail': 11057, 'add': 11057, 'early': 0.15, 'max_legs': 4}
 
 ## Overall (H1, real cost): cycles 1158 win 86% net GBP+2003 /trade +1.729
+
+## Stage 9: Money-management on FORWARD (OOS) trades: n=348, 69 losers (20%), SL £62.8/0.01 leg
+  [9a] starting-balance sweep (fixed £50/0.01, ruin-aware):
+       £  100 -> £         738 (+638%, DD 6%)
+       £  500 -> £       4,597 (+819%, DD 6%)
+       £ 1000 -> £       9,385 (+839%, DD 6%)
+       £ 5000 -> £      47,890 (+858%, DD 6%)
+  [9b] £100 -> £100k dream: Monte Carlo P(target)/P(ruin) + adverse stress, per sizing:
+                fixed £50: P(£100k)   0.0%  P(ruin)  0.0%  median £      765  | stress worst-first 725  streak-ruin 0.0%
+                fixed £25: P(£100k)   0.0%  P(ruin)  0.0%  median £    7,503  | stress worst-first 7268  streak-ruin 0.0%
+         taper 10->25->50: P(£100k)   0.0%  P(ruin)  0.0%  median £   18,590  | stress worst-first 17506  streak-ruin 0.0%
+                fixed £10: P(£100k) 100.0%  P(ruin)  0.0%  median £  103,673  | stress worst-first 101752  streak-ruin 0.0%
+                 fixed £5: P(£100k) 100.0%  P(ruin)  0.0%  median £  103,715  | stress worst-first RUIN  streak-ruin 0.0%
+       -> lowest-risk viable-for-£100k schedule: fixed £10

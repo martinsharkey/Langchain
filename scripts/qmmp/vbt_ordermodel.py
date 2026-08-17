@@ -28,7 +28,13 @@ GBP_PER_PT_PER_LOT = 0.007
 
 # Validated params (points)
 SL_PTS = 250000.0; BE_PTS = 15850.0; TRAIL_PTS = 15850.0; ADD_PTS = 15850.0
-EARLY_FRAC = 0.15; MAX_LEGS = 4; PER_GBP = 250.0   # £250/0.01 conservative default
+EARLY_FRAC = 0.15; MAX_LEGS = 4; PER_GBP = 250.0   # conservative engine sizing.
+# NOTE: this native vbt engine is the ONNX-feeding trade-record engine on ONE historical
+# path (compounding, no ruin-stop) -> it shows the LUCKY-PATH figure and a large max-DD.
+# The HONEST money-management answer (P(£100k)/P(ruin), stress) lives in the pipeline's
+# Stage 9 Monte Carlo (onboard_pipeline.py), which bounds ruin properly. Do NOT read this
+# engine's headline % as an expectation.
+START_CASH = float(os.getenv("QMMP_START_CASH", "5000.0"))
 
 
 @njit
@@ -77,9 +83,10 @@ def order_func_nb(c, cross, cyc_id, cyc_len, cyc_pos, sl_pts, be_pts, trail_pts,
         if (cyc_pos[c.i, c.col] <= early_bars) and (state[2] < max_legs):
             adv = sgn*(price - state[6])/pt
             if adv >= add_pts:
-                # per-leg size in lots from balance
+                # per-leg size in lots from balance (margin-capped)
                 bal = c.value_now
-                units = np.floor(bal/per_gbp)          # 0.01 units total affordable
+                units = np.floor(bal/per_gbp)
+                units = min(units, np.floor(bal / 0.94), 100.0 / 0.01)
                 per_leg = (units*0.01)/max_legs
                 if per_leg >= 0.01:
                     state[2] += 1.0; state[6] = price
@@ -93,8 +100,14 @@ def order_func_nb(c, cross, cyc_id, cyc_len, cyc_pos, sl_pts, be_pts, trail_pts,
     if cr != 0.0:
         is_long = cr > 0
         bal = c.value_now
-        units = np.floor(bal/per_gbp)
-        per_leg = (units*0.01)/max_legs
+        # RUIN guard: if equity has collapsed below one min-lot's margin, stop trading.
+        if bal <= 0.94:
+            return NoOrder
+        # margin-capped sizing: floor(bal/per_gbp) but never more than margin allows
+        # (bal/0.94 per 0.01 lot at 1:500) nor the 100-lot/account cap.
+        units = np.floor(bal / per_gbp)
+        units = min(units, np.floor(bal / 0.94), 100.0 / 0.01)
+        per_leg = (units * 0.01) / max_legs
         if per_leg < 0.01:
             return NoOrder
         state[0]=1.0; state[1]=cr; state[2]=1.0; state[3]=price; state[4]=0.0
@@ -133,7 +146,7 @@ def build(symbol="BTCUSD", per_gbp=PER_GBP):
         cross_a, cyc_id.values.reshape(-1,1)*0, cyc_len.values.reshape(-1,1),
         cyc_pos.values.reshape(-1,1), SL_PTS, BE_PTS, TRAIL_PTS, ADD_PTS,
         EARLY_FRAC, float(MAX_LEGS), float(per_gbp), SPREAD_PTS, SLIP_PTS, PT, state,
-        init_cash=5000, freq="30min",
+        init_cash=START_CASH, freq="30min",
     )
     stats = pf.stats()
     print(f"=== NATIVE vbt from_order_func {symbol} H1 (M30 path), £{per_gbp:.0f}/0.01 ===")

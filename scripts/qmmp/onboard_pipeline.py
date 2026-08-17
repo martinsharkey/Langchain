@@ -175,6 +175,7 @@ def build_rows(df, pdf, cyc, osma, pt, gbp_pt, cost_per_leg, exit_cfg, slip_pts)
     ph, plw, pc = pdf["high"].values, pdf["low"].values, pdf["close"].values
     ec = exit_cfg
     rows = []
+    dfh = df["high"].values; dfl = df["low"].values; dfc = df["close"].values
     for a, il, b in cyc:
         ai = bisect.bisect_left(pt_t, int(dft[a])); bi = bisect.bisect_left(pt_t, int(dft[min(b, len(dft)-1)]))
         if bi - ai < 3: continue
@@ -183,12 +184,17 @@ def build_rows(df, pdf, cyc, osma, pt, gbp_pt, cost_per_leg, exit_cfg, slip_pts)
                              ec["add"], ec["early"], pt, ec["max_legs"], slip_pts)
         usd = net * gbp_pt - nl * cost_per_leg
         sl3 = float(emaS[a] - emaS[a-3]) if a >= 3 else 0.0
+        # worst adverse excursion in points (SL-capped) — for the ruin/margin-call model
+        e = dfc[a]
+        wa = ((e - dfl[a:b+1].min()) / pt) if il else ((dfh[a:b+1].max() - e) / pt)
+        wa = min(wa, ec["sl"])
         rows.append(dict(t=int(dft[a]), side="long" if il else "short", session=session_of(int(dft[a])),
             usd=usd, win=1 if usd > 0 else 0, osma_mag=abs(float(osma[a])),
             ema_align=(sl3 if il else -sl3),
             bulls=(float(bulls[a]) if il else -float(bulls[a])) if np.isfinite(bulls[a]) else np.nan,
             bears=(-float(bears[a]) if il else float(bears[a])) if np.isfinite(bears[a]) else np.nan,
-            atr=float(atr[a]) if np.isfinite(atr[a]) else np.nan))
+            atr=float(atr[a]) if np.isfinite(atr[a]) else np.nan,
+            worst_adv_pts=float(wa), nl=int(nl)))
     return pd.DataFrame(rows)
 
 
@@ -257,47 +263,124 @@ def wf_net_per_trade(R, folds=3):
     return (st.mean(oos) if oos else R['usd'].mean()), R['win'].mean()*100
 
 
-def compound_equity(R, start_bal=5000.0, per_gbp=50.0, max_legs=4):
-    """Compounding + pyramiding equity from a base balance. R.usd is the per-basket net£
-    at a REFERENCE 0.01-lot-per-leg sizing; we scale it by the actual affordable lots
-    (floor(balance/per_gbp) x 0.01 total, split across up to max_legs, whole 0.01, 100-lot
-    cap). Chronological. Returns (final_balance, ret_pct, annualized_pct, maxdd_pct, days).
-    This is the TRUE selection metric: total compounded account growth, not per-trade £."""
+def compound_equity(R, start_bal=5000.0, per_gbp=50.0, max_legs=4, gbp_pt=0.0001,
+                    margin_per_001=0.94, target=None):
+    """Compounding + pyramiding equity with RUIN/margin-call. Sizing = floor(bal/per_gbp)
+    x 0.01 total, split across up to max_legs, capped by margin (bal/margin_per_001) and
+    100 lots/account. RUIN: a basket's worst realised loss = worst_adv_pts x gbp_pt x lots x
+    (open_legs/max_legs); if that >= balance the account is margin-called that trade.
+    Optional target: stop when balance reaches it. Returns
+    (final, ret%, annualized%, maxdd%, days, ruined)."""
     if len(R) < 20:
-        return start_bal, 0.0, 0.0, 0.0, 0.0
+        return start_bal, 0.0, 0.0, 0.0, 0.0, False
     R = R.sort_values("t")
-    bal = start_bal; peak = bal; maxdd = 0.0
-    ref_units = 1.0  # R.usd assumes 1 x 0.01 lot per leg reference; per-basket usd already summed legs
+    has_ruin_cols = "worst_adv_pts" in R.columns and "nl" in R.columns
+    bal = start_bal; peak = bal; maxdd = 0.0; ruined = False
     for _, row in R.iterrows():
-        units = int(bal // per_gbp)                 # affordable 0.01 lots total
+        units = int(bal // per_gbp)
+        units = min(units, int(bal // margin_per_001), int(100.0 / 0.01))  # margin + lot cap
         if units < 1:
-            break
-        units = min(units, int(100.0 / 0.01))        # 100-lot/account cap (per account)
-        # R.usd is per-basket at reference 1x0.01/leg; scale by (affordable total / reference).
-        # reference basket used ~ (avg legs) x 0.01; we approximate scale = units*0.01 / (max_legs*0.01)
-        scale = (units * 0.01) / (max_legs * 0.01)
+            ruined = True; break
+        lots = units * 0.01
+        if has_ruin_cols:
+            open_frac = min(int(row['nl']), max_legs) / max_legs
+            worst_loss = row['worst_adv_pts'] * gbp_pt * lots * open_frac
+            if worst_loss >= bal:            # margin-called mid-trade before net books
+                ruined = True; break
+        scale = lots / (max_legs * 0.01)
         bal += row['usd'] * scale
         if bal > peak: peak = bal
         dd = (peak - bal) / peak if peak > 0 else 0
         if dd > maxdd: maxdd = dd
         if bal <= 0:
-            bal = 0; break
+            bal = 0; ruined = True; break
+        if target and bal >= target:
+            break
     days = max(1.0, (R['t'].iloc[-1] - R['t'].iloc[0]) / 86400.0)
     ret = (bal / start_bal - 1) * 100
-    # annualized, guarded against tiny-days blow-up
     try:
-        if bal <= 0:
-            ann = -100.0
-        elif days < 7:
-            ann = ret          # too short to annualize meaningfully
+        if bal <= 0: ann = -100.0
+        elif days < 7: ann = ret
         else:
-            growth = bal / start_bal
-            exponent = min(365.0 / days, 50.0)      # cap to avoid overflow
-            ann = (growth ** exponent - 1) * 100
+            ann = ((bal / start_bal) ** min(365.0/days, 50.0) - 1) * 100
             ann = max(min(ann, 1e6), -100.0)
     except (OverflowError, ValueError):
         ann = ret
-    return bal, ret, ann, maxdd * 100, days
+    return bal, ret, ann, maxdd * 100, days, ruined
+
+
+# ---- money-management sizing schedules (data-driven tapering) ----
+def sizing_fixed(per):
+    return lambda b: per
+
+def sizing_taper(tiers):
+    """tiers = [(threshold, per), ...] ascending threshold; last per for the top band."""
+    def fn(b):
+        for thr, per in tiers:
+            if b < thr: return per
+        return tiers[-1][1]
+    return fn
+
+
+def montecarlo_dream(R, sizing_fn, start_bal, target, gbp_pt, max_legs=4, n_mc=1500, block=5):
+    """Block-bootstrap the forward trades n_mc times; return P(reach target), P(ruin),
+    median final. Honest ruin model via compound_equity."""
+    import random as _r
+    Rr = R.reset_index(drop=True); n = len(Rr)
+    if n < 20:
+        return 0.0, 0.0, start_bal
+    hits = ruin = 0; finals = []
+    idx = np.arange(n)
+    for _ in range(n_mc):
+        order = []
+        while len(order) < n:
+            s = _r.randint(0, n-1); order += list(range(s, min(s+block, n)))
+        order = order[:n]
+        sub = Rr.iloc[order].copy()
+        fb, r = _walk(sub, sizing_fn, start_bal, target, gbp_pt, max_legs)
+        finals.append(fb)
+        if r: ruin += 1
+        if fb >= target: hits += 1
+    finals = np.array(finals)
+    return hits/n_mc, ruin/n_mc, float(np.median(finals))
+
+
+def _walk(R, sizing_fn, start_bal, target, gbp_pt, max_legs, margin_per_001=0.94):
+    """Balance-dependent sizing walk with ruin model (used by Monte Carlo + stress)."""
+    bal = start_bal
+    has = "worst_adv_pts" in R.columns
+    for _, row in R.iterrows():
+        per = sizing_fn(bal)
+        units = min(int(bal//per), int(bal//margin_per_001), int(100/0.01))
+        if units < 1: return 0.0, True
+        lots = units*0.01
+        if has:
+            of = min(int(row['nl']), max_legs)/max_legs
+            if row['worst_adv_pts']*gbp_pt*lots*of >= bal: return 0.0, True
+        bal += row['usd']*(lots/(max_legs*0.01))
+        if bal <= 0: return 0.0, True
+        if target and bal >= target: return bal, False
+    return bal, False
+
+
+def stress_test(R, sizing_fn, start_bal, target, gbp_pt, max_legs=4):
+    """Adverse-sequence stress: worst-first ordering + forced loss-streak openings."""
+    Rr = R.reset_index(drop=True); n = len(Rr)
+    losers = Rr.index[Rr['usd'] < 0].tolist()
+    if not losers:
+        return dict(worst_first_ruin=False, worst_first_final=start_bal, streak_ruin_pct=0.0)
+    # worst-first: biggest losers first, then the rest
+    order = sorted(losers, key=lambda i: Rr['usd'].iloc[i]) + [i for i in range(n) if i not in set(losers)]
+    wf_final, wf_ruin = _walk(Rr.iloc[order], sizing_fn, start_bal, target, gbp_pt, max_legs)
+    # 10-loss opening streak, 300 shuffles
+    ruin_ct = 0
+    for _ in range(300):
+        first = list(np.random.choice(losers, size=min(10, len(losers)), replace=True))
+        rest = list(np.random.permutation(n))
+        _, r = _walk(Rr.iloc[first+rest], sizing_fn, start_bal, target, gbp_pt, max_legs)
+        ruin_ct += r
+    return dict(worst_first_ruin=wf_ruin, worst_first_final=round(wf_final),
+                streak_ruin_pct=round(100*ruin_ct/300, 1))
 
 
 def run(symbol, spread_pts=None, comm_per_lot=6.0, slip_pts=100.0, gbp_per_001=50.0,
@@ -342,8 +425,8 @@ def run(symbol, spread_pts=None, comm_per_lot=6.0, slip_pts=100.0, gbp_per_001=5
         cut = int(len(R) * 0.70)
         bt, ft = R.iloc[:cut], R.iloc[cut:]
         # compound: backtest from base; forward from a FRESH base (honest standalone OOS)
-        bt_bal, bt_ret, bt_ann, bt_dd, bt_days = compound_equity(bt, start_bal, gbp_per_001, max_legs)
-        ft_bal, ft_ret, ft_ann, ft_dd, ft_days = compound_equity(ft, start_bal, gbp_per_001, max_legs)
+        bt_bal, bt_ret, bt_ann, bt_dd, bt_days, _ = compound_equity(bt, start_bal, gbp_per_001, max_legs, gbp_pt)
+        ft_bal, ft_ret, ft_ann, ft_dd, ft_days, _ = compound_equity(ft, start_bal, gbp_per_001, max_legs, gbp_pt)
         win = R['win'].mean()*100
         tf_results.append(dict(tf=tf, cyc=len(R), move_cost=round(ratio,1), win=round(win,0),
                                exit=ec, R=R, med_peak=round(med),
@@ -387,6 +470,44 @@ def run(symbol, spread_pts=None, comm_per_lot=6.0, slip_pts=100.0, gbp_per_001=5
     L(f"\n## Overall ({TF}, real cost): cycles {len(R)} win {R['win'].mean()*100:.0f}% "
       f"net GBP{R['usd'].sum():+.0f} /trade {R['usd'].mean():+.3f}")
 
+    # ---- Stage 9: money-management on the FORWARD (OOS) trades ----
+    Rf = R.sort_values("t").reset_index(drop=True)
+    ft_only = Rf.iloc[int(len(Rf)*0.70):].reset_index(drop=True)
+    n_los = int((ft_only['usd'] < 0).sum())
+    L(f"\n## Stage 9: Money-management on FORWARD (OOS) trades: n={len(ft_only)}, "
+      f"{n_los} losers ({100*n_los/max(1,len(ft_only)):.0f}%), SL £{ec['sl']*gbp_pt:.1f}/0.01 leg")
+
+    # 9a: starting-balance sweep (fixed £50/0.01, compounding, ruin-aware)
+    L("  [9a] starting-balance sweep (fixed £50/0.01, ruin-aware):")
+    bal_sweep = {}
+    for sb in (100, 500, 1000, 5000):
+        fb, fr, fa, fdd, fd, ru = compound_equity(ft_only, float(sb), 50.0, max_legs, gbp_pt)
+        bal_sweep[sb] = dict(final=round(fb), ret_pct=round(fr), maxdd=round(fdd,1), ruined=ru)
+        L(f"       £{sb:>5} -> £{fb:>12,.0f} ({fr:+.0f}%, DD {fdd:.0f}%{' RUINED' if ru else ''})")
+
+    # 9b: sizing-schedule Monte Carlo for the £100->£100k dream + stress test
+    L("  [9b] £100 -> £100k dream: Monte Carlo P(target)/P(ruin) + adverse stress, per sizing:")
+    dream_target = 100_000.0
+    schedules = {
+        "fixed £50": sizing_fixed(50.0), "fixed £25": sizing_fixed(25.0),
+        "taper 10->25->50": sizing_taper([(1000,10.0),(10000,25.0),(1e18,50.0)]),
+        "fixed £10": sizing_fixed(10.0), "fixed £5": sizing_fixed(5.0),
+    }
+    mm = {}
+    for name, fn in schedules.items():
+        p_hit, p_ruin, med = montecarlo_dream(ft_only, fn, 100.0, dream_target, gbp_pt, max_legs)
+        strs = stress_test(ft_only, fn, 100.0, dream_target, gbp_pt, max_legs)
+        mm[name] = dict(p_reach_100k=round(100*p_hit,1), p_ruin=round(100*p_ruin,1), median=round(med),
+                        stress_worst_first=("RUIN" if strs["worst_first_ruin"] else strs["worst_first_final"]),
+                        stress_streak_ruin_pct=strs["streak_ruin_pct"])
+        L(f"       {name:>18}: P(£100k) {100*p_hit:5.1f}%  P(ruin) {100*p_ruin:4.1f}%  median £{med:>9,.0f}  "
+          f"| stress worst-first {mm[name]['stress_worst_first']}  streak-ruin {strs['streak_ruin_pct']}%")
+    # lowest-risk schedule that reaches target in >=90% MC AND survives worst-first
+    viable_dream = [(nm, v) for nm, v in mm.items()
+                    if v["p_reach_100k"] >= 90 and v["stress_worst_first"] != "RUIN"]
+    dream_pick = viable_dream[0][0] if viable_dream else None
+    L(f"       -> lowest-risk viable-for-£100k schedule: {dream_pick or 'NONE (dream not viable at these sizings)'}")
+
     model = dict(symbol=base, status="ONBOARDED", onboarded_at=str(datetime.now(timezone.utc).date()),
                  timeframe=TF, path_timeframe=PATH_TF_FOR.get(TF, TF),
                  cost_model=dict(spread_points=spread_pts, slippage_points=slip_pts,
@@ -395,7 +516,10 @@ def run(symbol, spread_pts=None, comm_per_lot=6.0, slip_pts=100.0, gbp_per_001=5
                  floors={k: v["value"] for k, v in floors.items()},
                  floors_detail=floors, exit=ec, per_session=sess_stats,
                  money_management=dict(base_balance=start_bal, gbp_per_001=gbp_per_001,
-                                       max_legs=max_legs, leverage="1:500", lot_cap_per_account=100),
+                                       max_legs=max_legs, leverage="1:500", lot_cap_per_account=100,
+                                       balance_sweep=bal_sweep,
+                                       dream_100k=dict(target=100000, base=100, schedules=mm,
+                                                       lowest_risk_viable=dream_pick)),
                  forward_test=dict(base=start_bal, final=chosen["ft_bal"], return_pct=chosen["ft_ret"],
                                    annualized_pct=chosen["ft_ann"], max_dd_pct=chosen["ft_dd"],
                                    days=chosen["ft_days"], split="70/30 backtest/forward"),
