@@ -1,8 +1,8 @@
 {
   "symbol": "BTCUSD",
   "status": "ONBOARDED",
-  "onboarded_at": "2026-08-17",
-  "build": 17,
+  "onboarded_at": "2026-08-18",
+  "build": 18,
   "timeframe": "H1",
   "path_timeframe": "M30",
   "cost_model": {
@@ -163,35 +163,35 @@
         "fixed \u00a350": {
           "p_reach_100k": 0.0,
           "p_ruin": 0.0,
-          "median": 768,
+          "median": 765,
           "stress_worst_first": 725,
           "stress_streak_ruin_pct": 0.0
         },
         "fixed \u00a325": {
           "p_reach_100k": 0.0,
           "p_ruin": 0.0,
-          "median": 7707,
+          "median": 7761,
           "stress_worst_first": 7268,
           "stress_streak_ruin_pct": 0.0
         },
         "taper 10->25->50": {
           "p_reach_100k": 0.0,
           "p_ruin": 0.0,
-          "median": 18456,
+          "median": 18598,
           "stress_worst_first": 17506,
           "stress_streak_ruin_pct": 0.0
         },
         "fixed \u00a310": {
-          "p_reach_100k": 99.9,
+          "p_reach_100k": 100.0,
           "p_ruin": 0.0,
-          "median": 103758,
+          "median": 103526,
           "stress_worst_first": 101752,
           "stress_streak_ruin_pct": 0.0
         },
         "fixed \u00a35": {
           "p_reach_100k": 100.0,
           "p_ruin": 0.0,
-          "median": 103522,
+          "median": 103644,
           "stress_worst_first": "RUIN",
           "stress_streak_ruin_pct": 0.0
         }

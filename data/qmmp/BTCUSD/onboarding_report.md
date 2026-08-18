@@ -38,11 +38,11 @@
        £ 1000 -> £       9,385 (+839%, DD 6%)
        £ 5000 -> £      47,890 (+858%, DD 6%)
   [9b] £100 -> £100k dream: Monte Carlo P(target)/P(ruin) + adverse stress, per sizing:
-                fixed £50: P(£100k)   0.0%  P(ruin)  0.0%  median £      768  | stress worst-first 725  streak-ruin 0.0%
-                fixed £25: P(£100k)   0.0%  P(ruin)  0.0%  median £    7,707  | stress worst-first 7268  streak-ruin 0.0%
-         taper 10->25->50: P(£100k)   0.0%  P(ruin)  0.0%  median £   18,456  | stress worst-first 17506  streak-ruin 0.0%
-                fixed £10: P(£100k)  99.9%  P(ruin)  0.0%  median £  103,758  | stress worst-first 101752  streak-ruin 0.0%
-                 fixed £5: P(£100k) 100.0%  P(ruin)  0.0%  median £  103,522  | stress worst-first RUIN  streak-ruin 0.0%
+                fixed £50: P(£100k)   0.0%  P(ruin)  0.0%  median £      765  | stress worst-first 725  streak-ruin 0.0%
+                fixed £25: P(£100k)   0.0%  P(ruin)  0.0%  median £    7,761  | stress worst-first 7268  streak-ruin 0.0%
+         taper 10->25->50: P(£100k)   0.0%  P(ruin)  0.0%  median £   18,598  | stress worst-first 17506  streak-ruin 0.0%
+                fixed £10: P(£100k) 100.0%  P(ruin)  0.0%  median £  103,526  | stress worst-first 101752  streak-ruin 0.0%
+                 fixed £5: P(£100k) 100.0%  P(ruin)  0.0%  median £  103,644  | stress worst-first RUIN  streak-ruin 0.0%
        -> lowest-risk viable-for-£100k schedule: fixed £10
 
 WROTE C:\Users\MartinSharkey\Documents\Langchain\langchain\data\qmmp\BTCUSD\model.json + onboarding_report.md
