@@ -5,6 +5,19 @@
 > the rulebook. When they conflict, this file wins. When this file is silent,
 > defer to `src/core_rules.py` for trading-system rules.
 
+## 0. New Agent Orientation (MANDATORY)
+
+Any agent new to this workspace MUST read the following files **before**
+modifying code or making decisions:
+1. `AGENTS.md` — project state, current focus, ground rules
+2. `WORKSPACE_RULES.md` — this file (session hygiene, commit discipline, etc.)
+3. `ARCHITECTURE.md` — current built state, component map, data flow
+4. `ARCHITECTURE_OVERVIEW.md` — high-level system map and cycle diagram
+5. `src/core_rules.py` — the enforced trading-system rules (R1–R10)
+
+These are the five-file minimum orientation. Skipping them is a violation of
+this workspace's onboarding protocol.
+
 ---
 
 ## 1. Session Continuity & History

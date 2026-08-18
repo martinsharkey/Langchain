@@ -249,3 +249,34 @@ validated) or becomes a tracked GitHub issue.
 See AGENTS.md "TODO". Priorities: #24 graduation, #19/#30 dashboard control panel,
 apply #21 account filter to all stats reads, run the real mql5 crawl, prove edge on
 the 3 focus symbols under the new strategy, then merge the branch.
+
+---
+
+## Session 2026-08-18 (afternoon) — Workspace review, rules, CI activation
+
+### What we did
+- **Complete workspace review** — examined all docs, code, tests, git state, open issues, and security posture.
+- **Created `WORKSPACE_RULES.md`** — authoritative rulebook covering sessions, GitHub, pushes, testing, hygiene, architecture, tools, security, live safety.
+- **Updated `AGENTS.md`** — added prominent signpost pointing to `WORKSPACE_RULES.md` as the authoritative rulebook.
+- **Activated CI** — created `.github/workflows/ci.yml` to run `pytest tests/` on every push/PR to `main`.
+- **Cleaned up stale artifacts** — removed `plans/` (3 outdated docs referencing abandoned Docker/Wine architecture), `mt5_screen.png` (binary screenshot), `env.txt` and `env_out.txt` (real MT5 credentials on disk).
+- **Fixed architecture docs** — updated `ARCHITECTURE.md` to reflect current built state (removed fixed "observe-only exit bug", updated entry point to `app.py LIVE_MICRO`).
+- **Reviewed open issues** — inspected GitHub Issues #55–#74 (QMMP pipeline bugs, EA fixes, feature requests).
+
+### What changed
+- Files created: `WORKSPACE_RULES.md`, `.github/workflows/ci.yml`
+- Files modified: `AGENTS.md`, `ARCHITECTURE.md`
+- Files deleted: `plans/architecture-plan.md`, `plans/mt5-bridge-fix-plan.md`, `plans/mt5-bridge-research-plan.md`, `mt5_screen.png`, `env.txt`, `env_out.txt`
+- Commit: `883088a` pushed to `origin/main`
+
+### Current state
+- **Branch:** main
+- **Tests:** 151 passing, 2 skipped
+- **CI:** `.github/workflows/ci.yml` present locally but needs to be added via GitHub UI (gh token lacks `workflow` scope)
+- **Open issues:** 20 (#55–#74), mostly QMMP/pipeline and EA template bugs
+- **Bot status:** LIVE_MICRO, XAUUSD profitable (73% WR, n=60), BTCUSD improving, GER40 struggling
+
+### Next
+- Add CI workflow via GitHub UI (requires re-authorizing gh with `workflow` scope)
+- Triage open issues #55–#74 for next session priorities
+- Continue QMMP pipeline work (EA generation, floor optimization, tick-awareness)

@@ -1,18 +1,18 @@
-# ARCHITECTURE — Current State (2026-07-31)
+# ARCHITECTURE — Current State (2026-08-18)
 
 Single-box, single-writer trading bot. The BROKER (MT5) is the source of truth for
 positions. All storage is local/embedded and portable (target: standalone app
 outside VS Code). Live task tracking is in **GitHub Issues**.
 
 ```
-                          ┌───────────────────────────────────────────────┐
-                          │                MT5 TERMINAL                     │
-                          │   VT Markets demo · terminal64.exe (GUI)        │
-                          │   ← source of truth for positions/fills →       │
-                          └───────────────▲───────────────┬─────────────────┘
-                                          │ order_send /   │ ticks / rates /
-                                          │ modify / close │ positions_get
-                                          │                ▼
+                           ┌───────────────────────────────────────────────┐
+                           │                MT5 TERMINAL                     │
+                           │   VT Markets demo · terminal64.exe (GUI)        │
+                           │   ← source of truth for positions/fills →       │
+                           └───────────────▲───────────────┬─────────────────┘
+                                           │ order_send /   │ ticks / rates /
+                                           │ modify / close │ positions_get
+                                           │                ▼
 ┌──────────────────────────────────────────────────────────────────────────────┐
 │                     SCALP EXECUTION ENGINE  (the process we run)                │
 │                        python -m src.trading.scalp_engine                      │
@@ -20,7 +20,7 @@ outside VS Code). Live task tracking is in **GitHub Issues**.
 │  every cycle:                                                                  │
 │   _adopt_existing_positions()  ── adopts bot+manual open trades on start/cycle │
 │   analyse symbols → Signal(s) → BrokerAdapter (mode: OBSERVE/PAPER/LIVE_MICRO) │
-│   TradeManager.evaluate() → modify_sl (real) / close (⚠ observe-only exit bug) │
+│   TradeManager.evaluate() → modify_sl (real) / close (real)                    │
 │   HTFContext: blip→widen SL once / reversal→cut                                │
 │   HYBRID_LLM review (throttled) → HOLD/TIGHTEN/EXIT                             │
 └───────┬───────────────────────┬───────────────────────┬───────────────────────┘
@@ -40,14 +40,32 @@ outside VS Code). Live task tracking is in **GitHub Issues**.
                      │ knowledge_store (Chroma:│    * WebSocket = authoritative
                      │   trading_knowledge_rag │      (Danny: event-driven push,
                      │   local MiniLM, portable)│      no S3 polling — see Q7/Q11)
+                     │ config_checkpointer     │
+                     │ edge_discovery          │
+                     │ continual_researcher    │
+                     │ onnx_predictor          │
                      └────────────────────────┘
 
-  LOCAL STORAGE (all under data/, gitignored, machine-local, portable):
-    data/chromadb_store/         3 Chroma collections (xauusd / whale / knowledge)
-    data/trading_experience.db   closed-trade journal + strategy performance
-    data/cryptorti_correlation.json   mined whale→candle table (re-mine on clone)
-    data/*.json                  bot_status, risk_state, tuned_params, ...
+   LOCAL STORAGE (all under data/, gitignored, machine-local, portable):
+     data/chromadb_store/         3 Chroma collections (xauusd / whale / knowledge)
+     data/trading_experience.db   closed-trade journal + strategy performance
+     data/cryptorti_correlation.json   mined whale→candle table (re-mine on clone)
+     data/*.json                  bot_status, risk_state, tuned_params, ...
 ```
+
+## Entry point
+
+```
+python app.py LIVE_MICRO
+  ├─ dashboard (:5000)                     dashboard/app.py
+  ├─ scalp execution engine                src/trading/scalp_engine.py   ← the core
+  ├─ orchestration (best-effort bg)        src/orchestration/*  → enhanced_research_agent
+  └─ CryptoRTI whale feed (websocket)      src/cryptorti/*
+```
+
+`src/trading/scalp_engine.py` is the process that actually trades: it adopts live
+positions, evaluates signals, manages exits, reconciles closes, records outcomes,
+and drives all learning loops.
 
 ## Data-source decision (CryptoRTI)
 Authoritative real-time source = **mTLS WebSocket, event-driven push only**. Do NOT
@@ -65,8 +83,6 @@ payload (Danny to embed — Q7). S3 is for async collaboration (`martin_qna.md`)
   durable knowledge.
 
 ## Known issues (track in GitHub)
-- Manager "rolling winner" EXIT is `OBSERVE close (no real order)` even in
-  LIVE_MICRO — real close orders not sent; winners ride the trailing broker SL.
 - whale_rag / knowledge_store not yet wired into the live engine loop (recall side).
 - Edge unproven: PF ~0.44 over 298 trades (Phase 1). Needs sample + tuning.
 
