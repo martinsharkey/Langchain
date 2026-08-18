@@ -308,8 +308,35 @@ the 3 focus symbols under the new strategy, then merge the branch.
   deliberate review before any action; do not merge blindly
 - **Bot status:** LIVE_MICRO, healthy, 1 open GER40 position
 
-### Next
-- Decide what to do with `origin/master` and `origin/code-review-fixes-2026-08-08`
-  (archive / delete / cherry-pick useful files).
-- Pick the next GitHub issue to work on; test changes offline first while bot is live.
+## Session 2026-08-18 (late evening) — fix BTCUSD exit-capture leak (#54)
+
+### What we did
+- **Re-opened and attacked #54** with an offline, tick-level replay harness:
+  - Added `scripts/qmmp/btc_exit_replay.py` that replays the last 30 days of Dukascopy
+    ticks for every H1 OsMA-cross BTCUSD entry and resolves the multi-leg trailing
+    stop tick-by-tick.
+  - Measured the original pipeline defaults against the tuned set.
+
+### Findings
+- Original config (sl=628348, be=11057, trail=11057, add=11057, max_legs=4):
+  net +160,753pt / 31 wins in replay.
+- Tuned config   (sl=5000,   be=5000,  trail=5000,  add=5000,  max_legs=2):
+  net +490,518pt / 22 wins in replay (~3x net improvement).
+- Root cause: original BE/trail values were far above the median H1 winner MFE,
+  so profit-protection rarely armed; the huge SL bled when reversals hit.
+
+### What changed
+- `data/qmmp/BTCUSD/model.json` updated to build 19 with tuned exit values.
+- Regenerated `GoldShark_BTCUSD.mq5` + `.set` + `.params.json` from the new model.
+- `src/config.py` PYRAMID_* defaults updated to match.
+- `scripts/qmmp/ea_generator.py` now supports `--verify` to assert EA inputs == model.json.
+- `data/qmmp/BTCUSD/onboarding_report.md` updated with replay Stage 12 evidence.
+
+### Verification
+- `python -m scripts.qmmp.ea_generator BTCUSD --verify` passes.
+- Full pytest suite: 151 passed, 2 skipped.
+
+### Git
+- Commit: `899ed87`
+- Closed issues: #54 (exit-capture leak), #69 (points unit mismatch — already fixed in a774193).
 
