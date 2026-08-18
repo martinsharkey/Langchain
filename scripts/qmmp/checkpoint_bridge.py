@@ -54,6 +54,20 @@ def _default_model(symbol: str, timeframe: str = "H1") -> dict:
     }
 
 
+def _load_existing_model(symbol: str, output_dir: str | None = None) -> tuple[dict, str]:
+    """Load existing model.json to preserve/increment build counter."""
+    if output_dir is None:
+        output_dir = os.path.join("data", "qmmp", symbol.upper())
+    model_path = os.path.join(output_dir, "model.json")
+    if os.path.exists(model_path):
+        try:
+            with open(model_path, "r", encoding="utf-8") as f:
+                return json.load(f), model_path
+        except Exception:
+            pass
+    return {}, model_path
+
+
 def _global_to_session_floors(live_config: dict) -> tuple[dict, list[str]]:
     """Map live global thresholds to per-session floor dicts.
 
@@ -81,21 +95,29 @@ def _global_to_session_floors(live_config: dict) -> tuple[dict, list[str]]:
         notes.append(f"ema_align floors set uniformly from live min_ema_slope={ema_slope} (no per-session split in live gate)")
 
     # Bulls/Bears power floors (direction-aware)
-    bulls_min = live_config.get("bulls_min_long", 0.0)
-    bears_min = live_config.get("bears_min_long", 0.0)
-    if bulls_min and float(bulls_min) > 0:
+    bulls_long = live_config.get("bulls_min_long", 0.0)
+    bulls_short = live_config.get("bulls_max_short", 0.0)
+    bears_long = live_config.get("bears_min_long", 0.0)
+    bears_short = live_config.get("bears_max_short", 0.0)
+
+    if bulls_long and float(bulls_long) > 0:
         floors["bulls"] = {}
         for s in SESSIONS:
-            floors["bulls"][f"{s}_long"] = float(bulls_min)
-            floors["bulls"][f"{s}_short"] = -float(bulls_min)  # mirror for short side
-        notes.append(f"bulls floors set uniformly from live bulls_min_long={bulls_min} (long/short mirrored, no per-session split)")
-    if bears_min and float(bears_min) > 0:
+            floors["bulls"][f"{s}_long"] = float(bulls_long)
+            # use actual short-side key if present; otherwise mirror
+            short_val = float(bulls_short) if bulls_short else -float(bulls_long)
+            floors["bulls"][f"{s}_short"] = short_val
+        notes.append(f"bulls floors: long={bulls_long}, short={bulls_short if bulls_short else '-mirrored from long'} (live gate is direction-aware)")
+
+    if bears_long and float(bears_long) > 0:
         if "bears" not in floors:
             floors["bears"] = {}
         for s in SESSIONS:
-            floors["bears"][f"{s}_long"] = -float(bears_min)
-            floors["bears"][f"{s}_short"] = float(bears_min)
-        notes.append(f"bears floors set uniformly from live bears_min_long={bears_min} (long/short mirrored, no per-session split)")
+            floors["bears"][f"{s}_long"] = -float(bears_long) if bears_long else 0.0
+            # use actual short-side key if present; otherwise mirror
+            short_val = float(bears_short) if bears_short else float(bears_long)
+            floors["bears"][f"{s}_short"] = short_val
+        notes.append(f"bears floors: long={-float(bears_long) if bears_long else 0}, short={bears_short if bears_short else bears_long} (live gate is direction-aware)")
 
     # ATR floor
     atr_min = live_config.get("atr_min", 0.0)
@@ -194,7 +216,9 @@ def build_model_from_checkpoint(
         "expectancy": expectancy,
         "sample_size": n,
         "checkpointed_at": best.get("ts", best.get("timestamp", "")),
-        "approximations": notes,
+        "approximations": notes + [
+            "add spacing approximated as be_trigger_pts (no separate live key for pyramid add distance)"
+        ],
         "warning": (
             "This model.json was derived from a live checkpoint, not from historical walk-forward. "
             "Per-session floors are approximated by applying live global thresholds uniformly. "
@@ -229,6 +253,12 @@ def write_model_from_checkpoint(
         output_dir = os.path.join("data", "qmmp", symbol.upper())
 
     os.makedirs(output_dir, exist_ok=True)
+
+    # Preserve/increment build counter from existing model.json
+    existing, _ = _load_existing_model(symbol, output_dir)
+    prev_build = int(existing.get("build", 0) or 0)
+    model["build"] = prev_build + 1
+
     out_path = os.path.join(output_dir, "model.json")
     with open(out_path, "w", encoding="utf-8") as f:
         json.dump(model, f, indent=2)

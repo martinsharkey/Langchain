@@ -66,10 +66,20 @@ def _apply_floors(df: pd.DataFrame, ind: dict, floors: dict) -> pd.DataFrame:
     close = ind["close"]; osma = ind["osma"]; bulls = ind["bulls"]; bears = ind["bears"]
     atr = ind["atr"]; ema = ind["ema"]
 
-    # session labels (UTC hours)
-    sessions = pd.Series(index=df.index, data="Off")
-    for h, s in [(0, "Asian"), (7, "London"), (12, "NewYork")]:
-        sessions[df.index.hour >= h] = s
+    # session labels (match live EA CurSession() exactly)
+    # Asian 0-8, London 7-16, NewYork 12-21, Off 21-23
+    def _session(h):
+        if 0 <= h < 8:
+            return "Asian"
+        elif 7 <= h < 16:
+            return "London"
+        elif 12 <= h < 21:
+            return "NewYork"
+        else:
+            return "Off"
+
+    sessions = pd.Series(df.index.hour).apply(_session)
+    sessions.index = df.index
 
     # OsMA zero-cross entries
     up = (osma.shift(1) <= 0) & (osma > 0)
@@ -178,7 +188,11 @@ def _backtest_floors(df: pd.DataFrame, ind: dict, floors: dict) -> dict[str, flo
 
 
 def objective(trial: optuna.Trial, df: pd.DataFrame, ind: dict, folds: int = 3) -> float:
-    """Optuna objective: propose floor values, backtest, return walk-forward Sharpe."""
+    """Optuna objective: propose floor values, backtest, return walk-forward Sharpe.
+
+    Uses only the first (folds-1) folds for optimization; the last fold is reserved
+    as a genuine held-out set that Optuna never sees.
+    """
     floors = {}
 
     # OsMA magnitude floors (per session)
@@ -210,7 +224,7 @@ def objective(trial: optuna.Trial, df: pd.DataFrame, ind: dict, folds: int = 3) 
         atr_floors[sn] = trial.suggest_float(f"atr_{sn}", 0.0, 5000.0, step=25.0)
     floors["atr"] = atr_floors
 
-    # Walk-forward evaluation
+    # Walk-forward evaluation on first (folds-1) folds only; last fold is held out
     n = len(df)
     fold_size = n // folds
     sharpes = []
@@ -246,12 +260,12 @@ def run_study(
         symbol: Symbol to optimize (e.g. "XAUUSD", "BTCUSD").
         tf: Timeframe to use (default H1).
         n_trials: Number of Optuna trials to run.
-        folds: Walk-forward folds.
+        folds: Walk-forward folds (last fold is held out, never seen by Optuna).
         study_name: Optuna study name (default: `floors_<symbol>`).
         storage: Optuna storage URI (default: SQLite in symbol's optuna folder).
 
     Returns:
-        Best trial params + metrics.
+        Best trial params + metrics, including held-out evaluation.
     """
     df = _load_data(symbol, tf)
     ind = _compute_indicators(df)
@@ -291,8 +305,14 @@ def run_study(
         "atr": {sn: best_floors.get(f"atr_{sn}", 0.0) for sn in SESSIONS},
     }
 
-    # Run final backtest on full dataset with best floors
-    final_metrics = _backtest_floors(df, ind, floors)
+    # Optimization metrics = walk-forward on first (folds-1) folds
+    opt_metrics = _backtest_floors(df.iloc[: (folds - 1) * (n // folds)], ind, floors)
+
+    # Held-out metrics = last fold, genuinely unseen during optimization
+    held_out_start = (folds - 1) * (n // folds)
+    held_out = df.iloc[held_out_start:]
+    held_out_ind = {k: v.loc[held_out.index] for k, v in ind.items()}
+    held_out_metrics = _backtest_floors(held_out, held_out_ind, floors)
 
     result = {
         "symbol": symbol,
@@ -302,7 +322,9 @@ def run_study(
         "best_value": best.value,
         "best_params": best_floors,
         "floors": floors,
-        "final_metrics": final_metrics,
+        "optimization_metrics": opt_metrics,
+        "held_out_metrics": held_out_metrics,
+        "final_metrics": held_out_metrics,  # held-out is the true final metric
         "timestamp": datetime.now(timezone.utc).isoformat(),
     }
 
