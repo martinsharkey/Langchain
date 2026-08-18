@@ -55,6 +55,25 @@ DOCKER_BRIDGE_TIMEOUT = int(os.getenv("MT5_BRIDGE_TIMEOUT", "10"))  # seconds fo
 MT5_INIT_TIMEOUT = int(os.getenv("MT5_INIT_TIMEOUT", "8"))  # seconds for remote initialize() call
 
 
+# ─── Global MT5 Lock ─────────────────────────────────────────
+# The MT5 IPC layer (native Windows package and especially the Docker/RPyC bridge)
+# is single-channel and prone to head-of-line blocking.  All mt5.* calls that can
+# contend with order execution MUST be serialized behind this lock.  It is an RLock
+# so nested acquisitions on the same thread do not deadlock (e.g. account info
+# inside a position check).
+_MT5_LOCK = threading.RLock()
+
+
+def mt5_lock() -> threading.RLock:
+    """Return the module-level MT5 reentrant lock.
+
+    Usage:
+        with mt5_lock():
+            mt5.order_send(...)
+    """
+    return _MT5_LOCK
+
+
 # ─── Error Handling Decorator ───────────────────────────────
 
 def mt5_error_handler(func: Callable) -> Callable:
@@ -417,10 +436,13 @@ _result = _init_result
                 return self._silicon_mt5.ping()
             except Exception:
                 return False
-        
+
         if MT5_AVAILABLE:
-            return self._connected and mt5.terminal_info() is not None
-        
+            try:
+                return self._connected and mt5.terminal_info() is not None
+            except Exception:
+                return False
+
         return self._connected
     
     @property

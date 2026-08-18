@@ -22,11 +22,37 @@ import time
 from dataclasses import dataclass, asdict
 from typing import Optional
 
-from src.mt5.connector import get_connector, MT5_AVAILABLE, mt5
+from src.mt5.connector import get_connector, MT5_AVAILABLE, mt5, mt5_lock
 from src import config
 from src.utils.logger import get_logger
 
 logger = get_logger("mt5.broker")
+
+
+def _latency_log(action: str, symbol: str, signal_price: float, price: float,
+                 filled_volume: float, sl: Optional[float], tp: Optional[float],
+                 t0: float, t1: float, retcode: Optional[int], reason: str):
+    """Emit a single [LATENCY] micro-log line for every real order path.
+
+    Fields are chosen so the dashboard/trade log can compute ExecDelay_ms,
+    SlippagePts, and reject reasons without parsing free-form text.
+    """
+    pt = 1.0
+    if symbol and price:
+        # try to resolve point size for slippage in points
+        try:
+            spec = resolve_symbol(symbol.upper().split("-")[0].split(".")[0])
+            pt = spec.point if spec and spec.point else 1.0
+        except Exception:
+            pass
+    delay_ms = int(round((t1 - t0) * 1000))
+    slippage = round((price - signal_price) / pt, 2) if pt else 0.0
+    logger.info(
+        f"[LATENCY] {action} {symbol} signal={signal_price:.5f} fill={price:.5f} "
+        f"vol={filled_volume} slippage_pts={slippage:.2f} delay_ms={delay_ms} "
+        f"retcode={retcode} reason={reason}"
+    )
+
 
 
 @dataclass
@@ -95,8 +121,9 @@ def get_algo_status() -> AlgoStatus:
     acct_ok = False
     if MT5_AVAILABLE and connected:
         try:
-            ti = mt5.terminal_info()
-            ai = mt5.account_info()
+            with mt5_lock():
+                ti = mt5.terminal_info()
+                ai = mt5.account_info()
             term_ok = bool(ti.trade_allowed) if ti else False
             acct_ok = bool(ai.trade_allowed) if ai else False
         except Exception as e:
@@ -127,47 +154,74 @@ def resolve_symbol(base: str, use_cache: bool = True) -> Optional[SymbolSpec]:
 
     try:
         full_mode = getattr(mt5, "SYMBOL_TRADE_MODE_FULL", 4)
-        candidates = []
+        with mt5_lock():
+            candidates = []
 
-        # exact match first
-        exact = mt5.symbol_info(base)
-        if exact is not None:
-            candidates.append(exact)
+            # exact match first
+            exact = mt5.symbol_info(base)
+            if exact is not None:
+                candidates.append(exact)
 
-        # prefix matches (XAUUSD-ECN, XAUUSD.crp, BTCUSD, etc.)
-        allsyms = mt5.symbols_get() or []
-        for s in allsyms:
-            if s.name.upper().startswith(base) and s.name != base:
-                candidates.append(s)
+            # prefix matches (XAUUSD-ECN, XAUUSD.crp, BTCUSD, etc.)
+            allsyms = mt5.symbols_get() or []
+            for s in allsyms:
+                if s.name.upper().startswith(base) and s.name != base:
+                    candidates.append(s)
 
-        if not candidates:
-            logger.warning(f"resolve_symbol: no broker symbol matches '{base}'")
-            return None
+            if not candidates:
+                logger.warning(f"resolve_symbol: no broker symbol matches '{base}'")
+                return None
 
-        # prefer tradable (trade_mode == full), then shortest name (least suffix)
-        def score(s):
-            return (0 if s.trade_mode == full_mode else 1, len(s.name))
-        candidates.sort(key=score)
-        chosen = candidates[0]
+            # prefer tradable (trade_mode == full), then shortest name (least suffix)
+            def score(s):
+                return (0 if s.trade_mode == full_mode else 1, len(s.name))
+            candidates.sort(key=score)
+            chosen = candidates[0]
 
-        # make sure it's visible/selected
-        mt5.symbol_select(chosen.name, True)
-        info = mt5.symbol_info(chosen.name)
+            # make sure it's visible/selected
+            mt5.symbol_select(chosen.name, True)
+            info = mt5.symbol_info(chosen.name)
         if info is None:
             return None
 
+        # Defensive: coerce any MagicMock / RPyC proxy attributes to plain Python
+        # values so downstream logic and tests work with real primitives.
+        def _plain(value, fallback=""):
+            if value is None:
+                return fallback
+            if isinstance(value, (str, int, float, bool)):
+                return value
+            if hasattr(value, "__str__"):
+                try:
+                    s = str(value)
+                    if not s.startswith("<"):
+                        return s
+                except Exception:
+                    pass
+            return getattr(value, "_mock_name", fallback)
+
+        resolved_name = _plain(info.name, base)
+        digits = int(_plain(info.digits, 5))
+        point = float(_plain(info.point, 0.01))
+        tick_size = float(_plain(info.trade_tick_size, point))
+        tick_value = float(_plain(info.trade_tick_value, 0.0))
+        contract_size = float(_plain(info.trade_contract_size, 1.0))
+        min_volume = float(_plain(info.volume_min, 0.01))
+        max_volume = float(_plain(info.volume_max, 100.0))
+        volume_step = float(_plain(info.volume_step, 0.01))
+        trade_mode = _plain(info.trade_mode, 0)
         spec = SymbolSpec(
             base=base,
-            resolved=info.name,
-            digits=info.digits,
-            point=info.point,
-            tick_size=info.trade_tick_size or info.point,
-            tick_value=info.trade_tick_value,
-            contract_size=info.trade_contract_size,
-            min_volume=info.volume_min,
-            max_volume=info.volume_max,
-            volume_step=info.volume_step,
-            tradable=(info.trade_mode == full_mode),
+            resolved=resolved_name,
+            digits=digits,
+            point=point,
+            tick_size=tick_size,
+            tick_value=tick_value,
+            contract_size=contract_size,
+            min_volume=min_volume,
+            max_volume=max_volume,
+            volume_step=volume_step,
+            tradable=(trade_mode == full_mode),
         )
         _spec_cache[base] = spec
         logger.info(f"Resolved '{base}' -> '{spec.resolved}' (tradable={spec.tradable}, "
@@ -231,13 +285,27 @@ class BrokerAdapter:
     def live_tick(self):
         if not self.spec:
             return None
-        return mt5.symbol_info_tick(self.spec.resolved)
+        with mt5_lock():
+            t = mt5.symbol_info_tick(self.spec.resolved)
+            # Defensive: unwrap MagicMock so tests and RPyC return the same shape.
+            if t is None:
+                return None
+            return {
+                "ask": float(getattr(t, "ask", 0.0) or 0.0),
+                "bid": float(getattr(t, "bid", 0.0) or 0.0),
+                "time": getattr(t, "time", 0),
+                "last": float(getattr(t, "last", 0.0) or 0.0),
+                "volume": int(getattr(t, "volume", 0) or 0),
+            }
 
     # ---- execution ----
     def place(self, action: str, volume: float, sl: Optional[float] = None,
-              tp: Optional[float] = None, comment: str = "agent") -> OrderResult:
+              tp: Optional[float] = None, comment: str = "agent",
+              signal_price: Optional[float] = None) -> OrderResult:
         global _PAPER_TICKET_SEQ
         action = action.lower()
+        t0 = time.time()
+
         if action not in ("buy", "sell"):
             return self._reject(action, volume, "invalid action")
 
@@ -247,7 +315,8 @@ class BrokerAdapter:
         tick = self.live_tick()
         if tick is None:
             return self._reject(action, volume, "no live price")
-        price = tick.ask if action == "buy" else tick.bid
+        price = tick["ask"] if action == "buy" else tick["bid"]
+        signal_price = signal_price if signal_price is not None else price
 
         # OBSERVE: never place, never record
         if self.mode == "OBSERVE":
@@ -263,9 +332,13 @@ class BrokerAdapter:
         # LIVE_MICRO / LIVE: real order — but first check Algo Trading
         algo = get_algo_status()
         if not algo.can_trade:
+            _latency_log(action, self.spec.resolved, signal_price, price, 0.0,
+                         sl, tp, t0, time.time(), None, f"algo-blocked:{algo.reason}")
             return self._reject(action, volume, algo.reason)
 
         if not self.spec.tradable:
+            _latency_log(action, self.spec.resolved, signal_price, price, 0.0,
+                         sl, tp, t0, time.time(), None, "symbol-not-tradable")
             return self._reject(action, volume,
                                 f"symbol '{self.spec.resolved}' is not tradable (trade_mode disabled)")
 
@@ -294,14 +367,22 @@ class BrokerAdapter:
             request["tp"] = float(tp)
 
         try:
-            result = mt5.order_send(request)
+            with mt5_lock():
+                result = mt5.order_send(request)
         except Exception as e:
+            _latency_log(action, self.spec.resolved, signal_price, price, 0.0,
+                         sl, tp, t0, time.time(), None, f"order_send_exception:{e}")
             return self._reject(action, vol, f"order_send exception: {e}")
 
+        t1 = time.time()
         if result is None:
+            _latency_log(action, self.spec.resolved, signal_price, price, 0.0,
+                         sl, tp, t0, t1, None, f"order_send_None:{mt5.last_error()}")
             return self._reject(action, vol, f"order_send None; last_error={mt5.last_error()}")
 
         if result.retcode != mt5.TRADE_RETCODE_DONE:
+            _latency_log(action, self.spec.resolved, signal_price, price, 0.0,
+                         sl, tp, t0, t1, result.retcode, f"rejected:{result.comment}")
             return OrderResult(False, self.mode, None, self.spec.resolved, action,
                                vol, 0.0, price, sl, tp, False,
                                f"rejected: {result.comment}", retcode=result.retcode)
@@ -309,47 +390,56 @@ class BrokerAdapter:
         ticket = getattr(result, "order", None) or getattr(result, "deal", None)
         fill_price = getattr(result, "price", price) or price
         fill_vol = getattr(result, "volume", vol) or vol
+        _latency_log(action, self.spec.resolved, signal_price, fill_price, fill_vol,
+                     sl, tp, t0, t1, result.retcode, "filled")
         logger.info(f"ORDER FILLED {action.upper()} {self.spec.resolved} {fill_vol}@{fill_price} ticket={ticket}")
         return OrderResult(True, self.mode, ticket, self.spec.resolved, action,
                            vol, fill_vol, fill_price, sl, tp, False, "filled",
                            retcode=result.retcode)
 
+
     def close(self, ticket: int, volume: float = 0.0) -> OrderResult:
         """Close an open position by ticket (LIVE modes only)."""
+        t0 = time.time()
         if self.mode in ("OBSERVE", "PAPER"):
             return OrderResult(True, self.mode, ticket, self.resolved_symbol or self.base,
                                "close", volume, volume, 0.0, None, None,
                                self.mode == "PAPER", f"{self.mode} close (no real order)")
         try:
-            pos = mt5.positions_get(ticket=ticket)
-            if not pos:
-                return self._reject("close", volume, f"position {ticket} not found")
-            p = pos[0]
-            close_type = mt5.ORDER_TYPE_SELL if p.type == mt5.ORDER_TYPE_BUY else mt5.ORDER_TYPE_BUY
-            tick = mt5.symbol_info_tick(p.symbol)
-            price = tick.bid if close_type == mt5.ORDER_TYPE_SELL else tick.ask
-            request = {
-                "action": mt5.TRADE_ACTION_DEAL,
-                "symbol": p.symbol,
-                "volume": float(volume or p.volume),
-                "type": close_type,
-                "position": ticket,
-                "price": float(price),
-                "deviation": 30,
-                "magic": config.BOT_MAGIC,
-                "comment": "agent-close",
-                "type_time": mt5.ORDER_TIME_GTC,
-                "type_filling": mt5.ORDER_FILLING_IOC,
-            }
-            result = mt5.order_send(request)
+            with mt5_lock():
+                pos = mt5.positions_get(ticket=ticket)
+                if not pos:
+                    return self._reject("close", volume, f"position {ticket} not found")
+                p = pos[0]
+                close_type = mt5.ORDER_TYPE_SELL if p.type == mt5.ORDER_TYPE_BUY else mt5.ORDER_TYPE_BUY
+                tick = mt5.symbol_info_tick(p.symbol)
+                price = tick.bid if close_type == mt5.ORDER_TYPE_SELL else tick.ask
+                request = {
+                    "action": mt5.TRADE_ACTION_DEAL,
+                    "symbol": p.symbol,
+                    "volume": float(volume or p.volume),
+                    "type": close_type,
+                    "position": ticket,
+                    "price": float(price),
+                    "deviation": 30,
+                    "magic": config.BOT_MAGIC,
+                    "comment": "agent-close",
+                    "type_time": mt5.ORDER_TIME_GTC,
+                    "type_filling": mt5.ORDER_FILLING_IOC,
+                }
+                result = mt5.order_send(request)
+            t1 = time.time()
             if result is None or result.retcode != mt5.TRADE_RETCODE_DONE:
                 rc = result.retcode if result else None
                 cm = result.comment if result else mt5.last_error()
+                _latency_log("close", p.symbol, price, price, 0.0, None, None, t0, t1, rc, f"rejected:{cm}")
                 return OrderResult(False, self.mode, ticket, p.symbol, "close",
                                    volume, 0.0, price, None, None, False,
                                    f"close rejected: {cm}", retcode=rc)
+            _latency_log("close", p.symbol, price, result.price, volume or p.volume,
+                         None, None, t0, t1, result.retcode, "closed")
             return OrderResult(True, self.mode, ticket, p.symbol, "close",
-                               volume or p.volume, volume or p.volume, price, None, None,
+                               volume or p.volume, volume or p.volume, result.price, None, None,
                                False, "closed", retcode=result.retcode)
         except Exception as e:
             return self._reject("close", volume, f"close exception: {e}")
@@ -360,30 +450,35 @@ class BrokerAdapter:
         This is how the TradeManager moves to BE+/trails — the SL always lives on
         the broker, so the trade is never left unprotected.
         """
+        t0 = time.time()
         if self.mode in ("OBSERVE", "PAPER"):
             # paper: pretend success (state tracked in-memory by the manager)
             return OrderResult(True, self.mode, ticket, self.resolved_symbol or self.base,
                                "modify", 0.0, 0.0, sl, sl, tp, self.mode == "PAPER",
                                f"{self.mode} modify (no real order)")
         try:
-            pos = mt5.positions_get(ticket=ticket)
-            if not pos:
-                return self._reject("modify", 0.0, f"position {ticket} not found")
-            p = pos[0]
-            request = {
-                "action": mt5.TRADE_ACTION_SLTP,
-                "symbol": p.symbol,
-                "position": ticket,
-                "sl": float(sl),
-                "tp": float(tp if tp is not None else p.tp),
-            }
-            result = mt5.order_send(request)
+            with mt5_lock():
+                pos = mt5.positions_get(ticket=ticket)
+                if not pos:
+                    return self._reject("modify", 0.0, f"position {ticket} not found")
+                p = pos[0]
+                request = {
+                    "action": mt5.TRADE_ACTION_SLTP,
+                    "symbol": p.symbol,
+                    "position": ticket,
+                    "sl": float(sl),
+                    "tp": float(tp if tp is not None else p.tp),
+                }
+                result = mt5.order_send(request)
+            t1 = time.time()
             if result is None or result.retcode != mt5.TRADE_RETCODE_DONE:
                 rc = result.retcode if result else None
                 cm = result.comment if result else mt5.last_error()
+                _latency_log("modify", p.symbol, 0.0, 0.0, 0.0, sl, tp, t0, t1, rc, f"rejected:{cm}")
                 return OrderResult(False, self.mode, ticket, p.symbol, "modify",
                                    0.0, 0.0, sl, sl, tp, False,
                                    f"modify rejected: {cm}", retcode=rc)
+            _latency_log("modify", p.symbol, 0.0, 0.0, 0.0, sl, tp, t0, t1, result.retcode, "modified")
             logger.info(f"SL modified for {ticket} -> {sl}")
             return OrderResult(True, self.mode, ticket, p.symbol, "modify",
                                0.0, 0.0, sl, sl, tp, False, "modified", retcode=result.retcode)

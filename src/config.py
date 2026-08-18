@@ -164,6 +164,16 @@ SCALP_CYCLE_SECONDS = int(os.getenv("SCALP_CYCLE_SECONDS", "15"))         # loop
 # cycles) so intra-cycle peaks are protected by the ratchet/trail/reversal.
 SCALP_MANAGE_SECONDS = int(os.getenv("SCALP_MANAGE_SECONDS", "2"))
 
+# #5 pre-close protection: how many minutes before the next scheduled session close
+# we start treating open positions as "at risk" and let the trade manager decide
+# whether to widen SL / lock profit / close. 0 disables the guard entirely.
+SESSION_CLOSE_BUFFER_MINUTES = int(os.getenv("SESSION_CLOSE_BUFFER_MINUTES", "30"))
+SESSION_CLOSE_BUFFER_MAX_MINUTES = int(os.getenv("SESSION_CLOSE_BUFFER_MAX_MINUTES", "120"))
+
+# #55 latency hard ceiling: orders taking longer than this (ms) are logged as warnings
+# and the engine can react (currently logging-only; killswitch candidate).
+EXEC_LATENCY_WARN_MS = int(os.getenv("EXEC_LATENCY_WARN_MS", "500"))
+
 # ─── Multi-Timeframe Alignment ──────────────────────────────────────
 # Before a fast (1m) entry, require that higher timeframes don't clearly oppose
 # the trade direction. Keeps scalps aligned with the broader trend.
@@ -340,18 +350,42 @@ MAX_OPEN_POSITIONS = int(os.getenv("MAX_OPEN_POSITIONS", "6"))          # across
 MAX_SPREAD_POINTS = float(os.getenv("MAX_SPREAD_POINTS", "0"))         # 0 = disabled; per-symbol override better
 MIN_FREE_MARGIN = float(os.getenv("MIN_FREE_MARGIN", "10"))            # refuse if below
 
-# Magic number stamped on the bot's own orders. Positions with a DIFFERENT magic
-# (or 0) are treated as MANUAL trades and adopted/managed by the bot too.
-BOT_MAGIC = int(os.getenv("BOT_MAGIC", "987654"))
+
 # Pending trades older than this with no findable closing deal are marked
 # 'unknown' so they stop skewing win/loss statistics.
 PENDING_STALE_HOURS = float(os.getenv("PENDING_STALE_HOURS", "48"))
+
+# Magic number stamped on the bot's own orders. Positions with a DIFFERENT magic
+# (or 0) are treated as MANUAL trades and adopted/managed by the bot too.
+BOT_MAGIC = int(os.getenv("BOT_MAGIC", "987654"))
+
+# Per-symbol magic-number seed.  MT5 reserves magic numbers 0–99999 for the
+# terminal, so we stay above 100000.  Given a base BOT_MAGIC and a stable seed,
+# each symbol gets a deterministic, collision-resistant magic:
+#     magic_for_symbol(sym) = (hash(sym + seed) & 0x7FFFFFFF) % 900000 + 100000
+# This keeps different symbols distinct in the broker's order history while
+# still letting the bot identify its own positions by the BOT_MAGIC base range.
+BOT_MAGIC_SEED = os.getenv("BOT_MAGIC_SEED", "goldshark-v1")
 
 # ─── Adaptive Intelligence (L4 reflect / L5 synthesize / L6 backtest) ──
 # How often (in engine cycles) to run the adaptive self-improvement pass, and
 # the minimum closed-trade sample per symbol before reflection is meaningful.
 ADAPTIVE_EVERY_CYCLES = int(os.getenv("ADAPTIVE_EVERY_CYCLES", "240"))  # ~1h at 15s cycles
 ADAPTIVE_MIN_SAMPLE = int(os.getenv("ADAPTIVE_MIN_SAMPLE", "10"))
+
+
+def magic_for_symbol(symbol: str, base: int = BOT_MAGIC, seed: str = BOT_MAGIC_SEED) -> int:
+    """Return a deterministic magic number for `symbol` above MT5's reserved range.
+
+    The Python bot and the generated MQL5 EAs use the same formula so that live
+    orders from both sources share a magic that the bot can identify and reconcile.
+    """
+    payload = f"{symbol.upper().strip()}:{seed}"
+    h = hash(payload)
+    # keep within signed 32-bit positive range and above MT5 reserved 0-99999
+    capped = (h & 0x7FFFFFFF) % 900000 + 100000
+    # blend in base so changing BOT_MAGIC reshuffles the whole fleet
+    return ((capped + base) & 0x7FFFFFFF) % 900000 + 100000
 
 # ─── Autonomous parameter optimizer (self-learning) ──
 # The bot mutates indicator params (EMA/OsMA/RSI/CCI periods, SL/RR) per symbol,

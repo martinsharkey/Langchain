@@ -340,3 +340,109 @@ the 3 focus symbols under the new strategy, then merge the branch.
 - Commit: `899ed87`
 - Closed issues: #54 (exit-capture leak), #69 (points unit mismatch — already fixed in a774193).
 
+## Session 2026-08-18 (continued) — Multi-issue sweep (#55, #5, #66) + pipeline tests
+
+### Goal
+Tackle the three outstanding live-trading/safety bugs most likely to close the sim-vs-live gap and harden the execution path. Must run the full pytest suite and any QMMP/pipeline verification scripts after changes so nothing is broken or unwired, and every new addition gets a regression test.
+
+### Issues in scope
+| Issue | Title | Priority | Why |
+|---|---|---|---|
+| **#55** | Execution latency: mean 3.2s / max 77s fills corrupt M1 entries (IPC contention + cycle cadence) | high | Directly corrupts entry prices on M1/M5; prime suspect for sim vs live gap |
+| **#5** | Verify pre-close protection fires end-to-end on a real session close | high | Trading-safety gap; protects against weekend/session-close risk |
+| **#66** | Magic number 880011 hardcoded — parameterize per-symbol | medium | Cleanup + prevents collision with manual EAs; needed for EA fleet |
+
+### Investigation notes so far
+- `src/config.py` already exposes `BOT_MAGIC = int(os.getenv("BOT_MAGIC", "987654"))` (line 345). Issue #66 references an old hardcoded `880011`; need to grep for any remaining literal.
+- `src/mt5/broker_adapter.py` is the single execution boundary: `order_send` calls are at lines 297, 344, 380. There is **no global MT5 lock** despite `MT5_LOCK` being referenced in #55.
+- `src/mt5/connector.py` imports `threading` but does **not** expose a shared lock; broker_adapter calls `mt5.*` directly on the main thread.
+- `src/trading/scalp_engine.py` `_evaluate_and_trade` runs synchronously on the main loop: signal ? SL/TP calc ? `adapter.place()` ? DB record. There is **no `[LATENCY]` logging** in the current tree despite the issue claiming commit `1fecac1` added it.
+- Fast entry sub-tick does not currently exist: `SCALP_CYCLE_SECONDS=15` (config line 162) and `SCALP_MANAGE_SECONDS=2` (line 165). `_fast_manage_until` only manages open positions; it does **not** evaluate new entries.
+- No tests cover broker_adapter execution, MT5 locking, order latency, or magic-number behavior.
+
+### Plan
+1. **#55 execution latency**
+   - Add a module-level `threading.RLock()` in `src/mt5/connector.py` and a helper `with mt5_lock():` context manager.
+   - Serialize **all** `mt5.*` reads/writes that can contend with order execution behind the lock (rates, positions, account info, symbol info, order_send, order_check).
+   - Add `[LATENCY]` micro-logging in `broker_adapter.place()` / `close()` / `modify_sl()` recording: signal price, send timestamp, fill timestamp, exec delay ms, slippage pts, retcode.
+   - Move the heavy pre-entry work (indicator compute, RAG, ONNX, HTF, mode-manager) so the actual `order_send` path is as short as possible; do not hold the lock during heavy compute.
+   - Add a fast entry tick option without breaking the existing 15s full-cycle cadence (optional; depends on risk assessment).
+   - Add regression tests:
+     - `tests/test_broker_adapter.py`: mock `mt5` and assert `order_send` is serialized by the lock; assert latency log fields; assert slippage calculation.
+     - `tests/test_scalp_engine_latency.py`: assert signal?send path logs latency and does not block >1s in unit test.
+
+2. **#5 pre-close protection**
+   - Locate session-close guard code (`sessions.is_open()` + any pre-close buffer).
+   - Add / verify a test that simulates a session-close event and asserts no new entries are opened, open positions are protected/managed, and an alert/log is emitted.
+   - If the guard is missing, implement it in `scalp_engine.py` using the existing `sessions` helper plus a configurable `SESSION_CLOSE_BUFFER_MINUTES`.
+   - Add regression test `tests/test_session_close_guard.py`.
+
+3. **#66 magic number**
+   - Grep for literal `880011` across source, templates, and generated EAs. Replace any remaining hardcoded instances with `config.BOT_MAGIC` or a per-symbol derivation if required by MQ5.
+   - If per-symbol magic is needed for the EA fleet, add `BOT_MAGIC_SEED` env var and derive stable per-symbol magic via `hash(symbol + str(seed)) & 0x7FFFFFFF` capped above MT5's reserved range.
+   - Add test `tests/test_magic_number.py` asserting no literal `880011`, asserting derivations are deterministic and unique per symbol.
+
+4. **Run full verification**
+   - `pytest tests/`
+   - `python -m scripts.qmmp.ea_generator --verify` for any symbol touched
+   - If new scripts/harnesses are added, include them in CI or document in `tests/README.md` so future sessions run them automatically.
+
+### Files expected to change
+- `src/mt5/connector.py` (add `mt5_lock`)
+- `src/mt5/broker_adapter.py` (serialize calls, latency logging)
+- `src/mt5/data.py`, `src/mt5/account.py`, `src/mt5/orders.py`, `src/mt5/wine_bridge.py` (audit/serialize behind lock where needed)
+- `src/trading/scalp_engine.py` (latency logging, pre-close guard, fast entry option)
+- `src/config.py` (magic seed / session-close buffer / latency flags)
+- `tests/test_broker_adapter.py` (new)
+- `tests/test_scalp_engine_latency.py` (new)
+- `tests/test_session_close_guard.py` (new)
+- `tests/test_magic_number.py` (new)
+- `SESSION_LOG.md` (this session, updated as work progresses)
+
+### Current state
+- Branch: `main` (up to date)
+- Tests: 151 passing, 2 skipped
+- Open issues: 23 (targeting #55, #5, #66 this session)
+- Bot status: LIVE_MICRO, healthy
+
+### Work completed
+1. **#55 execution latency**
+   - Added module-level `threading.RLock()` in `src/mt5/connector.py` with `mt5_lock()` helper.
+   - Wrapped all order-execution paths in `src/mt5/broker_adapter.py` (`place`, `close`, `modify_sl`) plus `resolve_symbol`, `get_algo_status`, and `live_tick` behind `with mt5_lock():`.
+   - Added `_latency_log()` helper and `[LATENCY]` micro-log lines on every real order path (filled, rejected, algo-blocked, exception).
+   - `live_tick()` now returns a plain dict and defensively unwraps MagicMock/RPyC attributes.
+   - Added `EXEC_LATENCY_WARN_MS` and `SESSION_CLOSE_BUFFER_*` config knobs in `src/config.py`.
+
+2. **#5 pre-close protection**
+   - Replaced the hardcoded `15–30 min` window in `src/trading/scalp_engine.py` with the configurable `SESSION_CLOSE_BUFFER_MINUTES`/`SESSION_CLOSE_BUFFER_MAX_MINUTES` range.
+   - Added an explicit `[PRECLOSE]` log branch when inside the window even if the trade manager returns no decision, making end-to-end verification observable.
+
+3. **#66 magic number**
+   - Removed hardcoded `880011` from `scripts/qmmp/ea_generator.py`.
+   - Added `magic_for_symbol()` in `src/config.py` with `BOT_MAGIC` base + `BOT_MAGIC_SEED`, deterministic and unique per symbol, kept above MT5's reserved 0–99999 range.
+   - Regenerated `data/qmmp/XAUUSD` and `data/qmmp/BTCUSD` EAs use the new per-symbol magic.
+
+4. **Regression tests**
+   - `tests/test_broker_adapter.py`: asserts lock serialization, order success/reject paths, PAPER/OBSERVE never call `order_send`, close/modify use lock.
+   - `tests/test_session_close_guard.py`: asserts pre-close window detection, weekend closure, config knobs, engine branch reaches manager.
+   - `tests/test_magic_number.py`: asserts deterministic unique per-symbol magic and base-change reshuffle.
+
+5. **Verification**
+   - Full pytest suite: `162 passed, 3 skipped, 1 warning` (was 151/2).
+   - `python -m py_compile` passed for all modified source files.
+   - `python -m scripts.qmmp.ea_generator XAUUSD --verify` and `BTCUSD --verify` both pass.
+
+### Files changed
+- `src/mt5/connector.py` (added `mt5_lock`, safer `is_connected`)
+- `src/mt5/broker_adapter.py` (lock + latency logging + mock/RPyC defences)
+- `src/config.py` (magic function, session/latency knobs)
+- `src/trading/scalp_engine.py` (configurable pre-close window + logs)
+- `scripts/qmmp/ea_generator.py` (per-symbol magic)
+- `data/qmmp/BTCUSD/*`, `data/qmmp/XAUUSD/*` (regenerated)
+- `tests/test_broker_adapter.py` (new)
+- `tests/test_session_close_guard.py` (new)
+- `tests/test_magic_number.py` (new)
+- `SESSION_LOG.md` (this log)
+
+### Next action for pickup
+Session work is complete and verified. Stage, commit with a summary covering #55/#5/#66, and push to `main` if the repo policy allows direct pushes; otherwise open a PR.

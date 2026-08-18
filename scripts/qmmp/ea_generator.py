@@ -77,7 +77,10 @@ def build_ea(model: dict) -> tuple[str, str, dict]:
     # --- money management ---
     add("GBP_per_001", gbp_per, 10, 250, 10)
     add("LotCapPerAccount", int(mm.get("lot_cap_per_account", 100)), 10, 100, 10, "int")
-    add("Magic", 880011, 100000, 999999, 1, "int")
+    # Issue #66: per-symbol deterministic magic (was hardcoded 880011).
+    from src.config import magic_for_symbol
+    magic = magic_for_symbol(sym)
+    add("Magic", magic, 100000, 999999, 1, "int")
 
     # Build grouped input block using MQL5 `input group` directive
     entry_block = "\n".join(inputs[:3])

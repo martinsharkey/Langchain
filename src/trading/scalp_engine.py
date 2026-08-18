@@ -2188,8 +2188,12 @@ class ScalpEngine:
             # extreme (tick high/low since last check) so peak tracking sees it.
             extreme_price = self._favourable_extreme_since(pos, adapter, st) or price
 
-            # ── session pre-close handling (15–30 min before close) ──
-            if self.sessions.in_preclose_window(pos.base_symbol, lo=15, hi=30):
+            # ── session pre-close handling (configurable window before close) ──
+            # Issue #5: verify pre-close protection fires end-to-end.  We explicitly
+            # branch here so the behaviour is deterministic and observable in tests.
+            pc_min = getattr(config, "SESSION_CLOSE_BUFFER_MINUTES", 30)
+            pc_max = max(pc_min + 1, getattr(config, "SESSION_CLOSE_BUFFER_MAX_MINUTES", 120))
+            if pc_min > 0 and self.sessions.in_preclose_window(pos.base_symbol, lo=pc_min, hi=pc_max):
                 atr_short = self.stats_engine.atr_points(pos.symbol, "M15") or st.atr_points
                 pc = self.trade_manager.preclose_decision(
                     st, price, adapter.spec.point, spread_pts, atr_short)
@@ -2199,17 +2203,23 @@ class ScalpEngine:
                     elif "close" in pc:
                         res = adapter.close(ticket)
                         if res.ok and not res.simulated:
-                            logger.info(f"Pre-close CLOSED {ticket}: {pc['close']} ({res.reason})")
+                            logger.info(f"[PRECLOSE] CLOSED {ticket}: {pc['close']} ({res.reason})")
                             self._retire_managed(ticket)
                         elif res.simulated or adapter.mode in ("OBSERVE", "PAPER"):
                             logger.warning(
-                                f"Pre-close wanted to close {ticket} ({pc['close']}) but "
+                                f"[PRECLOSE] wanted to close {ticket} ({pc['close']}) but "
                                 f"mode={adapter.mode} — SIMULATED, no real order. Trade left running."
                             )
                         else:
-                            logger.warning(f"Pre-close close of {ticket} FAILED ({res.reason}); "
+                            logger.warning(f"[PRECLOSE] close of {ticket} FAILED ({res.reason}); "
                                            f"keeping tracked")
                     continue  # pre-close decision takes precedence this cycle
+                else:
+                    # Even when the trade-manager has no specific instruction, we are inside
+                    # the pre-close window: log this so #5 can be verified end-to-end.
+                    logger.info(f"[PRECLOSE] {pos.base_symbol} #{ticket}: in pre-close window "
+                                f"({self.sessions.minutes_to_close(pos.base_symbol)} min), "
+                                f"monitoring for manager decision")
 
             # ── HTF-aware wick survival vs reversal (the trader's key ask) ──
             # If the trade is in adverse territory, ask the HTF context whether
