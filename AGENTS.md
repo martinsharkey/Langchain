@@ -76,11 +76,18 @@ VPS-ready — no editor/Kilo dependency). Change `src/core_rules.py` first if a 
    `validate_whale_backtest`, `whale_candle_study`. Full reference: **`TESTING.md`**.
 3. **Keeping the live bot healthy** while it accumulates real closed trades.
 
-> **Latest state (2026-08-02):** on `main` (pushed). Full 7-indicator confluence is
+> **Latest state (2026-08-18):** on `main` (pushed). Full 7-indicator confluence is
 > the single source of truth (`confluence_signal.py`); optimizer uses authoritative
 > mql5 ranges; all learning loops audited WIRED end-to-end; ONNX per-symbol; CryptoRTI
-> whale wired into BOTH live + backtest paths. 82 tests passing. Architecture:
-> `LEARNING_ARCHITECTURE.md`; testing: `TESTING.md`.
+> whale wired into BOTH live + backtest paths. 151 tests passing (2 skipped). CI
+> active (`.github/workflows/ci.yml`). Workspace rules codified in
+> `WORKSPACE_RULES.md` (authoritative rulebook). Architecture: `ARCHITECTURE.md` +
+> `ARCHITECTURE_OVERVIEW.md`; testing: `TESTING.md`.
+>
+> **ONNX outcome-predictor finding (2026-08-18):** the per-symbol ONNX models show
+> coin-flip AUC (0.45–0.52) on live floor-filtered OsMA_Confluence trades despite
+> 0.69–0.78 holdout AUC. Do NOT wire ONNX into the Optuna floor optimizer — it adds
+> noise, not value. Diagnostic: `scripts/qmmp/onnx_signal_diagnostic.py`.
 
 ## What we fixed / built THIS session (2026-07-31)
 

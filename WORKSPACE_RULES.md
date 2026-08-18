@@ -149,12 +149,15 @@ Run `python housekeeping.py` at least once per session. It checks:
 - Old session notes that are superseded by `SESSION_LOG.md` are deleted.
 - Before deleting: `git rm` and commit with message `chore: remove stale <file>`.
 
-### 5.4 Current Stale Items (clean up in next session)
-- `plans/architecture-plan.md` — references Wine/macOS bridge (no longer relevant)
-- `plans/mt5-bridge-fix-plan.md` — Docker bridge was abandoned
-- `plans/mt5-bridge-research-plan.md` — superseded by native Windows MT5
-- `mt5_screen.png` — binary screenshot, not needed in repo
+### 5.4 Stale-Item Cleanup (verified 2026-08-18)
+The following were removed in the 2026-08-18 session and are confirmed gone:
+- `plans/architecture-plan.md`, `plans/mt5-bridge-fix-plan.md`,
+  `plans/mt5-bridge-research-plan.md` — obsolete (Wine/Docker bridge abandoned)
+- `mt5_screen.png` — binary screenshot
 - `env.txt`, `env_out.txt` — credentials on disk (see Security section)
+
+`plans/` is now an empty directory; delete it if it reappears empty. Re-run the
+Section 11 checklist at the start of each session to catch new drift.
 
 ---
 
@@ -162,10 +165,21 @@ Run `python housekeeping.py` at least once per session. It checks:
 
 ### 6.1 Docs Must Track Code
 When the code structure changes:
-- Update `ARCHITECTURE.md` and do not create duplicate architecture documents
+- Update `ARCHITECTURE.md` (current built state) and `ARCHITECTURE_OVERVIEW.md`
+  (high-level map + cycle diagram) — these are the two canonical current-state docs.
 - Update `README.md` project layout section
 - Update `AGENTS.md` "Key paths" section
 - Update `TESTING.md` if test harnesses change
+
+Canonical architecture docs and their distinct purposes (do NOT create new ones):
+- `ARCHITECTURE.md` — current built state, component map, data flow, known issues
+- `ARCHITECTURE_OVERVIEW.md` — high-level system map + trading/learning cycle
+- `LEARNING_ARCHITECTURE.md` — learning-loop deep notes (superseded sections flagged)
+- `DISTRIBUTED_ARCHITECTURE.md` — FUTURE multi-box design only (do not build yet)
+- `CRYPTORTI_WAVE_DESIGN.md` — CryptoRTI whale-signal design
+
+If a new architecture topic arises, extend one of these rather than adding a new
+`*_ARCHITECTURE.md` file.
 
 ### 6.2 Architecture Review Cadence
 - At the start of every major phase, review `ARCHITECTURE.md` for drift.
