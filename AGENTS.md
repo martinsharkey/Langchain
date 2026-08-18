@@ -3,6 +3,23 @@
 > This file is the FIRST thing to read in a new chat. It tells you what this
 > project is, what we're building, what's broken, what's next, and the rules.
 
+## Workspace Rules
+
+**`WORKSPACE_RULES.md` is the authoritative rulebook for sessions, commits,
+testing, security, and code hygiene.** It covers:
+- Session logging & history preservation (SESSION_LOG.md protocol)
+- Todo tracking (GitHub Issues as source of truth)
+- Commit & push discipline (push after every session)
+- Testing requirements (all changes must have tests, CI must pass)
+- Code hygiene (no redundant code, scheduled housekeeping, stale file cleanup)
+- Architecture maintenance (docs must track code)
+- Tool & dependency approval (no new tools without human approval)
+- Security (secrets hygiene, credential rotation)
+- Live trading safety (kill switch, readiness gate)
+
+Read `WORKSPACE_RULES.md` alongside this file. When they conflict,
+`WORKSPACE_RULES.md` wins.
+
 ## GROUND RULE — GitHub is the single source of truth
 
 All issues, features, bugs, and TODOs live in **GitHub Issues** on
