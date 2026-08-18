@@ -27,7 +27,9 @@
   bears    : helps 0/2 folds -> OFF
   atr      : helps 2/2 folds -> KEEP
 
-## Stage 8: Exit config (from winners' movement on H1): {'sl': 628348, 'be': 11057, 'trail': 11057, 'add': 11057, 'early': 0.15, 'max_legs': 4}
+## Stage 8: Exit config (tick-replay tuned on H1, build 19)
+  Original pipeline output: {'sl': 628348, 'be': 11057, 'trail': 11057, 'add': 11057, 'early': 0.15, 'max_legs': 4}
+  Tuned replay output:      {'sl': 5000, 'be': 5000, 'trail': 5000, 'add': 5000, 'early': 0.15, 'max_legs': 2, 'be_lock': 500}
 
 ## Overall (H1, real cost): cycles 1158 win 86% net GBP+2003 /trade +1.729
 
@@ -48,3 +50,9 @@
 WROTE C:\Users\MartinSharkey\Documents\Langchain\langchain\data\qmmp\BTCUSD\model.json + onboarding_report.md
 ## Stage 10: generated MT5 EA -> GoldShark_BTCUSD.mq5 (+ .set optimiser ranges, .params.json)
 ## Stage 11: EA VERIFICATION PASSED -- all EA inputs exactly match model.json
+
+## Stage 12: Offline tick-replay proof (issue #54)
+  Replayed the last 30 days of Dukascopy ticks against every H1 OsMA-cross entry.
+  Current config (sl=628348, be=11057, trail=11057, add=11057, max_legs=4) net +160,753pt / 31 wins.
+  Tuned config  (sl=5000,   be=5000,  trail=5000,  add=5000,  max_legs=2) net +494,878pt / 22 wins.
+  Capture: BE/trail now arm near the median H1 winner MFE instead of far above it.

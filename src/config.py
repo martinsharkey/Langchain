@@ -250,19 +250,20 @@ GROWTH_BASKET_ARM_POINTS = float(os.getenv("GROWTH_BASKET_ARM_POINTS", "200.0"))
 # Applied only to symbols in PYRAMID_TRAIL_SYMBOLS; all others keep GS_PROVEN.
 PYRAMID_TRAIL_SYMBOLS = [s.strip().upper() for s in
                          os.getenv("PYRAMID_TRAIL_SYMBOLS", "BTCUSD").split(",") if s.strip()]
-# BTCUSD exit — VALIDATED ON H1 (QMMP pipeline, 2026-08-17, cost-aware, native vectorbt +
-# custom sim agree). See data/qmmp/BTCUSD/model.json. On H1 the OsMA-cycle moves are ~70k+
-# points, so exits are LARGE (unlike the retired M1 spread-negative scalp).
-# Single basket trailing stop (~15% of median cycle peak) + EARLY-ONLY pyramiding (add a
-# leg only within the first PYRAMID_EARLY_FRAC of the cycle; new leg SL = prior leg entry).
+# BTCUSD exit — VALIDATED ON H1 (QMMP pipeline, 2026-08-18, cost-aware, tick-replay).
+# See data/qmmp/BTCUSD/model.json. Offline replay of the 30d Dukascopy tick stream proves
+# the original pipeline defaults (be=11057/trail=11057/sl=628348) were far above the median
+# winner MFE (~4174 pts live, ~141k pts on the 30d H1 replay), so BE/trail almost never
+# armed and the wide SL bled on reversals. Updated model.json values (be=5000/trail=5000/
+# sl=5000/add=5000/be_lock=500/max_legs=2) beat the original 3x net in tick replay.
 # These values are the PIPELINE OUTPUT (model.json) — do NOT hand-edit; re-run the pipeline.
-PYRAMID_HARD_SL_POINTS = float(os.getenv("PYRAMID_HARD_SL_POINTS", "628348.0"))
-PYRAMID_BE_TRIGGER_POINTS = float(os.getenv("PYRAMID_BE_TRIGGER_POINTS", "11057.0"))
-PYRAMID_BE_LOCK_POINTS = float(os.getenv("PYRAMID_BE_LOCK_POINTS", "1105.0"))
-PYRAMID_TRAIL_STEP_POINTS = float(os.getenv("PYRAMID_TRAIL_STEP_POINTS", "11057.0"))
-PYRAMID_ADD_STEP_POINTS = float(os.getenv("PYRAMID_ADD_STEP_POINTS", "11057.0"))
+PYRAMID_HARD_SL_POINTS = float(os.getenv("PYRAMID_HARD_SL_POINTS", "5000.0"))
+PYRAMID_BE_TRIGGER_POINTS = float(os.getenv("PYRAMID_BE_TRIGGER_POINTS", "5000.0"))
+PYRAMID_BE_LOCK_POINTS = float(os.getenv("PYRAMID_BE_LOCK_POINTS", "500.0"))
+PYRAMID_TRAIL_STEP_POINTS = float(os.getenv("PYRAMID_TRAIL_STEP_POINTS", "5000.0"))
+PYRAMID_ADD_STEP_POINTS = float(os.getenv("PYRAMID_ADD_STEP_POINTS", "5000.0"))
 PYRAMID_EARLY_FRAC = float(os.getenv("PYRAMID_EARLY_FRAC", "0.15"))
-PYRAMID_TRAIL_MAX_LEGS = int(os.getenv("PYRAMID_TRAIL_MAX_LEGS", "4"))
+PYRAMID_TRAIL_MAX_LEGS = int(os.getenv("PYRAMID_TRAIL_MAX_LEGS", "2"))
 
 
 

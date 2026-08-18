@@ -335,6 +335,14 @@ def main():
     model = json.load(open(os.path.join(d, "model.json"), encoding="utf-8"))
     p = write_ea(model, d)
     print(f"wrote {p} + .set (optimiser ranges)")
+    if "--verify" in sys.argv or "-v" in sys.argv:
+        problems = verify_ea(model, p)
+        if problems:
+            for pr in problems:
+                print("VERIFY FAIL:", pr)
+            sys.exit(1)
+        else:
+            print(f"verify {p}: EA inputs == model.json manifest")
 
 
 if __name__ == "__main__":

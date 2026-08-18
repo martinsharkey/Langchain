@@ -2,7 +2,7 @@
   "symbol": "BTCUSD",
   "status": "ONBOARDED",
   "onboarded_at": "2026-08-18",
-  "build": 18,
+  "build": 19,
   "timeframe": "H1",
   "path_timeframe": "M30",
   "cost_model": {
@@ -97,12 +97,13 @@
     }
   },
   "exit": {
-    "sl": 628348,
-    "be": 11057,
-    "trail": 11057,
-    "add": 11057,
+    "sl": 5000,
+    "be": 5000,
+    "trail": 5000,
+    "add": 5000,
     "early": 0.15,
-    "max_legs": 4
+    "max_legs": 2,
+    "be_lock": 500
   },
   "per_session": {
     "Asian": {
