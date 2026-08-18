@@ -2586,6 +2586,8 @@ class ScalpEngine:
         except Exception:
             pass
         return params
+
+    def _maybe_run_adaptive(self):
         """Run the adaptive intelligence loop in a background thread (non-blocking)."""
 
         def _work():
