@@ -276,7 +276,40 @@ the 3 focus symbols under the new strategy, then merge the branch.
 - **Open issues:** 20 (#55–#74), mostly QMMP/pipeline and EA template bugs
 - **Bot status:** LIVE_MICRO, XAUUSD profitable (73% WR, n=60), BTCUSD improving, GER40 struggling
 
+---
+
+## Session 2026-08-18 (evening) — branch audit & live-bot safety review
+
+### What we did
+- **Full live-bot health check** — verified `app.py LIVE_MICRO`, dashboard, and MT5 terminal
+  are all running; 1 open GER40 position; balance £4,688.48; realized today +£11.11.
+- **Git branch audit** — identified and deleted fully-merged branches:
+  - Local `fix/17-11-manage-live-positions`
+  - Remote `origin/live-tuning-2026-08-16`
+- **Flagged dangerous stale branches** (do NOT merge into `main`):
+  - `origin/master` — unrelated history (no merge base), 24 ahead / 189 behind
+  - `origin/code-review-fixes-2026-08-08` — destructive revert that deletes `WORKSPACE_RULES.md`,
+    `.github/workflows/ci.yml`, `src/core_rules.py`, most QMMP scripts, and re-adds `RULES.md`/`plans/`
+- **Workspace review** — confirmed `main` is clean, 151 tests passing, 2 skipped, 23 open issues,
+  no open PRs, no stashes, `.env` present and gitignored, kill switch not active.
+- **Removed empty `plans/` directory** left over from earlier cleanup.
+
+### What changed
+- Branches deleted: `fix/17-11-manage-live-positions`, `origin/live-tuning-2026-08-16`
+- Directory deleted: empty `plans/`
+- Docs updated: `SESSION_LOG.md`
+
+### Current state
+- **Branch:** main (up to date with origin/main)
+- **Tests:** 151 passing, 2 skipped
+- **CI:** `.github/workflows/ci.yml` active and pushed
+- **Open issues:** 23 (QMMP pipeline, trading safety, research)
+- **Dangerous stale branches:** `origin/master`, `origin/code-review-fixes-2026-08-08` — require
+  deliberate review before any action; do not merge blindly
+- **Bot status:** LIVE_MICRO, healthy, 1 open GER40 position
+
 ### Next
-- Add CI workflow via GitHub UI (requires re-authorizing gh with `workflow` scope)
-- Triage open issues #55–#74 for next session priorities
-- Continue QMMP pipeline work (EA generation, floor optimization, tick-awareness)
+- Decide what to do with `origin/master` and `origin/code-review-fixes-2026-08-08`
+  (archive / delete / cherry-pick useful files).
+- Pick the next GitHub issue to work on; test changes offline first while bot is live.
+
