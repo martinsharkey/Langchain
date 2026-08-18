@@ -260,6 +260,84 @@ def api_strategies():
     return jsonify({"performance": perf, "by_symbol": by_symbol})
 
 
+@app.route("/api/generate_ea", methods=["POST"])
+def api_generate_ea():
+    """Trigger EA generation for a symbol (HLD B).
+
+    Body JSON:
+      { "symbol": "XAUUSD", "source": "historical_fit" | "live_checkpoint" }
+
+    Reuses the existing Stage 10-13 pipeline machinery.
+    """
+    req = request.get_json(silent=True) or {}
+    symbol = (req.get("symbol") or "").upper().strip()
+    source = (req.get("source") or "historical_fit").strip()
+
+    if not symbol:
+        return jsonify({"error": "symbol is required", "build": None}), 400
+
+    result = {
+        "symbol": symbol,
+        "source": source,
+        "build": None,
+        "compile_ok": False,
+        "deploy_path": None,
+        "verification": None,
+        "error": None,
+    }
+
+    try:
+        if source == "live_checkpoint":
+            from scripts.qmmp.checkpoint_bridge import write_model_from_checkpoint
+            model_path, model = write_model_from_checkpoint(symbol)
+            result["model_path"] = model_path
+            result["checkpoint_meta"] = model.get("checkpoint_meta", {})
+        else:
+            from scripts.qmmp.onboard_pipeline import run
+            model = run(symbol)
+            result["model_path"] = os.path.join("data", "qmmp", symbol, "model.json")
+
+        if not model:
+            result["error"] = "No model produced"
+            return jsonify(result), 500
+
+        # Stage 10-13: write EA, verify, compile, deploy
+        from scripts.qmmp.ea_generator import write_ea, verify_ea
+        from scripts.qmmp.onboard_pipeline import _compile_ea, _deploy_ea
+
+        d = os.path.join("data", "qmmp", symbol)
+        ea_path = write_ea(model, d)
+        result["ea_path"] = ea_path
+
+        problems = verify_ea(model, ea_path)
+        result["verification"] = "PASS" if not problems else problems
+        if problems:
+            result["error"] = f"EA verification failed: {problems}"
+            return jsonify(result), 500
+
+        build = int(model.get("build", 0) or 0)
+        result["build"] = build
+
+        compile_ok = _compile_ea(ea_path, symbol, build)
+        result["compile_ok"] = compile_ok
+        if not compile_ok:
+            result["error"] = "Compilation failed"
+            return jsonify(result), 500
+
+        _deploy_ea(os.path.dirname(ea_path), symbol, build)
+        result["deploy_path"] = os.path.join(
+            "MT5", "VT Markets (Pty) MT5 Terminal", "Bases", "Default", "MQL5", "Experts",
+            f"GoldShark_{symbol}_build{build:03d}.ex5"
+        )
+        result["status"] = "success"
+        return jsonify(result)
+
+    except Exception as e:
+        result["error"] = str(e)
+        logger.error(f"generate_ea failed: {e}", exc_info=True)
+        return jsonify(result), 500
+
+
 @app.route("/api/learning")
 def api_learning():
     """Learning progress: closed-trade counts, symbols learned, knowledge base."""
