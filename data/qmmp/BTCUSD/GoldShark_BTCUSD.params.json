@@ -23,14 +23,14 @@
   "BullsFloor_NewYork_Short": -137.729,
   "BearsFloor_NewYork_Short": 0.0,
   "AtrFloor_NewYork": 551.449,
-  "HardSL_pts": 5000,
-  "BE_pts": 5000,
-  "BE_lock_pts": 500,
-  "Trail_pts": 5000,
-  "Add_pts": 5000,
+  "HardSL_pts": 628348,
+  "BE_pts": 11057,
+  "BE_lock_pts": 1105,
+  "Trail_pts": 11057,
+  "Add_pts": 11057,
   "EarlyFrac": 0.15,
-  "MaxLegs": 2,
+  "MaxLegs": 4,
   "GBP_per_001": 50.0,
   "LotCapPerAccount": 100,
-  "Magic": 385933
+  "Magic": 108498
 }

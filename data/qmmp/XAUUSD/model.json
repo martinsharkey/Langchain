@@ -1,11 +1,12 @@
 {
   "symbol": "XAUUSD",
   "status": "ONBOARDED",
-  "onboarded_at": "2026-08-17",
+  "onboarded_at": "2026-08-18",
+  "build": 1,
   "timeframe": "H1",
   "path_timeframe": "M30",
   "cost_model": {
-    "spread_points": 260.0,
+    "spread_points": 200.0,
     "slippage_points": 100.0,
     "commission_usd_per_lot": 6.0,
     "gbp_per_point_per_001": 0.00074
@@ -21,13 +22,13 @@
   "floors": {
     "osma_mag": {
       "Asian": 0.286,
-      "London": 0.345,
-      "NewYork": 0.381
+      "London": 0.346,
+      "NewYork": 0.395
     },
     "ema_align": {
-      "Asian": 0.177,
-      "London": -0.08,
-      "NewYork": 1.365
+      "Asian": 0.131,
+      "London": -0.127,
+      "NewYork": 1.342
     },
     "bulls": "OFF (not validated)",
     "bears": "OFF (not validated)",
@@ -37,8 +38,8 @@
     "osma_mag": {
       "value": {
         "Asian": 0.286,
-        "London": 0.345,
-        "NewYork": 0.381
+        "London": 0.346,
+        "NewYork": 0.395
       },
       "helps": 2,
       "folds": 2,
@@ -46,9 +47,9 @@
     },
     "ema_align": {
       "value": {
-        "Asian": 0.177,
-        "London": -0.08,
-        "NewYork": 1.365
+        "Asian": 0.131,
+        "London": -0.127,
+        "NewYork": 1.342
       },
       "helps": 2,
       "folds": 2,
@@ -62,9 +63,9 @@
     },
     "bears": {
       "value": "OFF (not validated)",
-      "helps": 0,
+      "helps": 1,
       "folds": 2,
-      "summary": "helps 0/2 folds -> OFF"
+      "summary": "helps 1/2 folds -> OFF"
     },
     "atr": {
       "value": "OFF (not validated)",
@@ -84,21 +85,21 @@
   "per_session": {
     "Asian": {
       "n": 237,
-      "win": 86.5,
-      "net": 555.0,
-      "per_trade": 2.341
+      "win": 88.2,
+      "net": 565.0,
+      "per_trade": 2.386
     },
     "London": {
       "n": 164,
-      "win": 83.5,
-      "net": 482.0,
-      "per_trade": 2.94
+      "win": 85.4,
+      "net": 489.0,
+      "per_trade": 2.984
     },
     "NewYork": {
       "n": 312,
-      "win": 90.4,
-      "net": 951.0,
-      "per_trade": 3.049
+      "win": 92.3,
+      "net": 965.0,
+      "per_trade": 3.093
     }
   },
   "money_management": {
@@ -109,27 +110,27 @@
     "lot_cap_per_account": 100,
     "balance_sweep": {
       "100": {
-        "final": 19777,
-        "ret_pct": 19677,
+        "final": 21199,
+        "ret_pct": 21099,
         "maxdd": 5.8,
         "ruined": false
       },
       "500": {
-        "final": 121003,
-        "ret_pct": 24101,
+        "final": 129244,
+        "ret_pct": 25749,
         "maxdd": 5.8,
         "ruined": false
       },
       "1000": {
-        "final": 250643,
-        "ret_pct": 24964,
+        "final": 264870,
+        "ret_pct": 26387,
         "maxdd": 5.8,
         "ruined": false
       },
       "5000": {
-        "final": 981427,
-        "ret_pct": 19529,
-        "maxdd": 3.2,
+        "final": 1008241,
+        "ret_pct": 20065,
+        "maxdd": 3.1,
         "ruined": false
       }
     },
@@ -140,36 +141,36 @@
         "fixed \u00a350": {
           "p_reach_100k": 0.5,
           "p_ruin": 0.0,
-          "median": 19605,
-          "stress_worst_first": 18755,
+          "median": 20556,
+          "stress_worst_first": 19906,
           "stress_streak_ruin_pct": 0.0
         },
         "fixed \u00a325": {
           "p_reach_100k": 100.0,
           "p_ruin": 0.0,
-          "median": 103855,
-          "stress_worst_first": 105093,
+          "median": 104049,
+          "stress_worst_first": 100561,
           "stress_streak_ruin_pct": 0.0
         },
         "taper 10->25->50": {
-          "p_reach_100k": 100.0,
+          "p_reach_100k": 99.9,
           "p_ruin": 0.0,
-          "median": 101938,
-          "stress_worst_first": 101387,
+          "median": 101996,
+          "stress_worst_first": 100012,
           "stress_streak_ruin_pct": 0.0
         },
         "fixed \u00a310": {
           "p_reach_100k": 100.0,
           "p_ruin": 0.0,
-          "median": 109021,
-          "stress_worst_first": 100914,
+          "median": 108490,
+          "stress_worst_first": 107653,
           "stress_streak_ruin_pct": 0.0
         },
         "fixed \u00a35": {
           "p_reach_100k": 100.0,
           "p_ruin": 0.0,
-          "median": 110603,
-          "stress_worst_first": 157922,
+          "median": 109365,
+          "stress_worst_first": 107479,
           "stress_streak_ruin_pct": 0.0
         }
       },
@@ -178,102 +179,111 @@
   },
   "forward_test": {
     "base": 5000.0,
-    "final": 981427,
-    "return_pct": 19529.0,
-    "annualized_pct": 644306.0,
-    "max_dd_pct": 3.2,
+    "final": 1008241,
+    "return_pct": 20065.0,
+    "annualized_pct": 673818.0,
+    "max_dd_pct": 3.1,
     "days": 220,
     "split": "70/30 backtest/forward"
   },
   "backtest": {
-    "return_pct": 15753.0,
+    "return_pct": 17007.0,
     "max_dd_pct": 10.9,
     "days": 479
+  },
+  "validation_window": {
+    "backtest_start": "2024-09-13",
+    "split_date": "2026-01-06",
+    "forward_end": "2026-08-14",
+    "split_pct": "70/30",
+    "note": "Use ForwardMode=4 in MT5 Strategy Tester with ForwardDate=split_date to match pipeline's 70/30 split"
   },
   "timeframe_scan": [
     {
       "tf": "M1",
       "cyc": 2939,
-      "move_cost": 6.9,
-      "win": 49.0,
-      "bt_ret": 148.0,
-      "bt_dd": 9.9,
-      "ft_ret": 104.0,
+      "move_cost": 8.4,
+      "win": 54.0,
+      "bt_ret": 291.0,
+      "bt_dd": 7.9,
+      "ft_ret": 148.0,
       "ft_ann": 1000000.0,
-      "ft_dd": 4.8,
+      "ft_dd": 4.7,
       "ft_days": 14,
-      "ft_bal": 10185
+      "ft_bal": 12384
     },
     {
       "tf": "M5",
       "cyc": 1550,
-      "move_cost": 19.0,
-      "win": 74.0,
-      "bt_ret": 15653.0,
+      "move_cost": 23.0,
+      "win": 76.0,
+      "bt_ret": 18071.0,
       "bt_dd": 21.2,
-      "ft_ret": 469.0,
+      "ft_ret": 532.0,
       "ft_ann": 1000000.0,
-      "ft_dd": 7.8,
+      "ft_dd": 7.5,
       "ft_days": 35,
-      "ft_bal": 28455
+      "ft_bal": 31577
     },
     {
       "tf": "M15",
       "cyc": 611,
-      "move_cost": 31.7,
-      "win": 82.0,
-      "bt_ret": 1972.0,
+      "move_cost": 38.5,
+      "win": 84.0,
+      "bt_ret": 2176.0,
       "bt_dd": 6.3,
-      "ft_ret": 163.0,
+      "ft_ret": 175.0,
       "ft_ann": 1000000.0,
       "ft_dd": 3.9,
       "ft_days": 38,
-      "ft_bal": 13174
+      "ft_bal": 13726
     },
     {
       "tf": "M30",
       "cyc": 295,
-      "move_cost": 33.5,
-      "win": 83.0,
-      "bt_ret": 350.0,
+      "move_cost": 40.7,
+      "win": 84.0,
+      "bt_ret": 370.0,
       "bt_dd": 8.1,
-      "ft_ret": 63.0,
-      "ft_ann": 10074.0,
+      "ft_ret": 66.0,
+      "ft_ann": 12193.0,
       "ft_dd": 1.0,
       "ft_days": 39,
-      "ft_bal": 8153
+      "ft_bal": 8317
     },
     {
       "tf": "H1",
       "cyc": 793,
-      "move_cost": 46.5,
-      "win": 86.0,
-      "bt_ret": 15753.0,
+      "move_cost": 56.4,
+      "win": 88.0,
+      "bt_ret": 17007.0,
       "bt_dd": 10.9,
-      "ft_ret": 19529.0,
-      "ft_ann": 644306.0,
-      "ft_dd": 3.2,
+      "ft_ret": 20065.0,
+      "ft_ann": 673818.0,
+      "ft_dd": 3.1,
       "ft_days": 220,
-      "ft_bal": 981427
+      "ft_bal": 1008241
     },
     {
       "tf": "H4",
       "cyc": 314,
-      "move_cost": 91.2,
-      "win": 88.0,
-      "bt_ret": 1311.0,
+      "move_cost": 110.7,
+      "win": 89.0,
+      "bt_ret": 1384.0,
       "bt_dd": 22.1,
-      "ft_ret": 1626.0,
-      "ft_ann": 5688.0,
+      "ft_ret": 1661.0,
+      "ft_ann": 5859.0,
       "ft_dd": 6.2,
       "ft_days": 256,
-      "ft_bal": 86288
+      "ft_bal": 88074
     }
   ],
   "overall": {
     "cycles": 793,
-    "win_pct": 86.3,
-    "net_gbp": 2206.0,
-    "gbp_per_trade": 2.782
-  }
+    "win_pct": 88.1,
+    "net_gbp": 2242.0,
+    "gbp_per_trade": 2.827
+  },
+  "config_version": "3335669c5297",
+  "ea_verification": "PASS"
 }
