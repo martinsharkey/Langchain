@@ -68,6 +68,10 @@ AI21_API_KEY = os.getenv("AI21_API_KEY", "")
 # xAI / Grok ($25 signup credit)
 XAI_API_KEY = os.getenv("XAI_API_KEY", "")
 
+# IBM Advantage Models (free tier via /v1 OpenAI-compatible endpoint)
+IBM_ADVANTAGE_API_KEY = os.getenv("IBM_ADVANTAGE_API_KEY", "")
+IBM_ADVANTAGE_BASE_URL = os.getenv("IBM_ADVANTAGE_BASE_URL", "https://api.nextgen-beta.ica.ibm.com/ica/v1")
+
 # ─── MetaTrader 5 ───────────────────────────────────────────
 _mt5_account_str = os.getenv("MT5_ACCOUNT", "0")
 try:
@@ -431,6 +435,7 @@ def validate_config() -> list[str]:
         ("DEEPSEEK_API_KEY", DEEPSEEK_API_KEY),
         ("AI21_API_KEY", AI21_API_KEY),
         ("XAI_API_KEY", XAI_API_KEY),
+        ("IBM_ADVANTAGE_API_KEY", IBM_ADVANTAGE_API_KEY),
     ]
     configured_llms = [name for name, val in llm_keys if val]
     key_free_enabled = USE_KILO_GATEWAY

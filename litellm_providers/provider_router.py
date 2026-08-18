@@ -23,21 +23,27 @@
 ║      NVIDIA_API_KEY=...                (40 RPM, free dev program)           ║
 ║      HUGGINGFACE_API_KEY=...           (100K credits/month)                 ║
 ║      GITHUB_TOKEN=...                  (free for GitHub users)              ║
-║      TOGETHER_API_KEY=...              (free research models)               ║
-║      DEEPSEEK_API_KEY=...              (5M free tokens)                     ║
-║      AI21_API_KEY=...                  (trial credits)                      ║
-║      XAI_API_KEY=...                   (Grok, $25 signup credit)            ║
+  ║      TOGETHER_API_KEY=...              (free research models)               ║
+  ║      DEEPSEEK_API_KEY=...              (5M free tokens)                     ║
+  ║      AI21_API_KEY=...                  (trial credits)                      ║
+  ║      XAI_API_KEY=...                   (Grok, $25 signup credit)            ║
+  ║      IBM_ADVANTAGE_API_KEY=...         (free tier: Haiku, Llama Maverick,   ║
+  ║                         Gemma, Granite via /v1 OpenAI-compatible endpoint) ║
 ║                                                                             ║
-║  API-key-free provider (no signup needed, just set USE_ flag):              ║
-║      USE_KILO_GATEWAY=true             (200 req/hr per IP, no account)      ║
-║                                                                             ║
-║  Provider priority (lower weight = tried first):                            ║
-║    Tier 0: Kilo Gateway (API-key-free, always available)                    ║
-║    Tier 1: Groq (fastest LPU inference)                                     ║
-║    Tier 2: Gemini, Cerebras, Mistral (generous free tiers)                  ║
-║    Tier 3: OpenRouter, SambaNova, Cohere (good free tiers)                  ║
-║    Tier 4: Cloudflare, NVIDIA, HuggingFace, GitHub (moderate)               ║
-║    Tier 5: Together, DeepSeek, AI21, xAI (trial/credit-based)               ║
+  ║  API-key-free provider (no signup needed, just set USE_ flag):              ║
+  ║      USE_KILO_GATEWAY=true             (200 req/hr per IP, no account)      ║
+  ║                                                                             ║
+  ║  IBM Advantage Models (free tier, OpenAI-compatible /v1 endpoint):          ║
+  ║      IBM_ADVANTAGE_API_KEY=...         (global key for all models)         ║
+  ║      IBM_ADVANTAGE_BASE_URL=https://api.nextgen-beta.ica.ibm.com/ica/v1   ║
+  ║                                                                             ║
+  ║  Provider priority (lower weight = tried first):                            ║
+  ║    Tier 0: Kilo Gateway (API-key-free, always available)                    ║
+  ║    Tier 1: Groq (fastest LPU inference)                                     ║
+  ║    Tier 2: Gemini, Cerebras, Mistral (generous free tiers)                  ║
+  ║    Tier 3: IBM Advantage Models, OpenRouter, SambaNova, Cohere (good free)  ║
+  ║    Tier 4: Cloudflare, NVIDIA, HuggingFace, GitHub (moderate)               ║
+  ║    Tier 5: Together, DeepSeek, AI21, xAI (trial/credit-based)               ║
 ║                                                                             ║
 ║  Copy this single file into any project to use it standalone.               ║
 ╚══════════════════════════════════════════════════════════════════════════════╝
@@ -111,6 +117,9 @@ AGENT_TEMPERATURE = float(os.getenv("AGENT_TEMPERATURE", "0.7"))
 # Kilo Gateway base URL (OpenAI-compatible, no API key needed)
 KILO_API_BASE = "https://api.kilo.ai/api/gateway/v1"
 
+# IBM Advantage Models base URL (OpenAI-compatible /v1 endpoint)
+IBM_ADVANTAGE_BASE_URL = "https://api.nextgen-beta.ica.ibm.com/ica/v1"
+
 PROVIDERS = [
     # ═══ Tier 0: Primary paid/provisioned API keys (fastest, most reliable) ═══
     # DeepSeek — 5M free tokens, excellent quality, provisioned API key
@@ -134,6 +143,14 @@ PROVIDERS = [
     ("cerebras/gpt-oss-120b", "CEREBRAS_API_KEY", 3, True, None),
     ("mistral/mistral-large-2407", "MISTRAL_API_KEY", 3, True, None),
     ("gemini/gemini-1.5-pro", "GEMINI_API_KEY", 3, True, None),
+
+    # ═══ Tier 3b: IBM Advantage Models (free tier, OpenAI-compatible /v1 endpoint) ═══
+    # All 4 models use the same IBM_ADVANTAGE_API_KEY + IBM_ADVANTAGE_BASE_URL.
+    # Model names use ibm/ prefix so they're clearly identifiable in logs and the router.
+    ("ibm/claude-haiku-4-5", "IBM_ADVANTAGE_API_KEY", 3, True, IBM_ADVANTAGE_BASE_URL),
+    ("ibm/meta-llama/llama-4-maverick-17b-128e-instruct-fp8", "IBM_ADVANTAGE_API_KEY", 3, True, IBM_ADVANTAGE_BASE_URL),
+    ("ibm/gemma-4-26b-a4b-it", "IBM_ADVANTAGE_API_KEY", 3, True, IBM_ADVANTAGE_BASE_URL),
+    ("ibm/granite-4-h-small", "IBM_ADVANTAGE_API_KEY", 3, True, IBM_ADVANTAGE_BASE_URL),
 
     # ═══ Tier 4: Good free tiers (no credit card) ═══
     ("openrouter/meta-llama/llama-3.3-70b-instruct:free", "OPENROUTER_API_KEY", 4, True, None),
