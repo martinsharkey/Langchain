@@ -41,9 +41,19 @@ Goal: adaptive learning is grounded in clean, independent data.
 
 | Item | Priority | Notes | GitHub issue(s) |
 |---|---|---|---|
+| Fix backtester point value for FX pairs | critical | `compute_indicator_series()` must pass `point` from MT5 data; backtester falls back to 0.01 breaking FX SL/TP/cost modeling. | #104 |
+| Fix vbt_model.py / optuna_floor_optimizer.py hardcoded gold costs | critical | Both use `SPREAD_PTS=1200`, `PT=0.01`, hardcoded paths; must read live MT5 specs and resolve ECN suffixes like `onboard_pipeline.py`. | #105 |
+| Fix vbt_model.py zeroed commission | critical | `fees = spread_frac / 2 + ... * 0` ignores round-turn commission. | #106 |
 | Validate Dukascopy replay fidelity against MT5 ticks | high | Ensure #80 actually uses equivalent history. | |
 | Implement per-session backtest scoring | high | Blocker for re-enabling `_mutate_session_floors()`. | |
+| Add test for param_optimizer model.json fallback | high | Valid/malformed/partial model.json coverage. | #107 |
+| Add test for ingest.py ECN suffix path handling | high | Regression guard for broker symbol name resolution. | #108 |
+| Add end-to-end test for onboard_pipeline.py | high | Smoke test from ingest to EA generation. | #109 |
+| Add pipeline cost-model integration test | high | Verify spread/slippage/commission consistency across all backtester entry points. | #117 |
 | Retire or fix ONNX outcome predictor | medium | AUC collapses on live floor-filtered trades. | |
+| Consolidate session boundaries into single source | medium | `sessions.py` is canonical; `onboard_symbol.py` and `indicator_scorer.py` still duplicate/drift. | #110 |
+| Audit conftest.py path patching completeness | medium | May be missing modules that cache `config.DATA_DIR` paths at import time. | #111 |
+| Add data-quality tests for parquet files | medium | No tests for duplicates, nulls, timezone, schema consistency, weekend bars. | #112 |
 | Document data-source provenance rules for reviewers | low | Extend `TESTING.md`. | |
 
 ### 4. Operations & multi-symbol
@@ -64,6 +74,13 @@ Goal: autonomous research produces actionable, validated findings.
 |---|---|---|---|
 | Continual researcher audit of new EA patterns | medium | Feed `docs/ea_pattern_audit.md` into RAG. | |
 | Danny-blocked questions (see `AGENTS.md`) | low | External dependency; track only. | |
+
+### 6. Code hygiene (from 2026-08-19 review)
+
+| Item | Priority | Notes | GitHub issue(s) |
+|---|---|---|---|
+| Fix indicator_scorer.py session names to match canonical | low | Uses `asia`, `london_ny_overlap`, `late_ny` instead of `Asian`, `London`, `NewYork`, `Off`. | #114 |
+| Remove dead-code risk in onboard_symbol.py | low | Local `_session()` duplicates canonical function but is never imported. | #115 |
 
 ## Milestones
 
