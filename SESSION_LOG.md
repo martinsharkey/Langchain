@@ -554,3 +554,57 @@ Tackle the backlog of execution-safety, data-source, EA-generator, and design is
 - Findings should be recorded in review/ISSUES_LOG.md and filed as GitHub issues under the appropriate label.
 - Maintain the review/ROADMAP.md as a living backlog, not a parallel tracker to GitHub.
 
+---
+
+## Session 2026-08-19 (continued) — Bot health recovery + restart test harness
+
+**Branch:** main  
+**Mode:** LIVE_MICRO  
+**Status:** Bot restarted and running. Restart test harness added. Commit pending.
+
+### Goal
+Investigate why the bot had not traded since this morning, recover to a healthy running state, and add an automated restart test harness so future code changes are exercised through a full process restart.
+
+### Investigation
+- No trading-engine process was running. The only `pythonw` process (PID 15144) was `rag_watcher.py` from a different project.
+- `data/bot_status.json` was stale (07:50 UTC, cycle 18). Last DB trade was GER40 at 06:57 UTC.
+- Dashboard on :5000 was not responding.
+- MT5 terminal (PID 904) was still running from 15 Aug but had no bot connected.
+- `data/control.json` showed `scalping: true`, so if the engine had been running, entries would have been enabled.
+
+### Recovery actions
+1. **Killed stale processes** — `terminal64`, `pythonw`, `python` were terminated. `metatester64` processes were access-denied (system-owned / services children) and left alone; they do not interfere with live trading.
+2. **Launched correct MT5 terminal** — initially launched the VT Markets terminal with `/portable`, which created an empty profile. User clarified the correct profile is the same path **without** `/portable`. Killed the portable instance and relaunched `C:\Users\MartinSharkey\Documents\Langchain\MT5\VT Markets (Pty) MT5 Terminal\terminal64.exe` normally.
+3. **Verified MT5 connection** — account 1176166, server VTMarkets-Demo, balance £4661.57.
+4. **Restarted bot** — launched `python app.py LIVE_MICRO` as subprocess PID 5428. Bot connected, adopted open BTCUSD position #600981912, and began cycling.
+5. **Verified live state** — dashboard endpoints `/api/status`, `/api/readiness`, `/api/trading_state` all respond. Status shows `running=true`, `mode=LIVE_MICRO`, `cycle` advancing, 1 open position adopted, all three symbols eligible, algo trading OK.
+
+### New test harness
+- Added `tests/test_bot_restart.py` with:
+  - `find_bot_processes()` / `stop_bot()` helpers (stub + psutil).
+  - `start_bot()` that launches a fresh subprocess with `PYTHONDONTWRITEBYTECODE=1` to ensure latest source is loaded.
+  - `wait_for_dashboard()` polling helper.
+  - Stub tests for process identification and termination.
+  - `test_live_restart_adopts_positions()` — gated by `RUN_LIVE_RESTART=1`; verifies real restart reaches dashboard, mode=LIVE_MICRO, and adopted open positions match deterministic `config.magic_for_symbol()`.
+- Full suite: **202 passed, 5 skipped, 1 warning**.
+
+### Files changed
+- `tests/test_bot_restart.py` (new)
+- `SESSION_LOG.md` (this entry)
+
+### Commits
+- `54d2afc` docs(review): SESSION_LOG, ARCHITECTURE_OVERVIEW, AGENTS, review/ folder for issues #79-#86
+- `<this hash>` fix(health): restart bot, add restart test harness
+
+### Current state
+- Bot: **running** (PID 5428, `python app.py LIVE_MICRO`).
+- MT5: connected, demo account 1176166, 1 adopted BTCUSD position.
+- Dashboard: reachable at http://localhost:5000.
+- Daily loss used: £4.62 / £2331.59 limit (0.2%).
+- Risk: not halted, kill switch off.
+
+### Next
+- Monitor for a few cycles to confirm entries fire when signals clear.
+- Consider wiring `RUN_LIVE_RESTART=1` into a nightly CI step on a Windows runner if one becomes available.
+- Continue review-agent work in `review/`.
+
