@@ -88,6 +88,17 @@
 - **GitHub issue:** #90
 - **Status:** open
 
+### 8. Live state stores are not protected from tests or restarts
+
+- **Severity:** critical
+- **Theme:** Trading safety & execution
+- **Files:** `tests/*.py`, `data/config_checkpoints.json`, `data/tuned_params.json`, `data/graduation.json`, `data/symbol_evidence.json`
+- **Observation:** Running the full pytest suite currently mutates live proven-state files (e.g. adds synthetic failed directions, reverted tuned params, refreshed graduation state). A future automated restart could overwrite successful live configs if it does not snapshot first.
+- **Risk:** Proven live tuning and best-known configs could be corrupted or lost, breaking the learning feedback loop.
+- **Recommendation:** Implement the phased plan in `review/PLAN_test_isolation_and_restart.md`: snapshot service -> test isolation -> safe restart script -> CI gating.
+- **GitHub issues:** #97 (snapshot), #99 (isolation), #98 (fix tests), #100 (restart bot), #101 (vectorbt/optuna replay), #102 (CI workflow)
+- **Status:** open
+
 ---
 
 ## Theme backlog (for triage)

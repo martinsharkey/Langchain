@@ -16,6 +16,11 @@ Goal: every live order path is observable, serialized, and fails safely.
 | Add latency dashboards / alerts | medium | `[LATENCY]` logs exist; expose via dashboard endpoint. | |
 | Harden pre-close guard with broker timezone tests | medium | #5 is runtime observation; add synthetic session-close test. | |
 | Document MT5 IPC failure modes and recovery | low | Connector retry + terminal restart playbook. | |
+| Snapshot live proven-state stores before risky ops | high | `scripts/snapshot_state.py`; prerequisite for safe restart/CI. | #97 |
+| Isolate tests from live `data/` stores | high | `tests/conftest.py` + temp `DATA_DIR`; protect checkpointer/tuned/graduation/evidence. | #99, #98 |
+| Safe automated bot restart with rollback | high | `scripts/restart_bot.py`; snapshot, validate, restore on failure. | #100 |
+| Vectorbt/Optuna replay validation on restart | medium | Reuse `vbt_model.py` / `vbt_ordermodel.py` for smoke test after restart. | #101 |
+| CI workflow for isolated tests + gated live restart | medium | `.github/workflows/restart_ci.yml`; never auto-restart LIVE_MICRO. | #102 |
 
 ### 2. EA / MT5 generation and runtime
 
@@ -67,3 +72,4 @@ Goal: autonomous research produces actionable, validated findings.
 | EA hardened | TBD | `ea_generator.py` has tests, reload is resilient, lifecycle log covers full trade. |
 | Multi-symbol MVP | TBD | Two symbols run in parallel on the same host with isolated state. |
 | Learning validated | TBD | Per-session scoring + Dukascopy fidelity proven; ONNX path decided. |
+| Test isolation + safe restart | 2026-08-26 | `pytest tests/` does not mutate live stores; `restart_bot.py` snapshots, validates, rolls back. |
