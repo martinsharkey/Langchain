@@ -1941,7 +1941,7 @@ class ScalpEngine:
                 tick = adapter.live_tick()
                 if tick is None:
                     continue
-                px = tick.ask if action == "buy" else tick.bid
+                px = tick["ask"] if action == "buy" else tick["bid"]
             except Exception:
                 continue
             advanced = ((px - frontier) if action == "buy" else (frontier - px)) / pt
@@ -1954,7 +1954,7 @@ class ScalpEngine:
                 continue
             # risk gate (respects daily halt etc.)
             try:
-                spread_pts = ((tick.ask - tick.bid) / pt) if pt else 0
+                spread_pts = ((tick["ask"] - tick["bid"]) / pt) if pt else 0
                 if not self.risk.check_entry(spread_points=spread_pts).allowed:
                     continue
             except Exception:
@@ -2087,7 +2087,7 @@ class ScalpEngine:
             pt = adapter.spec.point or 0.01
             try:
                 tick = adapter.live_tick()
-                px = tick.bid if action == "buy" else tick.ask
+                px = tick["bid"] if action == "buy" else tick["ask"]
             except Exception:
                 continue
             # combined profit in points across all legs (lot-weighted)
@@ -2181,8 +2181,8 @@ class ScalpEngine:
             tick = adapter.live_tick()
             if tick is None:
                 continue
-            price = tick.bid if pos.action == "buy" else tick.ask
-            spread_pts = ((tick.ask - tick.bid) / adapter.spec.point) if adapter.spec.point else 0
+            price = tick["bid"] if pos.action == "buy" else tick["ask"]
+            spread_pts = ((tick["ask"] - tick["bid"]) / adapter.spec.point) if adapter.spec.point else 0
             # intra-cycle peak fix: the 15s loop is blind to spikes BETWEEN polls, so
             # MFE/ratchet would understate the true peak. Pull the real favourable
             # extreme (tick high/low since last check) so peak tracking sees it.
@@ -3101,13 +3101,13 @@ class ScalpEngine:
         tick = adapter.live_tick()
         if tick is None:
             return
-        price = tick.ask if signal.action == "buy" else tick.bid
+        price = tick["ask"] if signal.action == "buy" else tick["bid"]
         pt = spec.point
 
         try:
             si = mt5.symbol_info(resolved)
             stops_level = getattr(si, "trade_stops_level", 0) or 0
-            spread_pts = (tick.ask - tick.bid) / pt if pt else 0
+            spread_pts = (tick["ask"] - tick["bid"]) / pt if pt else 0
         except Exception:
             stops_level, spread_pts = 0, 0
 
@@ -3181,9 +3181,9 @@ class ScalpEngine:
             # above entry) — a pyramid is only ever built on a genuinely winning trade.
             try:
                 tick = adapter.live_tick()
-                px = tick.bid if signal.action == "buy" else tick.ask
+                px = tick["bid"] if signal.action == "buy" else tick["ask"]
                 pt = adapter.spec.point if adapter.spec else 0.01
-                spread_pts = abs((tick.ask - tick.bid) / pt) if pt else 0
+                spread_pts = abs((tick["ask"] - tick["bid"]) / pt) if pt else 0
                 be_buffer = max(spread_pts, 5) * pt   # past spread/costs = truly in profit
                 winning = all(
                     ((px - p.entry_price) if signal.action == "buy" else (p.entry_price - px)) > be_buffer
@@ -3397,9 +3397,9 @@ class ScalpEngine:
             if tick is None or not adapter.spec or not adapter.spec.point:
                 return None
             point = adapter.spec.point
-            cur = tick.bid if pos.action == "buy" else tick.ask
+            cur = tick["bid"] if pos.action == "buy" else tick["ask"]
             # server-timed window from the live tick (avoids local/server offset bug)
-            now_srv = float(tick.time)
+            now_srv = float(tick["time"])
             last = getattr(st, "_last_tick_srv", None)
             frm = last if last else now_srv - config.SCALP_CYCLE_SECONDS
             st._last_tick_srv = now_srv
@@ -3460,8 +3460,8 @@ class ScalpEngine:
                     "base": base,
                     "resolved": ad.resolved_symbol,
                     "tradable": ad.spec.tradable if ad.spec else False,
-                    "bid": getattr(t, "bid", None),
-                    "ask": getattr(t, "ask", None),
+                    "bid": t.get("bid") if isinstance(t, dict) else getattr(t, "bid", None),
+                    "ask": t.get("ask") if isinstance(t, dict) else getattr(t, "ask", None),
                     "open": self.sessions.is_open(base),
                     "minutes_to_close": self.sessions.minutes_to_close(base),
                 })
