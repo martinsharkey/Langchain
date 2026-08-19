@@ -8,7 +8,9 @@
 
 A self-learning, single-box, single-writer trading bot (Python + LangChain) that
 trades XAUUSD / GER40 / BTCUSD via **MetaTrader 5** (VT Markets demo). MT5 is the
-source of truth for positions; all storage is local/embedded and portable.
+source of truth for positions; all storage is local/embedded and portable. The
+execution engine is now MT5-IPC-aware: all MT5 data and order calls that contend
+with live execution are serialized behind `mt5_lock()`.
 
 ## Entry point
 
@@ -53,6 +55,9 @@ signal ─▶ gate ─▶ trade ─▶ manage ─▶ reconcile ─▶ record ─
 - Experience DB (+MFE/MAE +`data_source`), pattern RAG, per-symbol ONNX quality
   model, parameter optimizer, post-mortem, config checkpointer, graduation/governor/
   operating-mode, semantic KnowledgeStore, reflection, HTF context.
+- **Adaptive loop now validates synthesized strategies on independent Dukascopy
+  history** before promotion, using injectable `rates_fn` / `ticks_fn` in
+  `AdaptiveLoop` and `Backtester`.
 - Full detail: **[`LEARNING_LOOPS.md`](LEARNING_LOOPS.md)**.
 
 ### Research (autonomous investigation)
@@ -101,6 +106,33 @@ execution,env_setup,base}_agent.py` + the two orphaned duplicates
 `enhanced_research_agent`, and `orchestration` were **kept** (still reachable from
 `app.py`).
 
+## Generated MT5 EA (QMMP)
+
+- `scripts/qmmp/ea_generator.py` builds `GoldShark_<SYM>.mq5` + `.set` + `.params.json`
+  from `data/qmmp/<SYM>/model.json`.
+- The generated EA exposes grouped `input` parameters for Core/risk, Session/time,
+  Entry/OsMA, per-session floors, Exit, Money management, and Logging.
+- Safety inputs include `MaxDrawdownPct`, `DailyDrawdownPct`, `MinAccountBalance`,
+  `BrokerGMTOffset`, weekday/session toggles, and a rollover buffer.
+- `OnTimer(60)` reloads `qmmp_<SYM>_model.json` from MQL5 `Files/` and overrides
+  SL/BE/trail/add/GBP values at runtime (issue #83).
+- A lightweight CSV lifecycle log is written to `GoldShark_Logs/<SYM>_Lifecycle.csv`
+  for entry snapshots and risk-halt events (issue #84).
+- Verification: `python -m scripts.qmmp.ea_generator <SYM> --verify` asserts that
+  every EA input default exactly matches the source `model.json` manifest.
+- Pattern audit that drove the redesign: `docs/ea_pattern_audit.md`.
+
+## Multi-symbol scaling (design only, issue #85)
+
+Current system is single-box/single-writer. Two candidate architectures are
+compared in `docs/multi_symbol_architecture.md`:
+- **Approach A** — one MT5 terminal per symbol on the same host (MVP for 2-3 symbols).
+- **Approach B** — container per symbol + central spine (triggered at ~5+ symbols or
+  when host-level isolation is required).
+
+Per-symbol state (`data/qmmp/<SYM>/`, deterministic `Magic`, generated EA, tuned
+params) is already isolated, so migration to either model is mostly operational.
+
 ## Doc index
 
 | Doc | Covers |
@@ -112,3 +144,6 @@ execution,env_setup,base}_agent.py` + the two orphaned duplicates
 | `LEARNING_ARCHITECTURE.md` | Prior deep learning-architecture notes |
 | `TESTING.md` | Test/backtest harnesses |
 | `AGENTS.md` | Next-session signpost + ground rules |
+| `docs/ea_pattern_audit.md` | Reusable patterns sampled from existing MQL5 EAs |
+| `docs/multi_symbol_architecture.md` | Multi-symbol scaling options and decision criteria |
+| `review/README.md` | Two-way review process for external review agents |

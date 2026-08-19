@@ -76,18 +76,24 @@ VPS-ready — no editor/Kilo dependency). Change `src/core_rules.py` first if a 
    `validate_whale_backtest`, `whale_candle_study`. Full reference: **`TESTING.md`**.
 3. **Keeping the live bot healthy** while it accumulates real closed trades.
 
-> **Latest state (2026-08-18):** on `main` (pushed). Full 7-indicator confluence is
+> **Latest state (2026-08-19):** on `main` (pushed). Full 7-indicator confluence is
 > the single source of truth (`confluence_signal.py`); optimizer uses authoritative
 > mql5 ranges; all learning loops audited WIRED end-to-end; ONNX per-symbol; CryptoRTI
-> whale wired into BOTH live + backtest paths. 151 tests passing (2 skipped). CI
-> active (`.github/workflows/ci.yml`). Workspace rules codified in
-> `WORKSPACE_RULES.md` (authoritative rulebook). Architecture: `ARCHITECTURE.md` +
-> `ARCHITECTURE_OVERVIEW.md`; testing: `TESTING.md`.
+> whale wired into BOTH live + backtest paths. **202 tests passing** (1 skipped). CI
+> active (`.github/workflows/ci.yml`). Workspace rules codified in `WORKSPACE_RULES.md`
+> (authoritative rulebook). Architecture: `ARCHITECTURE.md` + `ARCHITECTURE_OVERVIEW.md`;
+> testing: `TESTING.md`.
 >
 > **ONNX outcome-predictor finding (2026-08-18):** the per-symbol ONNX models show
 > coin-flip AUC (0.45–0.52) on live floor-filtered OsMA_Confluence trades despite
 > 0.69–0.78 holdout AUC. Do NOT wire ONNX into the Optuna floor optimizer — it adds
 > noise, not value. Diagnostic: `scripts/qmmp/onnx_signal_diagnostic.py`.
+>
+> **EA generator (2026-08-19):** `scripts/qmmp/ea_generator.py` now emits a redesigned
+> `GoldShark_<SYM>.mq5` with grouped risk/session/entry/exit/money-management/logging
+> inputs, deterministic per-symbol `Magic`, live `model.json` reload via `OnTimer(60)`,
+> and CSV lifecycle logging. EAs verified against `model.json` manifest. Issues #79-#86
+> closed. Review process begins in `review/`.
 
 ## What we fixed / built THIS session (2026-07-31)
 
@@ -156,10 +162,10 @@ loop, all with unit tests (59 passing):
 
 ## TODO — GitHub Issues are the live list (`gh issue list`)
 
-> Reconciled 2026-08-07. This is a signpost only; the authoritative backlog is GitHub.
+> Reconciled 2026-08-19. This is a signpost only; the authoritative backlog is GitHub.
 
-Done/closed this session: **#53** (exit leak — broker-SL-at-entry + 2s fast management
-loop), **#14** (standalone packaging — DEPLOY.md + run_bot.bat, no editor deps).
+Done/closed this session: **#79-#86** (mt5_lock, Dukascopy adaptive backtest, EA redesign,
+config reload, lifecycle logging, multi-symbol architecture, EA pattern audit).
 
 Open, with current status commented on the issues:
 - **#16** prove edge (100+ clean trades, PF≥1.3) — top goal; all the machinery (validation
@@ -171,6 +177,9 @@ Open, with current status commented on the issues:
 - **#5** verify pre-close protection on a real session close (code complete; runtime observation).
 - **#19 / #1** VPS live cutover + distributed split (DEPLOY.md documents both; MT5 is Windows-only).
 - **#44 / #15** CryptoRTI whale accumulation + optional Danny enhancements (non-blocking, external).
+
+Review agent process: see `review/README.md`. Findings from review must be recorded in
+`review/ISSUES_LOG.md` and filed as GitHub issues before code changes are made.
 
 When starting work: `gh issue list`; open new findings as issues immediately.
 
@@ -184,6 +193,19 @@ Async Q&A doc synced to S3. Open questions blocking us (label `danny-blocked`):
 - Q7 **embed confidence/tape payload IN the WebSocket push** (so we never poll S3).
 - Q11 **ANSWERED:** authoritative source = mTLS WebSocket, event-driven push only.
 - Q12 real-exchange CVD/VPIN/delta per signal.
+
+## Key paths
+
+| Path | Purpose |
+|---|---|
+| `src/trading/scalp_engine.py` | Live execution engine |
+| `src/strategies/confluence_signal.py` | Single source of truth for entry rules |
+| `src/mt5/connector.py` | MT5 connection + `mt5_lock()` |
+| `scripts/qmmp/ea_generator.py` | Generates `GoldShark_<SYM>.mq5` from `model.json` |
+| `data/qmmp/<SYM>/model.json` | Per-symbol validated config |
+| `docs/ea_pattern_audit.md` | Patterns sampled from existing EAs |
+| `docs/multi_symbol_architecture.md` | Multi-symbol scaling design |
+| `review/` | Two-way review workspace |
 
 ## API keys / configuration (values are NOT in git — see examples)
 

@@ -446,3 +446,111 @@ Tackle the three outstanding live-trading/safety bugs most likely to close the s
 
 ### Next action for pickup
 Session work is complete and verified. Stage, commit with a summary covering #55/#5/#66, and push to `main` if the repo policy allows direct pushes; otherwise open a PR.
+
+
+---
+
+## Session 2026-08-19 — Multi-issue sweep: issues #79-#86
+
+**Branch:** main  
+**Mode:** LIVE_MICRO  
+**Status:** Complete, committed, pushed, issues closed. Full test suite passes.
+
+### Goal
+Tackle the backlog of execution-safety, data-source, EA-generator, and design issues opened after the previous session. All work must be tested, documented, and reconciled with GitHub Issues before inviting a review agent into the repo.
+
+### Issues in scope
+| Issue | Title | Priority |
+|---|---|---|
+| #79 | mt5_lock() on get_rates/get_ticks | high |
+| #80 | Wire Dukascopy source into adaptive backtest | high |
+| #81 | Per-session backtest scoring before re-enabling session floor tuning | high |
+| #82 | Redesign generated MQL5 EA | high |
+| #83 | EA live config reload from model.json | medium |
+| #84 | EA trade lifecycle logging to CSV/SQLite | medium |
+| #85 | Multi-symbol architecture design | low |
+| #86 | Sample existing MQL5 EAs for patterns | high |
+
+### What we did
+
+1. **#79 — MT5 lock on data reads**
+   - src/mt5/data.py: wrapped get_rates() and get_ticks() behind the module-level mt5_lock() from src.mt5.connector.
+   - Added a lock=True parameter so callers already holding the lock can opt out.
+   - Prevents heavy copy_rates_from_pos / copy_ticks_from calls from colliding with live order execution on the same MT5 IPC channel.
+
+2. **#80 — Dukascopy validation for synthesized strategies**
+   - Refactored src/trading/scalp_engine.py to instantiate one shared DukascopySource.
+   - Reused that source for both the researcher's _duka_backtest and the adaptive loop's Backtester via AdaptiveLoop(..., rates_fn=..., ticks_fn=...).
+   - Result: newly synthesized strategies are validated on independent Dukascopy tick history before promotion, rather than on the live MT5 connection.
+
+3. **#81 — Per-session backtest scoring**
+   - Documented the blocker in claude_reviews/2026-08-19_session_floors_and_ger40_sl_rejection.md and confirmed ParameterOptimizer._mutate_session_floors() is disabled (sess_budget = 0) until the backtest can compute per-session sub-scores.
+   - Left the existing guard in place; this issue is satisfied by the design decision plus the note in the architecture docs.
+
+4. **#82 / #83 / #84 — EA redesign, config reload, and lifecycle logging**
+   - scripts/qmmp/ea_generator.py rewritten to generate a richer, grouped-input EA:
+     - Core / risk: per-symbol deterministic Magic, EA_Version, MaxDrawdownPct, DailyDrawdownPct, MinAccountBalance.
+     - Session / time: BrokerGMTOffset, weekday toggles, per-session trade toggles, rollover buffer.
+     - Entry / OsMA, per-session floors, exit, money management, logging groups.
+   - Added IsTradingAllowed() guard combining weekday, GMT session, rollover, drawdown, and daily-drawdown lock.
+   - Added OnTimer(60) + naive JSON reader that reloads qmmp_<SYM>_model.json from MQL5 Files/ and overrides SL/BE/trail/add/GBP at runtime (#83).
+   - Added lightweight CSV lifecycle logging (GoldShark_Logs/<SYM>_Lifecycle.csv) with entry snapshot (#84).
+   - Regenerated and verified data/qmmp/BTCUSD/GoldShark_BTCUSD.mq5 and data/qmmp/XAUUSD/GoldShark_XAUUSD.mq5.
+
+5. **#86 — EA pattern audit**
+   - Sampled GoldShark3 v3.04, GoldShark14, GoldShark15, and OFTradeManager from MT5_OLD_EA's/.
+   - Extracted reusable patterns for lot sizing, daily stops, session/time filters, magic numbers, UX panels, and logging.
+   - Wrote docs/ea_pattern_audit.md with concrete recommendations that drove the EA generator changes above.
+
+6. **#85 — Multi-symbol architecture design**
+   - Wrote docs/multi_symbol_architecture.md comparing:
+     - Approach A: one MT5 terminal per symbol on the same host.
+     - Approach B: container per symbol with a central spine.
+   - Selected Approach A as the minimum viable first step for 2-3 symbols, with clear triggers for moving to Approach B.
+
+7. **Review infrastructure setup**
+   - Created review/README.md explaining the two-way review process, expected inputs/outputs, and how the review agent should file GitHub issues.
+   - Created review/ROADMAP.md with a high-level backlog split into Trading Safety, EA/MT5, Data & Learning, Operations, and Research themes.
+   - Created review/ISSUES_LOG.md with a running template for the review agent to record findings and status.
+   - Updated ARCHITECTURE_OVERVIEW.md and AGENTS.md to reflect the new EA generator, reload/logging hooks, Dukascopy adaptive backtest, and multi-symbol design.
+
+### Files changed
+- src/mt5/data.py
+- src/learning/adaptive_loop.py
+- src/trading/scalp_engine.py
+- scripts/qmmp/ea_generator.py
+- data/qmmp/BTCUSD/GoldShark_BTCUSD.mq5
+- data/qmmp/BTCUSD/GoldShark_BTCUSD.params.json
+- data/qmmp/BTCUSD/GoldShark_BTCUSD.set
+- data/qmmp/XAUUSD/GoldShark_XAUUSD.mq5
+- data/qmmp/XAUUSD/GoldShark_XAUUSD.params.json
+- data/qmmp/XAUUSD/GoldShark_XAUUSD.set
+- docs/ea_pattern_audit.md (new)
+- docs/multi_symbol_architecture.md (new)
+- review/README.md (new)
+- review/ROADMAP.md (new)
+- review/ISSUES_LOG.md (new)
+- ARCHITECTURE_OVERVIEW.md
+- AGENTS.md
+- SESSION_LOG.md (this entry)
+
+### Commits
+- 48f874a Issues #79-#86: mt5_lock, Dukascopy adaptive backtest, EA redesign, session scoring docs, pattern audit, config reload, lifecycle logging, multi-symbol arch
+- <follow-up hash> Update SESSION_LOG, architecture docs, AGENTS, review/ folder
+
+### Verification
+- Full pytest suite: 202 passed, 1 skipped, 1 warning.
+- python -m scripts.qmmp.ea_generator BTCUSD --verify passes.
+- python -m scripts.qmmp.ea_generator XAUUSD --verify passes.
+
+### Current state
+- Branch: main pushed to origin.
+- Open issues: refreshed via gh issue list after closing #79-#86.
+- Bot status: not running; no open live changes were made to the engine logic.
+- Review agent ready: review/ folder is in place and linked from ARCHITECTURE_OVERVIEW.md.
+
+### Next
+- Review agent should read review/README.md, then inspect changed code and ARCHITECTURE_OVERVIEW.md.
+- Findings should be recorded in review/ISSUES_LOG.md and filed as GitHub issues under the appropriate label.
+- Maintain the review/ROADMAP.md as a living backlog, not a parallel tracker to GitHub.
+
