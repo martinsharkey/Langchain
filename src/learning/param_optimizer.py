@@ -153,6 +153,15 @@ SYMBOL_BASELINES = {
         "sl_atr": 0.8, "tp_rr": 2.0, "min_confluence": 3,
         "hard_sl_points": 1034.4,
     },
+    "AUDCAD": {
+        "osma_fast": 12, "osma_slow": 26, "osma_signal": 9, "ema_period": 13,
+        "atr_period": 14, "min_ema_slope": 0.0, "atr_min": 0.0, "atr_max": 0.0,
+        "osma_min_long": 0.0, "bulls_min_long": 0.0, "bears_min_long": 0.0,
+        "osma_max_short": 0.0, "bulls_max_short": 0.0, "bears_max_short": 0.0,
+        "max_momentum_age": 26, "rsi_long_max": 100.0, "rsi_short_min": 0.0,
+        "sl_atr": 2.0, "tp_rr": 2.0, "min_confluence": 3,
+        "hard_sl_points": 1169.0,
+    },
 }
 
 

@@ -415,7 +415,7 @@ def stress_test(R, sizing_fn, start_bal, target, gbp_pt, max_legs=4):
                 streak_ruin_pct=round(100*ruin_ct/300, 1))
 
 
-def run(symbol, spread_pts=None, comm_per_lot=6.0, slip_pts=100.0, gbp_per_001=50.0,
+def run(symbol, spread_pts=None, comm_per_lot=6.0, slip_pts=None, gbp_per_001=50.0,
         max_legs=4, early_frac=0.15, start_bal=5000.0):
     resolved = _resolve_symbol(symbol)
     base = resolved.upper().split("-")[0].rstrip(".")
@@ -424,8 +424,64 @@ def run(symbol, spread_pts=None, comm_per_lot=6.0, slip_pts=100.0, gbp_per_001=5
     def L(s): print(s); log.append(s)
     pt, gbp_pt = pt_value(symbol)
     if spread_pts is None:
-        spread_pts = float(os.getenv("QMMP_SPREAD_PTS", "1200.0"))   # real ECN, not demo
-    cost_per_leg = spread_pts * gbp_pt + comm_per_lot * 0.01
+        spread_pts = float(os.getenv("QMMP_SPREAD_PTS", "0"))
+        if spread_pts <= 0:
+            try:
+                import MetaTrader5 as mt5
+                if mt5.initialize():
+                    info = mt5.symbol_info(resolved)
+                    if info and info.spread > 0:
+                        spread_pts = float(info.spread)
+                    else:
+                        spread_pts = 200.0
+                    mt5.shutdown()
+                else:
+                    spread_pts = 200.0
+            except Exception:
+                spread_pts = 200.0
+    if slip_pts is None:
+        try:
+            import MetaTrader5 as mt5
+            if mt5.initialize():
+                info = mt5.symbol_info(resolved)
+                if info:
+                    pt_val = info.point or 0.01
+                    if pt_val <= 0.0001:
+                        slip_pts = 2.0
+                    elif pt_val <= 0.01:
+                        slip_pts = 20.0
+                    else:
+                        slip_pts = 100.0
+                else:
+                    slip_pts = 100.0
+                mt5.shutdown()
+            else:
+                slip_pts = 100.0
+        except Exception:
+            slip_pts = 100.0
+    try:
+        import MetaTrader5 as mt5
+        if mt5.initialize():
+            acc = mt5.account_info()
+            acc_currency = acc.currency if acc else "GBP"
+            if acc_currency != "GBP" and comm_per_lot > 0:
+                gbp_pair = f"GBP{acc_currency}"
+                if not mt5.symbol_info(gbp_pair):
+                    gbp_pair = f"{acc_currency}GBP"
+                mt5.symbol_select(gbp_pair, True)
+                gbp_tick = mt5.symbol_info_tick(gbp_pair)
+                if gbp_tick and gbp_tick.ask > 0:
+                    comm_gbp = comm_per_lot / gbp_tick.ask
+                else:
+                    comm_gbp = comm_per_lot
+            else:
+                comm_gbp = comm_per_lot
+            mt5.shutdown()
+        else:
+            comm_gbp = comm_per_lot
+    except Exception:
+        comm_gbp = comm_per_lot
+    cost_per_leg = spread_pts * gbp_pt + comm_gbp * 0.01
     L(f"# QMMP Onboarding — {base}\n")
     L(f"## Stage 1: REAL cost model (spread + slippage + commission)")
     L(f"  point={pt}  GBP/pt/0.01={gbp_pt:.6f}  spread={spread_pts:.0f}pt  slippage={slip_pts:.0f}pt/fill  comm=${comm_per_lot}/lot")

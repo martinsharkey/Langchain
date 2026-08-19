@@ -1526,6 +1526,7 @@ class ScalpEngine:
             "XAUUSD": {"be_trigger_pts": 347.0, "trail_points": 73.0},
             "GER40":  {"wick_points": 40.0, "be_trigger_pts": 50.0, "trail_wick_mult": 1.0},
             "BTCUSD": {"wick_points": 400.0, "be_trigger_pts": 600.0, "trail_wick_mult": 1.2},
+            "AUDCAD": {"wick_points": 22.0, "be_trigger_pts": 22.0, "trail_wick_mult": 1.0},
         }
         for _k, _cfg in _exit_seed.items():
             if base_symbol.upper().startswith(_k):
