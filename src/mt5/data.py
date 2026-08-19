@@ -104,6 +104,13 @@ def get_rates(
                         f"Fetched {len(rates)} {symbol} {timeframe} candles "
                         f"via Docker bridge"
                     )
+                    pt = 0.01
+                    try:
+                        info = silicon_mt5.symbol_info(symbol)
+                        if info is not None:
+                            pt = getattr(info, "point", 0.01) or 0.01
+                    except Exception:
+                        pass
                     return [
                         {
                             "time": str(datetime.fromtimestamp(r["time"])),
@@ -115,6 +122,7 @@ def get_rates(
                             "volume": r.get("tick_volume", r.get("volume", 0)),
                             "spread": r.get("spread", 0),
                             "real_time": r.get("real_time", 0),
+                            "point": pt,
                         }
                         for r in rates
                     ]
@@ -153,6 +161,18 @@ def get_rates(
                 "volume": int(rate["tick_volume"]),
                 "spread": int(rate["spread"]) if "spread" in rates.dtype.names else 0,
             })
+
+        try:
+            import MetaTrader5 as _mt5
+            if _mt5.initialize():
+                info = _mt5.symbol_info(symbol)
+                if info:
+                    pt = getattr(info, "point", 0.01) or 0.01
+                    for r in result:
+                        r["point"] = pt
+                _mt5.shutdown()
+        except Exception:
+            pass
 
         return result
 

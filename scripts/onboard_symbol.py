@@ -41,8 +41,8 @@ EDGE_MIN_RHO, EDGE_MIN_N = 0.30, 40   # significance guardrails
 
 
 def session_of(ts):
-    h = datetime.fromtimestamp(ts, timezone.utc).hour
-    return ("Asian" if h < 8 else "London" if h < 13 else "NewYork" if h < 21 else "OffHours")
+    from src.strategies.sessions import session_of as _canonical
+    return _canonical(datetime.fromtimestamp(ts, timezone.utc).hour)
 
 
 def is_weekday(ts):

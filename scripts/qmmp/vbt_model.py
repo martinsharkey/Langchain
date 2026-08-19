@@ -21,14 +21,50 @@ import vectorbt as vbt
 from src.strategies.indicators import osma as osma_fn, bulls_power as bp, bears_power as bpw, atr as atr_fn, ema as ema_fn
 FAST, SLOW, SIG = 12, 26, 9
 D = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "data", "qmmp")
-# real ECN cost
-SPREAD_PTS = 1200.0; PT = 0.01
-GBP_PER_PT_PER_LOT = 0.007        # £/point/1.0 lot (from account: £0.07 per 1000pt per 0.01)
-COMM_PER_LOT = 6.0                # $ round-turn per 1.0 lot
+
+
+def _resolve_symbol(symbol):
+    try:
+        from scripts.qmmp.onboard_pipeline import _resolve_symbol as _rs
+        return _rs(symbol)
+    except Exception:
+        return symbol
+
+
+def pt_value(symbol):
+    try:
+        from scripts.qmmp.onboard_pipeline import pt_value as _pv
+        return _pv(symbol)
+    except Exception:
+        return 0.01, 0.00007
+
+
+def _adaptive_slip_pts(symbol):
+    try:
+        import MetaTrader5 as mt5
+        if mt5.initialize():
+            info = mt5.symbol_info(symbol)
+            if info:
+                pt = getattr(info, "point", 0.01) or 0.01
+                if pt <= 0.0001:
+                    slip = 2.0
+                elif pt <= 0.01:
+                    slip = 20.0
+                else:
+                    slip = 100.0
+            else:
+                slip = 100.0
+            mt5.shutdown()
+            return slip
+    except Exception:
+        pass
+    return 100.0
 
 
 def build(symbol="BTCUSD", tf="H1", trail_pct=0.15, sl_pts=628348):
-    d = os.path.join(D, symbol.upper())
+    resolved = _resolve_symbol(symbol)
+    base = resolved.upper().split("-")[0].rstrip(".")
+    d = os.path.join(D, base)
     df = pl.read_parquet(os.path.join(d, f"{tf}.parquet")).sort("time").to_pandas()
     df = df.set_index("time")
     close = df["close"]
@@ -42,27 +78,59 @@ def build(symbol="BTCUSD", tf="H1", trail_pct=0.15, sl_pts=628348):
     exits = dn
     short_exits = up
 
+    pt, gbp_pt = pt_value(symbol)
+    spread_pts = 0.0
+    try:
+        import MetaTrader5 as mt5
+        if mt5.initialize():
+            info = mt5.symbol_info(resolved)
+            if info and info.spread > 0:
+                spread_pts = float(info.spread)
+            mt5.shutdown()
+    except Exception:
+        pass
+    if spread_pts <= 0:
+        spread_pts = 200.0
+
     # trailing stop distance as fraction of price (approx: median cycle peak ~ trail_pct).
     # vbt tsl_stop is a fraction of price; convert points-trail to fractional via median price.
     med_price = float(close.median())
     # median cycle peak in points -> trail distance in points -> fraction of price
     # use a robust trail = trail_pct * (median peak). Estimate median peak from ATR proxy:
     atr = atr_fn(df, 14)
-    trail_pts = trail_pct * float((atr.median()) / PT) * 8  # ~cycle peak proxy
-    tsl = max(0.002, (trail_pts * PT) / med_price)          # fractional trailing stop
-    slf = max(0.01, (sl_pts * PT) / med_price)              # fractional hard SL
+    trail_pts = trail_pct * float((atr.median()) / pt) * 8  # ~cycle peak proxy
+    tsl = max(0.002, (trail_pts * pt) / med_price)          # fractional trailing stop
+    slf = max(0.01, (sl_pts * pt) / med_price)              # fractional hard SL
 
     # cost: spread as fixed fees (fraction), commission via fees
-    spread_frac = (SPREAD_PTS * PT) / med_price
-    fees = spread_frac / 2 + (COMM_PER_LOT / (med_price)) * 0  # spread modelled as fee both sides
+    spread_frac = (spread_pts * pt) / med_price
+    comm_per_lot = 6.0
+    try:
+        import MetaTrader5 as mt5
+        if mt5.initialize():
+            acc = mt5.account_info()
+            acc_currency = acc.currency if acc else "GBP"
+            if acc_currency != "GBP":
+                gbp_pair = f"GBP{acc_currency}"
+                if not mt5.symbol_info(gbp_pair):
+                    gbp_pair = f"{acc_currency}GBP"
+                mt5.symbol_select(gbp_pair, True)
+                gbp_tick = mt5.symbol_info_tick(gbp_pair)
+                if gbp_tick and gbp_tick.ask > 0:
+                    comm_per_lot = 6.0 / gbp_tick.ask
+            mt5.shutdown()
+    except Exception:
+        pass
+    fees = spread_frac / 2 + (comm_per_lot / med_price) * 0.01
 
+    slip_pts = _adaptive_slip_pts(resolved)
     pf = vbt.Portfolio.from_signals(
         close=close,
         entries=entries, exits=exits,
         short_entries=short_entries, short_exits=short_exits,
         sl_stop=tsl, sl_trail=True,          # TRAILING stop at fractional distance tsl
         fees=spread_frac,                    # round-turn spread cost as fee
-        slippage=(SLIP := (100.0*PT)/med_price),
+        slippage=(slip_pts * pt) / med_price,
         init_cash=5000, freq="1H",
     )
     stats = pf.stats()

@@ -487,6 +487,8 @@ def compute_indicator_series(data: list[dict], params: Optional[dict] = None):
     close = df["close"]; high = df["high"]; low = df["low"]
     open_ = df["open"] if "open" in df.columns else close
     volume = df["volume"] if "volume" in df.columns else pd.Series([0] * n, index=df.index)
+    pt = float(df["point"].iloc[0]) if "point" in df.columns else 0.01
+    sp = int(df["spread"].iloc[0]) if "spread" in df.columns else 0
 
     ema_fast_s = ema(close, p.get("ema_period", p.get("ema_fast", 9)))
     ema_slow_s = ema(close, p.get("ema_slow", p.get("ema_period", 21)))
@@ -545,6 +547,7 @@ def compute_indicator_series(data: list[dict], params: Optional[dict] = None):
             "cci": g(cci_s, i, 0.0), "obv": g(obv_s, i, 0.0),
             "bulls_power": g(bulls_s, i, 0.0), "bears_power": g(bears_s, i, 0.0),
             "osma": g(osma_s, i, 0.0),
+            "point": pt, "spread_points": sp,
             "support_levels": [], "resistance_levels": [],
             "trend": trend,
             "price_change_5": g(pc5, i, 0.0), "price_change_10": g(pc10, i, 0.0),

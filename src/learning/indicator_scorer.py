@@ -20,6 +20,7 @@ from collections import defaultdict
 from typing import Optional
 
 from src.utils.logger import get_logger
+from src.strategies.sessions import session_of
 
 logger = get_logger("indicator_scorer")
 
@@ -30,18 +31,19 @@ SCORED_FIELDS = [
     "lower_wick", "price_change_5", "price_change_10", "volume",
 ]
 
+# Backward-compat mapping for old session names that may exist in stored data.
+_OLD_SESSION_MAP = {
+    "asia": "Asian",
+    "london": "London",
+    "london_ny_overlap": "NewYork",
+    "new_york": "NewYork",
+    "late_ny": "Off",
+}
+
 
 def _session_of(hour_utc: int) -> str:
     """Coarse trading session from a UTC hour (for entry-timing analysis)."""
-    if 0 <= hour_utc < 7:
-        return "asia"
-    if 7 <= hour_utc < 12:
-        return "london"
-    if 12 <= hour_utc < 16:
-        return "london_ny_overlap"
-    if 16 <= hour_utc < 21:
-        return "new_york"
-    return "late_ny"  # 21-24 (incl. gold daily break window)
+    return _OLD_SESSION_MAP.get(session_of(hour_utc), session_of(hour_utc))
 
 
 class IndicatorScorer:

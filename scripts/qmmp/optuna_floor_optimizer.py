@@ -28,16 +28,53 @@ from optuna.samplers import TPESampler
 from src.strategies.indicators import osma as osma_fn, bulls_power as bp, bears_power as bpw, atr as atr_fn, ema as ema_fn
 
 D = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "data", "qmmp")
-SPREAD_PTS = 1200.0; PT = 0.01
-GBP_PER_PT_PER_LOT = 0.007
-COMM_PER_LOT = 6.0
 FAST, SLOW, SIG = 12, 26, 9
 SESSIONS = ("Asian", "London", "NewYork")
 
 
+def _resolve_symbol(symbol):
+    try:
+        from scripts.qmmp.onboard_pipeline import _resolve_symbol as _rs
+        return _rs(symbol)
+    except Exception:
+        return symbol
+
+
+def pt_value(symbol):
+    try:
+        from scripts.qmmp.onboard_pipeline import pt_value as _pv
+        return _pv(symbol)
+    except Exception:
+        return 0.01, 0.00007
+
+
+def _adaptive_slip_pts(symbol):
+    try:
+        import MetaTrader5 as mt5
+        if mt5.initialize():
+            info = mt5.symbol_info(symbol)
+            if info:
+                pt = getattr(info, "point", 0.01) or 0.01
+                if pt <= 0.0001:
+                    slip = 2.0
+                elif pt <= 0.01:
+                    slip = 20.0
+                else:
+                    slip = 100.0
+            else:
+                slip = 100.0
+            mt5.shutdown()
+            return slip
+    except Exception:
+        pass
+    return 100.0
+
+
 def _load_data(symbol: str, tf: str = "H1") -> pd.DataFrame:
     """Load parquet data for a symbol/timeframe."""
-    d = os.path.join(D, symbol.upper())
+    resolved = _resolve_symbol(symbol)
+    base = resolved.upper().split("-")[0].rstrip(".")
+    d = os.path.join(D, base)
     path = os.path.join(d, f"{tf}.parquet")
     if not os.path.exists(path):
         raise FileNotFoundError(f"No data file: {path}")
@@ -141,7 +178,8 @@ def _apply_floors(df: pd.DataFrame, ind: dict, floors: dict) -> pd.DataFrame:
     }, index=df.index)
 
 
-def _backtest_floors(df: pd.DataFrame, ind: dict, floors: dict) -> dict[str, float]:
+def _backtest_floors(df: pd.DataFrame, ind: dict, floors: dict, pt: float = 0.01,
+                     spread_pts: float = 200.0, slip_pts: float = 100.0) -> dict[str, float]:
     """Run vectorbt backtest with given floors and return key metrics."""
     signals = _apply_floors(df, ind, floors)
     close = ind["close"]
@@ -149,17 +187,17 @@ def _backtest_floors(df: pd.DataFrame, ind: dict, floors: dict) -> dict[str, flo
     med_price = float(close.median())
     sl_pts = floors.get("sl_pts", 628348)
     trail_pts = floors.get("trail_pts", 11057)
-    tsl = max(0.002, (trail_pts * PT) / med_price)
-    slf = max(0.01, (sl_pts * PT) / med_price)
-    spread_frac = (SPREAD_PTS * PT) / med_price
+    tsl = max(0.002, (trail_pts * pt) / med_price)
+    slf = max(0.01, (sl_pts * pt) / med_price)
+    spread_frac = (spread_pts * pt) / med_price
 
     pf = vbt.Portfolio.from_signals(
         close=close,
         entries=signals["entry_long"], exits=signals["exit_long"],
-        short_entries=signals["entry_short"], short_exits=signals["exit_short"],
+        short_entries=signals["entry_short"], short_exits=signals["short_exits"],
         sl_stop=tsl, sl_trail=True,
         fees=spread_frac,
-        slippage=(100.0 * PT) / med_price,
+        slippage=(slip_pts * pt) / med_price,
         init_cash=5000, freq="1H",
     )
     stats = pf.stats()
@@ -178,7 +216,8 @@ def _backtest_floors(df: pd.DataFrame, ind: dict, floors: dict) -> dict[str, flo
     }
 
 
-def objective(trial: optuna.Trial, df: pd.DataFrame, ind: dict, folds: int = 3) -> float:
+def objective(trial: optuna.Trial, df: pd.DataFrame, ind: dict, folds: int = 3,
+              pt: float = 0.01, spread_pts: float = 200.0, slip_pts: float = 100.0) -> float:
     """Optuna objective: propose floor values, backtest, return walk-forward Sharpe.
 
     Uses only the first (folds-1) folds for optimization; the last fold is reserved
@@ -225,7 +264,7 @@ def objective(trial: optuna.Trial, df: pd.DataFrame, ind: dict, folds: int = 3) 
             continue
         te_ind = {k: v.loc[te.index] for k, v in ind.items()}
         try:
-            metrics = _backtest_floors(te, te_ind, floors)
+            metrics = _backtest_floors(te, te_ind, floors, pt=pt, spread_pts=spread_pts, slip_pts=slip_pts)
             if metrics["total_trades"] >= 10 and metrics["max_dd"] < 50:
                 sharpes.append(metrics["sharpe"])
         except Exception:
@@ -258,13 +297,31 @@ def run_study(
     Returns:
         Best trial params + metrics, including held-out evaluation.
     """
+    resolved = _resolve_symbol(symbol)
+    base = resolved.upper().split("-")[0].rstrip(".")
     df = _load_data(symbol, tf)
     ind = _compute_indicators(df)
 
+    pt, gbp_pt = pt_value(symbol)
+    spread_pts = 0.0
+    try:
+        import MetaTrader5 as mt5
+        if mt5.initialize():
+            info = mt5.symbol_info(resolved)
+            if info and info.spread > 0:
+                spread_pts = float(info.spread)
+            mt5.shutdown()
+    except Exception:
+        pass
+    if spread_pts <= 0:
+        spread_pts = 200.0
+
+    slip_pts = _adaptive_slip_pts(resolved)
+
     if study_name is None:
-        study_name = f"floors_{symbol.upper()}"
+        study_name = f"floors_{base}"
     if storage is None:
-        optuna_dir = os.path.join(D, symbol.upper(), "optuna")
+        optuna_dir = os.path.join(D, base, "optuna")
         os.makedirs(optuna_dir, exist_ok=True)
         storage = f"sqlite:///{os.path.join(optuna_dir, 'study.db')}"
 
@@ -278,7 +335,7 @@ def run_study(
     )
 
     def _obj(trial):
-        return objective(trial, df, ind, folds)
+        return objective(trial, df, ind, folds, pt=pt, spread_pts=spread_pts, slip_pts=slip_pts)
 
     study.optimize(_obj, n_trials=n_trials, n_jobs=1)
 
@@ -301,16 +358,16 @@ def run_study(
     # Optimization metrics = walk-forward on first (folds-1) folds
     opt_slice = df.iloc[: (folds - 1) * fold_size]
     opt_ind = {k: v.loc[opt_slice.index] for k, v in ind.items()}
-    opt_metrics = _backtest_floors(opt_slice, opt_ind, floors)
+    opt_metrics = _backtest_floors(opt_slice, opt_ind, floors, pt=pt, spread_pts=spread_pts, slip_pts=slip_pts)
 
     # Held-out metrics = last fold, genuinely unseen during optimization
     held_out_start = (folds - 1) * fold_size
     held_out = df.iloc[held_out_start:]
     held_out_ind = {k: v.loc[held_out.index] for k, v in ind.items()}
-    held_out_metrics = _backtest_floors(held_out, held_out_ind, floors)
+    held_out_metrics = _backtest_floors(held_out, held_out_ind, floors, pt=pt, spread_pts=spread_pts, slip_pts=slip_pts)
 
     result = {
-        "symbol": symbol,
+        "symbol": base,
         "timeframe": tf,
         "study_name": study_name,
         "n_trials": len(study.trials),
@@ -324,7 +381,7 @@ def run_study(
     }
 
     # Save trial result
-    trials_dir = os.path.join(D, symbol.upper(), "optuna", "trials")
+    trials_dir = os.path.join(D, base, "optuna", "trials")
     os.makedirs(trials_dir, exist_ok=True)
     ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M")
     trial_path = os.path.join(trials_dir, f"best_floors_{ts}.json")
