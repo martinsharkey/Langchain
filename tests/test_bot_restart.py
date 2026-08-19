@@ -132,6 +132,7 @@ def test_find_and_stop_bot_processes():
     assert procs[2].is_running()  # unrelated left alone
 
 
+@pytest.mark.live
 def test_start_bot_fresh_code(tmp_path, monkeypatch):
     """Verify a fresh bot subprocess imports the latest source modules."""
     if os.getenv("RUN_LIVE_RESTART") != "1":
@@ -155,6 +156,7 @@ def test_start_bot_fresh_code(tmp_path, monkeypatch):
     assert float(out) > 0
 
 
+@pytest.mark.live
 @pytest.mark.skipif(os.getenv("RUN_LIVE_RESTART") != "1", reason="requires live MT5")
 def test_live_restart_adopts_positions():
     """
