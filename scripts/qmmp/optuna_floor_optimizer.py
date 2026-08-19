@@ -305,11 +305,15 @@ def run_study(
         "atr": {sn: best_floors.get(f"atr_{sn}", 0.0) for sn in SESSIONS},
     }
 
+    n_len = len(df)
+    fold_size = n_len // folds
     # Optimization metrics = walk-forward on first (folds-1) folds
-    opt_metrics = _backtest_floors(df.iloc[: (folds - 1) * (n // folds)], ind, floors)
+    opt_slice = df.iloc[: (folds - 1) * fold_size]
+    opt_ind = {k: v.loc[opt_slice.index] for k, v in ind.items()}
+    opt_metrics = _backtest_floors(opt_slice, opt_ind, floors)
 
     # Held-out metrics = last fold, genuinely unseen during optimization
-    held_out_start = (folds - 1) * (n // folds)
+    held_out_start = (folds - 1) * fold_size
     held_out = df.iloc[held_out_start:]
     held_out_ind = {k: v.loc[held_out.index] for k, v in ind.items()}
     held_out_metrics = _backtest_floors(held_out, held_out_ind, floors)

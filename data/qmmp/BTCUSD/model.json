@@ -2,11 +2,11 @@
   "symbol": "BTCUSD",
   "status": "ONBOARDED",
   "onboarded_at": "2026-08-18",
-  "build": 22,
+  "build": 23,
   "timeframe": "H1",
   "path_timeframe": "M30",
   "cost_model": {
-    "spread_points": 1200,
+    "spread_points": 1200.0,
     "slippage_points": 100.0,
     "commission_usd_per_lot": 6.0,
     "gbp_per_point_per_001": 0.0001
@@ -163,35 +163,35 @@
         "fixed \u00a350": {
           "p_reach_100k": 0.0,
           "p_ruin": 0.0,
-          "median": 764,
+          "median": 765,
           "stress_worst_first": 725,
           "stress_streak_ruin_pct": 0.0
         },
         "fixed \u00a325": {
           "p_reach_100k": 0.0,
           "p_ruin": 0.0,
-          "median": 7726,
+          "median": 7500,
           "stress_worst_first": 7268,
           "stress_streak_ruin_pct": 0.0
         },
         "taper 10->25->50": {
           "p_reach_100k": 0.0,
           "p_ruin": 0.0,
-          "median": 18655,
+          "median": 18715,
           "stress_worst_first": 17506,
           "stress_streak_ruin_pct": 0.0
         },
         "fixed \u00a310": {
-          "p_reach_100k": 99.9,
+          "p_reach_100k": 100.0,
           "p_ruin": 0.0,
-          "median": 103532,
+          "median": 103250,
           "stress_worst_first": 101752,
           "stress_streak_ruin_pct": 0.0
         },
         "fixed \u00a35": {
           "p_reach_100k": 100.0,
           "p_ruin": 0.0,
-          "median": 103810,
+          "median": 103790,
           "stress_worst_first": "RUIN",
           "stress_streak_ruin_pct": 0.0
         }
@@ -306,6 +306,6 @@
     "net_gbp": 2003.0,
     "gbp_per_trade": 1.729
   },
-  "config_version": "d220c1567e46",
+  "config_version": "3a709f815839",
   "ea_verification": "PASS"
 }

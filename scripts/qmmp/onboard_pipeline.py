@@ -605,6 +605,7 @@ def _compile_ea(mq5_path: str, symbol: str, build: int):
     _workspace = os.path.dirname(os.path.dirname(os.path.dirname(_this_dir)))
     candidates = [
         os.path.join(_workspace, "MT5", "VT Markets (Pty) MT5 Terminal", "MetaEditor64.exe"),
+        os.path.join("C:\\", "Users", "MartinSharkey", "Documents", "Langchain", "MT5", "VT Markets (Pty) MT5 Terminal", "MetaEditor64.exe"),
         "MetaEditor64.exe",
     ]
     metaeditor = None
