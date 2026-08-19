@@ -56,9 +56,9 @@ except Exception:  # pragma: no cover
     _mt5_module = None  # type: ignore
 
 try:
-    from scripts.snapshot_state import create_snapshot, restore_snapshot, list_snapshots
+    from scripts.snapshot_state import create_snapshot, restore_snapshot, list_snapshots, prune_snapshots
 except ImportError:  # pragma: no cover
-    create_snapshot = restore_snapshot = list_snapshots = None  # type: ignore
+    create_snapshot = restore_snapshot = list_snapshots = prune_snapshots = None  # type: ignore
 
 LOGS_DIR = getattr(config, "LOGS_DIR", os.path.join(os.path.dirname(config.BASE_DIR), "logs"))
 logger = logging.getLogger("restart_bot")
@@ -367,6 +367,12 @@ def main(argv: Optional[list] = None) -> int:
     if all_errors:
         _log(f"Restart completed with validation errors: {all_errors}")
         return 1
+
+    if prune_snapshots is not None:
+        try:
+            prune_snapshots(keep=10)
+        except Exception as e:
+            _log(f"prune snapshots failed: {e}")
 
     _log(f"Restart OK | mode={args.mode} pid={proc.pid if proc else 'n/a'} symbols={symbols}")
     return 0

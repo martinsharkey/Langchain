@@ -179,8 +179,12 @@ After this plan is complete:
 
 1. Should `restart_bot.py` default to PAPER mode, or should it require an
    explicit mode argument?
+   **Answered:** Default to PAPER. `--confirm-live` is required for LIVE_MICRO.
 2. Should the CI live-restart workflow require one or two human approvals?
+   **Answered:** One manual trigger (`workflow_dispatch` with `run_live_tests` boolean) is sufficient. For formal Environments, one approval gate is standard.
 3. Do we want the snapshot service to keep only the last N snapshots to avoid
    disk bloat?
+   **Answered:** Yes. Keep last 10 snapshots. `restart_bot.py` calls `prune_snapshots(keep=10)` after a successful restart.
 4. Should vectorbt replay during restart validation be a fast smoke test
    (latest 1k bars) or the full historical gate?
+   **Answered:** Fast smoke test (latest 1k bars) by default. Full replay requires explicit `--full-replay` flag.
