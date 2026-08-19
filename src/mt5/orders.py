@@ -11,7 +11,7 @@ from typing import Optional
 from enum import Enum
 from datetime import datetime
 
-from src.mt5.connector import get_connector, MT5_AVAILABLE, mt5, mt5_error_handler, SILICON_MT5_AVAILABLE
+from src.mt5.connector import get_connector, MT5_AVAILABLE, mt5, mt5_error_handler, SILICON_MT5_AVAILABLE, mt5_lock
 from src.mt5.account import get_positions
 from src.utils.logger import get_logger
 
@@ -195,65 +195,66 @@ def _place_order_native(
     magic: int,
 ) -> dict:
     """Place an order via native MetaTrader5 package (Windows)."""
-    # Determine order type
-    if order_type.lower() == "buy":
-        mt5_type = mt5.ORDER_TYPE_BUY
-    elif order_type.lower() == "sell":
-        mt5_type = mt5.ORDER_TYPE_SELL
-    else:
-        return {"success": False, "error": f"Invalid order type: {order_type}"}
-    
-    # Get current price if not specified
-    if price is None:
-        tick = mt5.symbol_info_tick(symbol)
-        if tick is None:
-            return {"success": False, "error": f"Cannot get price for {symbol}"}
-        price = tick.ask if mt5_type == mt5.ORDER_TYPE_BUY else tick.bid
-    
-    # Prepare order request
-    request = {
-        "action": mt5.TRADE_ACTION_DEAL,
-        "symbol": symbol,
-        "volume": float(volume),
-        "type": mt5_type,
-        "price": float(price),
-        "sl": float(sl) if sl else 0.0,
-        "tp": float(tp) if tp else 0.0,
-        "deviation": 20,
-        "magic": magic,
-        "comment": comment,
-        "type_time": mt5.ORDER_TIME_GTC,
-        "type_filling": mt5.ORDER_FILLING_IOC,
-    }
-    
-    # Send order
-    result = mt5.order_send(request)
-    if result is None:
-        return {"success": False, "error": "Order send returned None"}
-    
-    if result.retcode == mt5.TRADE_RETCODE_DONE:
-        logger.info(
-            f"Order placed: {order_type.upper()} {volume} {symbol} "
-            f"@ ${result.price:.2f} (order: {result.order})"
-        )
-        return {
-            "success": True,
-            "order_id": result.order,
-            "deal_id": result.deal,
-            "price": result.price,
-            "volume": result.volume,
-            "message": f"Order {result.order} executed",
-            "simulated": False,
+    with mt5_lock():
+        # Determine order type
+        if order_type.lower() == "buy":
+            mt5_type = mt5.ORDER_TYPE_BUY
+        elif order_type.lower() == "sell":
+            mt5_type = mt5.ORDER_TYPE_SELL
+        else:
+            return {"success": False, "error": f"Invalid order type: {order_type}"}
+        
+        # Get current price if not specified
+        if price is None:
+            tick = mt5.symbol_info_tick(symbol)
+            if tick is None:
+                return {"success": False, "error": f"Cannot get price for {symbol}"}
+            price = tick.ask if mt5_type == mt5.ORDER_TYPE_BUY else tick.bid
+        
+        # Prepare order request
+        request = {
+            "action": mt5.TRADE_ACTION_DEAL,
+            "symbol": symbol,
+            "volume": float(volume),
+            "type": mt5_type,
+            "price": float(price),
+            "sl": float(sl) if sl else 0.0,
+            "tp": float(tp) if tp else 0.0,
+            "deviation": 20,
+            "magic": magic,
+            "comment": comment,
+            "type_time": mt5.ORDER_TIME_GTC,
+            "type_filling": mt5.ORDER_FILLING_IOC,
         }
-    else:
-        logger.error(f"Order failed: retcode={result.retcode}")
-        return {
-            "success": False,
-            "error": f"Order failed: retcode={result.retcode}",
-            "retcode": result.retcode,
-            "comment": result.comment,
-            "simulated": False,
-        }
+        
+        # Send order
+        result = mt5.order_send(request)
+        if result is None:
+            return {"success": False, "error": "Order send returned None"}
+        
+        if result.retcode == mt5.TRADE_RETCODE_DONE:
+            logger.info(
+                f"Order placed: {order_type.upper()} {volume} {symbol} "
+                f"@ ${result.price:.2f} (order: {result.order})"
+            )
+            return {
+                "success": True,
+                "order_id": result.order,
+                "deal_id": result.deal,
+                "price": result.price,
+                "volume": result.volume,
+                "message": f"Order {result.order} executed",
+                "simulated": False,
+            }
+        else:
+            logger.error(f"Order failed: retcode={result.retcode}")
+            return {
+                "success": False,
+                "error": f"Order failed: retcode={result.retcode}",
+                "retcode": result.retcode,
+                "comment": result.comment,
+                "simulated": False,
+            }
 
 
 @mt5_error_handler
@@ -376,51 +377,52 @@ def _close_order_native(
     volume: float = 0.0,
 ) -> dict:
     """Close an order via native MetaTrader5 package (Windows)."""
-    # Get position to determine type
-    position = mt5.positions_get(ticket=ticket)
-    if position is None or len(position) == 0:
-        return {"success": False, "error": f"Position {ticket} not found"}
-    
-    position = position[0]
-    position_type = position.type
-    
-    # Determine opposite order type for closing
-    if position_type == mt5.ORDER_TYPE_BUY:
-        order_type = mt5.ORDER_TYPE_SELL
-        price = mt5.symbol_info_tick(position.symbol).bid
-    else:
-        order_type = mt5.ORDER_TYPE_BUY
-        price = mt5.symbol_info_tick(position.symbol).ask
-    
-    close_volume = volume if volume > 0 else float(position.volume)
-    
-    request = {
-        "action": mt5.TRADE_ACTION_DEAL,
-        "symbol": position.symbol,
-        "volume": close_volume,
-        "type": order_type,
-        "position": ticket,
-        "price": float(price),
-        "deviation": 20,
-        "magic": position.magic,
-        "comment": "Close by bot",
-        "type_time": mt5.ORDER_TIME_GTC,
-        "type_filling": mt5.ORDER_FILLING_IOC,
-    }
-    
-    result = mt5.order_send(request)
-    if result is None:
-        return {"success": False, "error": "Order send returned None"}
-    
-    if result.retcode == mt5.TRADE_RETCODE_DONE:
-        logger.info(f"Position {ticket} closed (deal: {result.deal})")
-        return {
-            "success": True,
-            "order_id": result.order,
-            "deal_id": result.deal,
-            "price": result.price,
-            "message": f"Position {ticket} closed",
-            "simulated": False,
+    with mt5_lock():
+        # Get position to determine type
+        position = mt5.positions_get(ticket=ticket)
+        if position is None or len(position) == 0:
+            return {"success": False, "error": f"Position {ticket} not found"}
+        
+        position = position[0]
+        position_type = position.type
+        
+        # Determine opposite order type for closing
+        if position_type == mt5.ORDER_TYPE_BUY:
+            order_type = mt5.ORDER_TYPE_SELL
+            price = mt5.symbol_info_tick(position.symbol).bid
+        else:
+            order_type = mt5.ORDER_TYPE_BUY
+            price = mt5.symbol_info_tick(position.symbol).ask
+        
+        close_volume = volume if volume > 0 else float(position.volume)
+        
+        request = {
+            "action": mt5.TRADE_ACTION_DEAL,
+            "symbol": position.symbol,
+            "volume": close_volume,
+            "type": order_type,
+            "position": ticket,
+            "price": float(price),
+            "deviation": 20,
+            "magic": position.magic,
+            "comment": "Close by bot",
+            "type_time": mt5.ORDER_TIME_GTC,
+            "type_filling": mt5.ORDER_FILLING_IOC,
+        }
+        
+        result = mt5.order_send(request)
+        if result is None:
+            return {"success": False, "error": "Order send returned None"}
+        
+        if result.retcode == mt5.TRADE_RETCODE_DONE:
+            logger.info(f"Position {ticket} closed (deal: {result.deal})")
+            return {
+                "success": True,
+                "order_id": result.order,
+                "deal_id": result.deal,
+                "price": result.price,
+                "message": f"Position {ticket} closed",
+                "simulated": False,
         }
     else:
         return {

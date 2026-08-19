@@ -78,8 +78,10 @@ class TradePostMortem:
         try:
             import MetaTrader5 as mt5
             import datetime as _dt
+            from src.mt5.connector import mt5_lock
             # use any active symbol's tick
-            t = mt5.symbol_info_tick("XAUUSD-ECN") or mt5.symbol_info_tick("EURUSD-ECN")
+            with mt5_lock():
+                t = mt5.symbol_info_tick("XAUUSD-ECN") or mt5.symbol_info_tick("EURUSD-ECN")
             if t:
                 self._srv_offset = (_dt.datetime.fromtimestamp(t.time) - _dt.datetime.now()).total_seconds()
             else:
@@ -92,7 +94,9 @@ class TradePostMortem:
     def _bars_range(self, symbol, tf_const, start_dt, end_dt):
         try:
             import MetaTrader5 as mt5
-            rr = mt5.copy_rates_range(symbol, tf_const, start_dt, end_dt)
+            from src.mt5.connector import mt5_lock
+            with mt5_lock():
+                rr = mt5.copy_rates_range(symbol, tf_const, start_dt, end_dt)
             if rr is None:
                 return []
             return [{"time": int(r["time"]), "open": float(r["open"]), "high": float(r["high"]),

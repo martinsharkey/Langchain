@@ -19,6 +19,7 @@ Design notes:
 from __future__ import annotations
 
 from dataclasses import dataclass, asdict
+from datetime import datetime
 from typing import Optional, Callable
 
 from src.strategies.indicators import compute_indicator_series
@@ -38,11 +39,12 @@ class BacktestResult:
     losses: int
     win_rate: float
     profit_factor: float
-    total_r: float          # sum of R multiples (reward/risk units)
+    total_r: float
     avg_bars_held: float
     max_drawdown_r: float
     passed: bool = False
     note: str = ""
+    session_scores: dict = None  # session -> {trades, wins, losses, gross_win_r, gross_loss_r}
 
 
 class Backtester:
@@ -257,8 +259,13 @@ class Backtester:
         peak = 0.0
         max_dd = 0.0
         bars_held_total = 0
+        from src.strategies.sessions import session_of
+        session_scores = {
+            s: {"trades": 0, "wins": 0, "losses": 0, "gross_win_r": 0.0, "gross_loss_r": 0.0}
+            for s in ("Asian", "London", "NewYork", "Off")
+        }
 
-        open_trade = None  # dict: dir, entry, sl, tp, bar
+        open_trade = None  # dict: dir, entry, sl, tp, bar, session
 
         for i in range(warmup, n):
             ind = series[i]
@@ -284,31 +291,40 @@ class Backtester:
                         closed_r = -1.0
                     elif lo <= open_trade["tp"]:
                         closed_r = open_trade["rr"]
-                if closed_r is not None:
-                    # Realism haircut: demo/backtests have ~0 slippage+spread which
-                    # over-states edge vs a live account. Deduct an assumed cost
-                    # (in R units) from every trade so results are LIVE-realistic.
-                    from src import config
-                    sl_points = open_trade.get("sl_points", 0) or 1
-                    cost_r = ((config.ASSUMED_SLIPPAGE_POINTS +
-                               open_trade.get("spread_points", 0) * config.BACKTEST_SPREAD_HAIRCUT)
-                              / sl_points)
-                    closed_r -= cost_r
-                    scored = i >= val_start
-                    if scored:
-                        trades += 1
-                        cum_r += closed_r
-                        r_curve.append(cum_r)
-                        peak = max(peak, cum_r)
-                        max_dd = max(max_dd, peak - cum_r)
-                        bars_held_total += i - open_trade["bar"]
-                        if closed_r > 0:
-                            wins += 1
-                            gross_win_r += closed_r
-                        else:
-                            losses += 1
-                            gross_loss_r += abs(closed_r)
-                    open_trade = None
+                    if closed_r is not None:
+                        # Realism haircut: demo/backtests have ~0 slippage+spread which
+                        # over-states edge vs a live account. Deduct an assumed cost
+                        # (in R units) from every trade so results are LIVE-realistic.
+                        from src import config
+                        sl_points = open_trade.get("sl_points", 0) or 1
+                        cost_r = ((config.ASSUMED_SLIPPAGE_POINTS +
+                                   open_trade.get("spread_points", 0) * config.BACKTEST_SPREAD_HAIRCUT)
+                                  / sl_points)
+                        closed_r -= cost_r
+                        scored = i >= val_start
+                        if scored:
+                            trades += 1
+                            cum_r += closed_r
+                            r_curve.append(cum_r)
+                            peak = max(peak, cum_r)
+                            max_dd = max(max_dd, peak - cum_r)
+                            bars_held_total += i - open_trade["bar"]
+                            if closed_r > 0:
+                                wins += 1
+                                gross_win_r += closed_r
+                            else:
+                                losses += 1
+                                gross_loss_r += abs(closed_r)
+                            sess = open_trade.get("session", "Off")
+                            if sess in session_scores:
+                                session_scores[sess]["trades"] += 1
+                                if closed_r > 0:
+                                    session_scores[sess]["wins"] += 1
+                                    session_scores[sess]["gross_win_r"] += closed_r
+                                else:
+                                    session_scores[sess]["losses"] += 1
+                                    session_scores[sess]["gross_loss_r"] += abs(closed_r)
+                        open_trade = None
 
             if open_trade:
                 continue  # one at a time
@@ -344,7 +360,8 @@ class Backtester:
             open_trade = {"dir": direction, "entry": price, "sl": sl, "tp": tp,
                           "bar": i, "rr": tp_dist / sl_dist if sl_dist else 1.5,
                           "sl_points": (sl_dist / point) if point else 1,
-                          "spread_points": ind.get("spread_points", 0)}
+                          "spread_points": ind.get("spread_points", 0),
+                          "session": session_of(datetime.fromtimestamp(int(rates[i]["timestamp"])).hour)}
 
         win_rate = round(wins / trades * 100, 1) if trades else 0.0
         profit_factor = round(gross_win_r / gross_loss_r, 2) if gross_loss_r else (gross_win_r or 0.0)
@@ -358,6 +375,7 @@ class Backtester:
             win_rate=win_rate, profit_factor=profit_factor,
             total_r=round(cum_r, 2), avg_bars_held=avg_bars,
             max_drawdown_r=round(max_dd, 2),
+            session_scores=session_scores,
         )
         logger.info(f"Backtest {result.label} {symbol} {timeframe}: "
                     f"{trades} trades, WR {win_rate}%, PF {profit_factor}, R {result.total_r}")

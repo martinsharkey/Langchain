@@ -8,7 +8,7 @@ On Windows, data is fetched directly via the MetaTrader5 package.
 
 from typing import Optional
 
-from src.mt5.connector import get_connector, MT5_AVAILABLE, mt5, mt5_error_handler, SILICON_MT5_AVAILABLE
+from src.mt5.connector import get_connector, MT5_AVAILABLE, mt5, mt5_error_handler, SILICON_MT5_AVAILABLE, mt5_lock
 from src.utils.logger import get_logger
 
 logger = get_logger("mt5.account")
@@ -82,10 +82,11 @@ def get_positions(symbol: Optional[str] = None) -> list[dict]:
         raise ConnectionError("MT5 not connected")
     
     # Try native MT5 (Windows)
-    if symbol:
-        positions = mt5.positions_get(symbol=symbol)
-    else:
-        positions = mt5.positions_get()
+    with mt5_lock():
+        if symbol:
+            positions = mt5.positions_get(symbol=symbol)
+        else:
+            positions = mt5.positions_get()
     
     if positions is None:
         return []
@@ -192,7 +193,8 @@ def get_history(deals: int = 100) -> list[dict]:
     to_time = datetime.datetime.now(timezone("UTC"))
     from_time = to_time - datetime.timedelta(days=7)
     
-    history = mt5.history_deals_get(from_time, to_time)
+    with mt5_lock():
+        history = mt5.history_deals_get(from_time, to_time)
     if history is None:
         return []
     

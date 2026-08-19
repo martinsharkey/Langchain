@@ -72,7 +72,9 @@ class ReversalSignatureAnalyzer:
             return self._srv_offset
         try:
             import MetaTrader5 as mt5, datetime as _dt
-            t = mt5.symbol_info_tick("XAUUSD-ECN") or mt5.symbol_info_tick("EURUSD-ECN")
+            from src.mt5.connector import mt5_lock
+            with mt5_lock():
+                t = mt5.symbol_info_tick("XAUUSD-ECN") or mt5.symbol_info_tick("EURUSD-ECN")
             self._srv_offset = ((_dt.datetime.fromtimestamp(t.time) - _dt.datetime.now()).total_seconds()
                                 if t else 0.0)
         except Exception:
@@ -82,7 +84,9 @@ class ReversalSignatureAnalyzer:
     def _mt5_bars(self, symbol, start_dt, end_dt):
         try:
             import MetaTrader5 as mt5
-            rr = mt5.copy_rates_range(symbol, mt5.TIMEFRAME_M1, start_dt, end_dt)
+            from src.mt5.connector import mt5_lock
+            with mt5_lock():
+                rr = mt5.copy_rates_range(symbol, mt5.TIMEFRAME_M1, start_dt, end_dt)
             if rr is None:
                 return []
             return [{"time": int(r["time"]), "open": float(r["open"]), "high": float(r["high"]),

@@ -29,7 +29,7 @@ from typing import Optional
 
 from src import config
 from src.utils.logger import get_logger
-from src.mt5.connector import get_connector, mt5, MT5_AVAILABLE
+from src.mt5.connector import get_connector, mt5, MT5_AVAILABLE, mt5_lock
 from src.mt5.data import get_rates
 from src.mt5.account import get_account_info
 from src.mt5.broker_adapter import BrokerAdapter, get_algo_status
@@ -751,7 +751,8 @@ class ScalpEngine:
         if not (MT5_AVAILABLE and self.connector.is_connected()):
             return
         try:
-            positions = mt5.positions_get() or []
+            with mt5_lock():
+                positions = mt5.positions_get() or []
         except Exception as e:
             logger.warning(f"adopt: positions_get failed: {e}")
             return
@@ -831,7 +832,8 @@ class ScalpEngine:
             return
         live_tickets = set()
         try:
-            live_tickets = {p.ticket for p in (mt5.positions_get() or [])}
+            with mt5_lock():
+                live_tickets = {p.ticket for p in (mt5.positions_get() or [])}
         except Exception:
             pass
 
@@ -891,7 +893,8 @@ class ScalpEngine:
             # deals are always captured (filtering is by position_id anyway).
             frm = _dt.datetime.now() - _dt.timedelta(days=14)
             to = _dt.datetime.now() + _dt.timedelta(days=1)
-            all_deals = mt5.history_deals_get(frm, to)
+            with mt5_lock():
+                all_deals = mt5.history_deals_get(frm, to)
             if not all_deals:
                 return None, None, None
             deals = [d for d in all_deals if getattr(d, "position_id", None) == ticket]
@@ -2382,7 +2385,8 @@ class ScalpEngine:
         trade_mode = "UNKNOWN"
         try:
             if mt5 is not None:
-                ai = mt5.account_info()
+                with mt5_lock():
+                    ai = mt5.account_info()
                 if ai:
                     login = getattr(ai, "login", None)
                     server = getattr(ai, "server", None)
@@ -3126,7 +3130,8 @@ class ScalpEngine:
         pt = spec.point
 
         try:
-            si = mt5.symbol_info(resolved)
+            with mt5_lock():
+                si = mt5.symbol_info(resolved)
             stops_level = getattr(si, "trade_stops_level", 0) or 0
             spread_pts = (tick["ask"] - tick["bid"]) / pt if pt else 0
         except Exception:
@@ -3321,7 +3326,8 @@ class ScalpEngine:
             return
 
         try:
-            live = mt5.positions_get() or []
+            with mt5_lock():
+                live = mt5.positions_get() or []
             live_tickets = {p.ticket for p in live}
         except Exception as e:
             logger.warning(f"positions_get failed: {e}")
@@ -3424,7 +3430,8 @@ class ScalpEngine:
             last = getattr(st, "_last_tick_srv", None)
             frm = last if last else now_srv - config.SCALP_CYCLE_SECONDS
             st._last_tick_srv = now_srv
-            ticks = mt5.copy_ticks_range(pos.symbol, frm, now_srv + 1, mt5.COPY_TICKS_ALL)
+            with mt5_lock():
+                ticks = mt5.copy_ticks_range(pos.symbol, frm, now_srv + 1, mt5.COPY_TICKS_ALL)
             if ticks is None or len(ticks) == 0:
                 return None
             # sane bound: a real favourable tick can't be more than a few ATR beyond

@@ -204,16 +204,39 @@ datetime lastBarTime = 0;
        if(mtime == 0 || mtime == g_modelFileTime) return;
        string json = ReadFileText(path);
        if(StringLen(json) == 0) return;
+       // atomic reload: parse ALL values into locals first, validate ranges, then apply.
+       // if ANY value is missing or out of bounds, keep the previous safe defaults.
+       double ov_fast  = JsonDouble(json, "\"fast\"");
+       double ov_slow  = JsonDouble(json, "\"slow\"");
+       double ov_sig   = JsonDouble(json, "\"signal\"");
+       double ov_sl    = JsonDouble(json, "\"sl\"");
+       double ov_be    = JsonDouble(json, "\"be\"");
+       double ov_trail = JsonDouble(json, "\"trail\"");
+       double ov_add   = JsonDouble(json, "\"add\"");
+       double ov_gbp   = JsonDouble(json, "\"gbp_per_001\"");
+       bool ok = true;
+       if(ov_fast  <= 0 || ov_fast  > 50) ok = false;
+       if(ov_slow  <= 0 || ov_slow  > 100) ok = false;
+       if(ov_sig   <= 0 || ov_sig   > 50) ok = false;
+       if(ov_sl    <= 0 || ov_sl    > 2000000) ok = false;
+       if(ov_be    <= 0 || ov_be    > 100000) ok = false;
+       if(ov_trail <= 0 || ov_trail > 100000) ok = false;
+       if(ov_add   <= 0 || ov_add   > 100000) ok = false;
+       if(ov_gbp   <= 0 || ov_gbp   > 1000) ok = false;
+       if(!ok)
+       {{
+          Print("[QMMP] Reload SKIPPED: model.json values out of safe bounds");
+          return;
+       }}
        g_modelFileTime = mtime;
-       // naive JSON number extraction for the fields we allow to change live
-       g_ov_osma_fast  = JsonDouble(json, "\"fast\"");
-       g_ov_osma_slow  = JsonDouble(json, "\"slow\"");
-       g_ov_osma_sig   = JsonDouble(json, "\"signal\"");
-       g_ov_hard_sl    = JsonDouble(json, "\"sl\"");
-       g_ov_be         = JsonDouble(json, "\"be\"");
-       g_ov_trail      = JsonDouble(json, "\"trail\"");
-       g_ov_add        = JsonDouble(json, "\"add\"");
-       g_ov_gbp_per_001= JsonDouble(json, "\"gbp_per_001\"");
+       g_ov_osma_fast   = ov_fast;
+       g_ov_osma_slow   = ov_slow;
+       g_ov_osma_sig    = ov_sig;
+       g_ov_hard_sl     = ov_sl;
+       g_ov_be          = ov_be;
+       g_ov_trail       = ov_trail;
+       g_ov_add         = ov_add;
+       g_ov_gbp_per_001 = ov_gbp;
        Print("[QMMP] Reloaded live model from ", path);
     }}
 
@@ -367,7 +390,7 @@ void SessionFloors(string s, bool isLong, double &osma, double &ema, double &bul
        MqlDateTime dt; TimeToStruct(now, dt);
        if(g_dayStart==0 || dt.day != g_dayStart) {{ g_dayStart=dt.day; g_dayStartBalance=balance; g_dailyLock=false; }}
        double dd = (g_dayStartBalance - equity) / g_dayStartBalance * 100.0;
-       if(!g_dailyLock && dd >= DailyDrawdownPct) {{ g_dailyLock=true; CloseAllBasket(); }}
+       if(!g_dailyLock && dd >= DailyDrawdownPct) {{ g_dailyLock=true; LogHalt("DAILY_DD"); CloseAllBasket(); }}
        if(g_dailyLock) return(false);
        int wd = (int)dt.day_of_week;
        if(wd==1 && !TradeMonday) return(false);
@@ -401,11 +424,13 @@ void SessionFloors(string s, bool isLong, double &osma, double &ema, double &bul
           armed = true;
           double lockSl = isLong ? avgEntry + RtBE_Lock()*_Point : avgEntry - RtBE_Lock()*_Point;
           ModifyAllSL(lockSl);
+          LogBE();
          }}
        if(armed)
          {{
           double newSL = isLong? basketBest-RtTrail()*_Point : basketBest+RtTrail()*_Point;
           ModifyAllSL(newSL);
+          LogModify(newSL);
          }}
        // early pyramid: add a leg if price advanced RtAdd beyond last leg and still early
        if(legCount>0 && legCount<MaxLegs)
@@ -445,6 +470,24 @@ void SessionFloors(string s, bool isLong, double &osma, double &ema, double &bul
        if(!LogToCSV) return; EnsureLog(); if(hLog<0) return;
        FileWrite(hLog, _Symbol + "_" + IntegerToString(Magic), 0, "", "", "", "", "", "", "", "", "", "",
                  "", "CLOSED", TimeToString(TimeCurrent()), "", reason);
+      }}
+    void LogModify(double new_sl)
+      {{
+       if(!LogToCSV) return; EnsureLog(); if(hLog<0) return;
+       FileWrite(hLog, _Symbol + "_" + IntegerToString(Magic), 0, "", "", "", "", "", "", "", "", "", "",
+                 "", "MODIFY", TimeToString(TimeCurrent()), DoubleToString(new_sl, 5), "SL_UPDATE");
+      }}
+    void LogBE()
+      {{
+       if(!LogToCSV) return; EnsureLog(); if(hLog<0) return;
+       FileWrite(hLog, _Symbol + "_" + IntegerToString(Magic), 0, "", "", "", "", "", "", "", "", "", "",
+                 "", "BE", TimeToString(TimeCurrent()), "", "BREAK_EVEN");
+      }}
+    void LogHalt(string reason)
+      {{
+       if(!LogToCSV) return; EnsureLog(); if(hLog<0) return;
+       FileWrite(hLog, _Symbol + "_" + IntegerToString(Magic), 0, "", "", "", "", "", "", "", "", "", "",
+                 "", "HALT", TimeToString(TimeCurrent()), "", reason);
       }}
     void FlushAndCloseLog() {{ if(hLog>=0){{ FileClose(hLog); hLog=-1; }} }}
 
