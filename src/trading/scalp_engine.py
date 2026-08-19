@@ -249,14 +249,20 @@ class ScalpEngine:
             # Dukascopy backtest of CURRENT settings via the REAL Backtester (injectable
             # data source) — lets the researcher measure our live indicator settings
             # against independent Dukascopy tick data, per symbol. Non-fatal.
-            _duka_backtest = None
+            _duka_source = None
             try:
                 from src.data_sources.dukascopy import DukascopySource
+                _duka_source = DukascopySource(use_cache=True)
+            except Exception as e:
+                logger.debug(f"DukascopySource unavailable: {e}")
+            _duka_backtest = None
+            try:
                 from src.learning.backtester import Backtester as _BT
 
                 def _duka_backtest(sym, params, sl_atr=None, tp_rr=None):
-                    src = DukascopySource(use_cache=True)
-                    bt = _BT(self.registry, rates_fn=src.get_rates, ticks_fn=src.get_ticks)
+                    if _duka_source is None:
+                        return None
+                    bt = _BT(self.registry, rates_fn=_duka_source.get_rates, ticks_fn=_duka_source.get_ticks)
                     # M5 keeps it light enough for a research cycle while clearing the
                     # 2000-bar floor (BTC 24/7 gets ~3000; gold/GER40 ~2200 from the
                     # cached ~13-day window). Cached per-day in gold_evidence.
@@ -303,6 +309,21 @@ class ScalpEngine:
                 dukascopy_backtest=_duka_backtest, current_params_fn=_cur_params,
                 apply_tuned_fn=_apply_tuned, onnx_predictor=getattr(self, "onnx_predictor", None),
                 change_validator=self.change_validator)
+
+            # Wire the same independent Dukascopy source into the adaptive loop so that
+            # synthesized strategies are validated on a DIFFERENT historical source before
+            # promotion (issue #80).
+            if self.adaptive is not None and _duka_source is not None:
+                try:
+                    self.adaptive = AdaptiveLoop(
+                        self.experience_db, self.registry,
+                        symbol_resolver=lambda b: (self.adapters[b].resolved_symbol
+                                                   if b in self.adapters else b),
+                        rates_fn=_duka_source.get_rates,
+                        ticks_fn=_duka_source.get_ticks,
+                    )
+                except Exception as e:
+                    logger.debug(f"Adaptive loop Dukascopy wiring unavailable: {e}")
         except Exception as e:
             logger.warning(f"ContinualResearcher unavailable: {e}")
 

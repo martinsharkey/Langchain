@@ -26,17 +26,22 @@ logger = get_logger("adaptive_loop")
 
 
 class AdaptiveLoop:
-    def __init__(self, experience_db, registry, symbol_resolver=None):
+    def __init__(self, experience_db, registry, symbol_resolver=None,
+                 rates_fn=None, ticks_fn=None):
         """
         symbol_resolver: optional callable(base_symbol)->resolved broker symbol
         (so backtests use the tradable symbol, e.g. XAUUSD -> XAUUSD-ECN).
+        rates_fn / ticks_fn: optional data-source callables matching
+        src.mt5.data.get_rates / get_ticks signatures. Use them to validate
+        synthesized strategies on an independent historical source such as
+        Dukascopy (issue #80).
         """
         self.experience_db = experience_db
         self.registry = registry
         self.store = HypothesisStore()
         self.reflection = ReflectionAgent(experience_db, registry, self.store)
         self.synth = StrategySynthesizer(registry)
-        self.backtester = Backtester(registry)
+        self.backtester = Backtester(registry, rates_fn=rates_fn, ticks_fn=ticks_fn)
         self.symbol_resolver = symbol_resolver or (lambda s: s)
         self.last_summary: dict = {}
 

@@ -1,4 +1,20 @@
 {
+  "Magic": 926561,
+  "EA_Version": 23,
+  "MaxDrawdownPct": 20.0,
+  "DailyDrawdownPct": 5.0,
+  "MinAccountBalance": 80.0,
+  "BrokerGMTOffset": 3,
+  "TradeMonday": 1,
+  "TradeTuesday": 1,
+  "TradeWednesday": 1,
+  "TradeThursday": 1,
+  "TradeFriday": 1,
+  "TradeAsian": 1,
+  "TradeLondon": 1,
+  "TradeNewYork": 1,
+  "AvoidRollover": 1,
+  "RolloverBufferMins": 30,
   "OsMA_Fast": 12,
   "OsMA_Slow": 26,
   "OsMA_Signal": 9,
@@ -32,5 +48,5 @@
   "MaxLegs": 4,
   "GBP_per_001": 50.0,
   "LotCapPerAccount": 100,
-  "Magic": 928071
+  "LogToCSV": 1
 }

@@ -10,7 +10,7 @@ Falls back to simulated data when neither is available.
 from typing import Optional
 from datetime import datetime, timedelta
 
-from src.mt5.connector import get_connector, MT5_AVAILABLE, mt5, mt5_error_handler, SILICON_MT5_AVAILABLE
+from src.mt5.connector import get_connector, MT5_AVAILABLE, mt5, mt5_error_handler, SILICON_MT5_AVAILABLE, mt5_lock
 from src.utils.logger import get_logger
 
 logger = get_logger("mt5.data")
@@ -65,6 +65,7 @@ def get_rates(
     symbol: str = "XAUUSD",
     timeframe: str = "H1",
     count: int = 100,
+    lock: bool = True,
 ) -> list[dict]:
     """
     Get OHLCV (Open, High, Low, Close, Volume) rate data.
@@ -76,105 +77,124 @@ def get_rates(
         symbol: Trading symbol (default: XAUUSD).
         timeframe: Timeframe string (M1, M5, M15, M30, H1, H4, D1, W1, MN1).
         count: Number of candles to fetch.
-    
+        lock: Whether to serialize this call behind mt5_lock(). Defaults to True.
+            Disable only when called from a path that already holds the lock.
+
     Returns:
         List of candle dictionaries with o, h, l, c, v, time fields.
-        
+
     Raises:
         ConnectionError: If MT5 not connected or no data available
     """
     connector = get_connector()
-    
+
     if not connector.is_connected():
         raise ConnectionError("MT5 not connected. Cannot fetch rates.")
-    
-    # Try silicon-metatrader5 Docker bridge first (macOS)
-    silicon_mt5 = _get_silicon_mt5()
-    if silicon_mt5:
-        try:
-            tf = _get_timeframe_value(timeframe)
-            rates = silicon_mt5.copy_rates_from_pos(symbol, tf, 0, count)
-            
-            if rates is not None and len(rates) > 0:
-                logger.info(
-                    f"Fetched {len(rates)} {symbol} {timeframe} candles "
-                    f"via Docker bridge"
-                )
-                return [
-                    {
-                        "time": str(datetime.fromtimestamp(r["time"])),
-                        "timestamp": r["time"],
-                        "open": r["open"],
-                        "high": r["high"],
-                        "low": r["low"],
-                        "close": r["close"],
-                        "volume": r.get("tick_volume", r.get("volume", 0)),
-                        "spread": r.get("spread", 0),
-                        "real_time": r.get("real_time", 0),
-                    }
-                    for r in rates
-                ]
-            else:
-                raise ConnectionError(
-                    f"No data for {symbol} {timeframe}. "
-                    f"Check MT5 terminal and market data availability."
-                )
-        except ConnectionError:
-            raise
-        except Exception as e:
-            raise ConnectionError(f"Docker bridge get_rates failed: {e}")
-    
-    # Try native MT5 (Windows)
-    if not MT5_AVAILABLE:
-        raise ConnectionError("MT5 package not available")
-    
-    tf = TIMEFRAMES.get(timeframe, mt5.TIMEFRAME_H1)
-    rates = mt5.copy_rates_from_pos(symbol, tf, 0, count)
-    
-    if rates is None or len(rates) == 0:
-        raise ConnectionError(
-            f"No data for {symbol} {timeframe}. "
-            f"Check MT5 terminal and market data availability."
-        )
-    
-    result = []
-    for rate in rates:
-        result.append({
-            "time": str(datetime.fromtimestamp(int(rate["time"]))),
-            "timestamp": int(rate["time"]),
-            "open": float(rate["open"]),
-            "high": float(rate["high"]),
-            "low": float(rate["low"]),
-            "close": float(rate["close"]),
-            "volume": int(rate["tick_volume"]),
-            "spread": int(rate["spread"]) if "spread" in rates.dtype.names else 0,
-        })
-    
-    return result
+
+    def _fetch():
+        # Try silicon-metatrader5 Docker bridge first (macOS)
+        silicon_mt5 = _get_silicon_mt5()
+        if silicon_mt5:
+            try:
+                tf = _get_timeframe_value(timeframe)
+                rates = silicon_mt5.copy_rates_from_pos(symbol, tf, 0, count)
+
+                if rates is not None and len(rates) > 0:
+                    logger.info(
+                        f"Fetched {len(rates)} {symbol} {timeframe} candles "
+                        f"via Docker bridge"
+                    )
+                    return [
+                        {
+                            "time": str(datetime.fromtimestamp(r["time"])),
+                            "timestamp": r["time"],
+                            "open": r["open"],
+                            "high": r["high"],
+                            "low": r["low"],
+                            "close": r["close"],
+                            "volume": r.get("tick_volume", r.get("volume", 0)),
+                            "spread": r.get("spread", 0),
+                            "real_time": r.get("real_time", 0),
+                        }
+                        for r in rates
+                    ]
+                else:
+                    raise ConnectionError(
+                        f"No data for {symbol} {timeframe}. "
+                        f"Check MT5 terminal and market data availability."
+                    )
+            except ConnectionError:
+                raise
+            except Exception as e:
+                raise ConnectionError(f"Docker bridge get_rates failed: {e}")
+
+        # Try native MT5 (Windows)
+        if not MT5_AVAILABLE:
+            raise ConnectionError("MT5 package not available")
+
+        tf = TIMEFRAMES.get(timeframe, mt5.TIMEFRAME_H1)
+        rates = mt5.copy_rates_from_pos(symbol, tf, 0, count)
+
+        if rates is None or len(rates) == 0:
+            raise ConnectionError(
+                f"No data for {symbol} {timeframe}. "
+                f"Check MT5 terminal and market data availability."
+            )
+
+        result = []
+        for rate in rates:
+            result.append({
+                "time": str(datetime.fromtimestamp(int(rate["time"]))),
+                "timestamp": int(rate["time"]),
+                "open": float(rate["open"]),
+                "high": float(rate["high"]),
+                "low": float(rate["low"]),
+                "close": float(rate["close"]),
+                "volume": int(rate["tick_volume"]),
+                "spread": int(rate["spread"]) if "spread" in rates.dtype.names else 0,
+            })
+
+        return result
+
+    if lock:
+        with mt5_lock():
+            return _fetch()
+    return _fetch()
 
 
-def get_ticks(symbol: str, from_epoch: float, to_epoch: float, max_ticks: int = 5_000_000):
+def get_ticks(symbol: str, from_epoch: float, to_epoch: float, max_ticks: int = 5_000_000,
+              lock: bool = True):
     """Real bid/ask TICKS for [from_epoch, to_epoch]. Returns a dict of parallel arrays
     {'time': [...], 'bid': [...], 'ask': [...]} (lists of float), or None if unavailable.
     Used by the backtester for tick-accurate SL/TP fills (MT5 'real ticks' model). Never
-    raises — returns None so the caller can fall back to bar-based fills."""
+    raises — returns None so the caller can fall back to bar-based fills.
+
+    `lock`: whether to serialize this call behind mt5_lock(). Defaults to True. Disable
+    only when called from a path that already holds the lock."""
     if not MT5_AVAILABLE:
         return None
-    try:
-        import datetime as _dt
-        t = mt5.copy_ticks_from(symbol, _dt.datetime.utcfromtimestamp(float(from_epoch)),
-                                int(max_ticks), mt5.COPY_TICKS_ALL)
-        if t is None or len(t) == 0:
+
+    def _fetch():
+        try:
+            import datetime as _dt
+            t = mt5.copy_ticks_from(symbol, _dt.datetime.utcfromtimestamp(float(from_epoch)),
+                                    int(max_ticks), mt5.COPY_TICKS_ALL)
+            if t is None or len(t) == 0:
+                return None
+            tt = t["time"].astype("int64")
+            # clip to the requested window
+            mask = (tt >= int(from_epoch)) & (tt <= int(to_epoch))
+            return {"time": tt[mask].tolist(),
+                    "bid": t["bid"][mask].astype("float64").tolist(),
+                    "ask": t["ask"][mask].astype("float64").tolist()}
+        except Exception as e:
+            logger.debug(f"get_ticks failed {symbol}: {e}")
             return None
-        tt = t["time"].astype("int64")
-        # clip to the requested window
-        mask = (tt >= int(from_epoch)) & (tt <= int(to_epoch))
-        return {"time": tt[mask].tolist(),
-                "bid": t["bid"][mask].astype("float64").tolist(),
-                "ask": t["ask"][mask].astype("float64").tolist()}
-    except Exception as e:
-        logger.debug(f"get_ticks failed {symbol}: {e}")
-        return None
+
+    if lock:
+        with mt5_lock():
+            return _fetch()
+    return _fetch()
 
 
 @mt5_error_handler

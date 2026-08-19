@@ -54,6 +54,27 @@ def build_ea(model: dict) -> tuple[str, str, dict]:
         inputs.append(ln); setlines.extend(sl)
         manifest[name] = int(val) if dtype == "int" else float(val)
 
+    build = int(model.get("build", 0) or 0)
+    # --- core / risk ---
+    from src.config import magic_for_symbol
+    magic = magic_for_symbol(sym)
+    add("Magic", magic, 100000, 999999, 1, "int")
+    add("EA_Version", build, 1, 9999, 1, "int")
+    add("MaxDrawdownPct", 20.0, 5.0, 50.0, 5.0)
+    add("DailyDrawdownPct", 5.0, 1.0, 20.0, 1.0)
+    add("MinAccountBalance", 80.0, 0.0, 1000.0, 10.0)
+    # --- session / time ---
+    add("BrokerGMTOffset", 3, -12, 12, 1, "int")
+    add("TradeMonday", 1, 0, 1, 1, "int")
+    add("TradeTuesday", 1, 0, 1, 1, "int")
+    add("TradeWednesday", 1, 0, 1, 1, "int")
+    add("TradeThursday", 1, 0, 1, 1, "int")
+    add("TradeFriday", 1, 0, 1, 1, "int")
+    add("TradeAsian", 1, 0, 1, 1, "int")
+    add("TradeLondon", 1, 0, 1, 1, "int")
+    add("TradeNewYork", 1, 0, 1, 1, "int")
+    add("AvoidRollover", 1, 0, 1, 1, "int")
+    add("RolloverBufferMins", 30, 0, 120, 10, "int")
     # --- entry / OsMA ---
     add("OsMA_Fast", o.get("fast", 12), 6, 18, 2, "int")
     add("OsMA_Slow", o.get("slow", 26), 18, 40, 2, "int")
@@ -77,20 +98,25 @@ def build_ea(model: dict) -> tuple[str, str, dict]:
     # --- money management ---
     add("GBP_per_001", gbp_per, 10, 250, 10)
     add("LotCapPerAccount", int(mm.get("lot_cap_per_account", 100)), 10, 100, 10, "int")
-    # Issue #66: per-symbol deterministic magic (was hardcoded 880011).
-    from src.config import magic_for_symbol
-    magic = magic_for_symbol(sym)
-    add("Magic", magic, 100000, 999999, 1, "int")
+    # --- logging ---
+    add("LogToCSV", 1, 0, 1, 1, "int")
 
     # Build grouped input block using MQL5 `input group` directive
-    entry_block = "\n".join(inputs[:3])
-    floor_block = "\n".join(inputs[3:3 + 21])
-    exit_block = "\n".join(inputs[3 + 21:3 + 21 + 7])
-    mm_block = "\n".join(inputs[3 + 21 + 7:])
-    inp_block = f'\ninput group "Entry / OsMA"\n{entry_block}\n' \
-                f'\ninput group "Per-session strength floors (0 = OFF)"\n{floor_block}\n' \
-                f'\ninput group "Exit: basket trail + early pyramid"\n{exit_block}\n' \
-                f'\ninput group "Money management"\n{mm_block}\n'
+    i = 0
+    core_block = "\n".join(inputs[i:i+5]); i += 5
+    session_block = "\n".join(inputs[i:i+11]); i += 11
+    entry_block = "\n".join(inputs[i:i+3]); i += 3
+    floor_block = "\n".join(inputs[i:i+21]); i += 21
+    exit_block = "\n".join(inputs[i:i+7]); i += 7
+    mm_block = "\n".join(inputs[i:i+2]); i += 2
+    log_block = "\n".join(inputs[i:i+1]); i += 1
+    inp_block = (f'\ninput group "Core / risk"\n{core_block}\n'
+                 f'\ninput group "Session / time"\n{session_block}\n'
+                 f'\ninput group "Entry / OsMA"\n{entry_block}\n'
+                 f'\ninput group "Per-session strength floors (0 = OFF)"\n{floor_block}\n'
+                 f'\ninput group "Exit: basket trail + early pyramid"\n{exit_block}\n'
+                 f'\ninput group "Money management"\n{mm_block}\n'
+                 f'\ninput group "Logging"\n{log_block}\n')
 
     fast_i = o.get("fast", 12); slow_i = o.get("slow", 26); sig_i = o.get("signal", 9)
     # config VERSION HASH + snapshot for traceability of optimiser runs (EA <-> model.json)
@@ -98,7 +124,6 @@ def build_ea(model: dict) -> tuple[str, str, dict]:
     cfg_snapshot = json.dumps(manifest, sort_keys=True)
     cfg_hash = hashlib.sha256((sym + tf + cfg_snapshot).encode()).hexdigest()[:12]
     onboarded = model.get("onboarded_at", "")
-    build = int(model.get("build", 0) or 0)
     ea_ver = model.get("ea_version", "1.00")
     ver_str = ea_ver                        # property version must stay standard (e.g. "1.00")
     desc_str = f"GoldShark {sym} {tf} | build {build} | config {cfg_hash} | onboarded {onboarded}"
@@ -141,18 +166,89 @@ int      hMACD = INVALID_HANDLE, hATR = INVALID_HANDLE, hEMA = INVALID_HANDLE;
 int      hBulls = INVALID_HANDLE, hBears = INVALID_HANDLE;
 datetime lastBarTime = 0;
 
-//+------------------------------------------------------------------+
-int OnInit()
-  {{
-   hMACD = iMACD(_Symbol, {tf_enum}, OsMA_Fast, OsMA_Slow, OsMA_Signal, PRICE_CLOSE);
-   hATR  = iATR(_Symbol, {tf_enum}, 14);
-   hEMA  = iMA(_Symbol, {tf_enum}, 13, 0, MODE_EMA, PRICE_CLOSE);
-   hBulls = iBullsPower(_Symbol, {tf_enum}, 13);
-   hBears = iBearsPower(_Symbol, {tf_enum}, 13);
-   if(hMACD==INVALID_HANDLE || hATR==INVALID_HANDLE || hEMA==INVALID_HANDLE || hBulls==INVALID_HANDLE || hBears==INVALID_HANDLE) return(INIT_FAILED);
-   return(INIT_SUCCEEDED);
-   }}
-void OnDeinit(const int reason){{ IndicatorRelease(hMACD); IndicatorRelease(hATR); IndicatorRelease(hEMA); IndicatorRelease(hBulls); IndicatorRelease(hBears); }}
+    //+------------------------------------------------------------------+
+    int OnInit()
+      {{
+       hMACD = iMACD(_Symbol, {tf_enum}, OsMA_Fast, OsMA_Slow, OsMA_Signal, PRICE_CLOSE);
+       hATR  = iATR(_Symbol, {tf_enum}, 14);
+       hEMA  = iMA(_Symbol, {tf_enum}, 13, 0, MODE_EMA, PRICE_CLOSE);
+       hBulls = iBullsPower(_Symbol, {tf_enum}, 13);
+       hBears = iBearsPower(_Symbol, {tf_enum}, 13);
+       if(hMACD==INVALID_HANDLE || hATR==INVALID_HANDLE || hEMA==INVALID_HANDLE || hBulls==INVALID_HANDLE || hBears==INVALID_HANDLE) return(INIT_FAILED);
+       SetModelFileName("qmmp_{sym}_model.json");
+       EventSetTimer(60);
+       return(INIT_SUCCEEDED);
+       }}
+
+    void OnTimer(const int id) {{ MaybeReloadModel(); }}
+    void OnDeinit(const int reason){{ IndicatorRelease(hMACD); IndicatorRelease(hATR); IndicatorRelease(hEMA); IndicatorRelease(hBulls); IndicatorRelease(hBears); FlushAndCloseLog(); }}
+
+    //--- config reload hook (issue #83): re-read data/qmmp/<SYM>/model.json from MQL5 Files folder on demand.
+    // MT5 EAs cannot read arbitrary filesystem paths, so the deployment step must copy model.json into
+    // MQL5/Files/qmmp_<SYM>_model.json.  OnTimer(60) checks the file mod-time and updates inputs via
+    // global overrides.  Inputs declared at file scope remain the defaults; runtime overrides live in
+    // g_override_* globals consumed by the floor/eval/exit helpers below.
+    string g_modelFile = "qmmp_BTCUSD_model.json";   // set per symbol in OnInit
+    datetime g_modelFileTime = 0;
+    // runtime overrides (0 means "use input default")
+    double g_ov_osma_fast=0, g_ov_osma_slow=0, g_ov_osma_sig=0;
+    double g_ov_hard_sl=0, g_ov_be=0, g_ov_be_lock=0, g_ov_trail=0, g_ov_add=0;
+    double g_ov_gbp_per_001=0;
+
+    void SetModelFileName(string fname) {{ g_modelFile = fname; }}
+
+    void MaybeReloadModel()
+    {{
+       string path = g_modelFile;
+       datetime mtime = (datetime)FileGetInteger(path, FILE_MODIFY_DATE, false);
+       if(mtime == 0 || mtime == g_modelFileTime) return;
+       string json = ReadFileText(path);
+       if(StringLen(json) == 0) return;
+       g_modelFileTime = mtime;
+       // naive JSON number extraction for the fields we allow to change live
+       g_ov_osma_fast  = JsonDouble(json, "\"fast\"");
+       g_ov_osma_slow  = JsonDouble(json, "\"slow\"");
+       g_ov_osma_sig   = JsonDouble(json, "\"signal\"");
+       g_ov_hard_sl    = JsonDouble(json, "\"sl\"");
+       g_ov_be         = JsonDouble(json, "\"be\"");
+       g_ov_trail      = JsonDouble(json, "\"trail\"");
+       g_ov_add        = JsonDouble(json, "\"add\"");
+       g_ov_gbp_per_001= JsonDouble(json, "\"gbp_per_001\"");
+       Print("[QMMP] Reloaded live model from ", path);
+    }}
+
+    string ReadFileText(string path)
+    {{
+       int h = FileOpen(path, FILE_READ|FILE_TXT|FILE_COMMON|FILE_SHARE_READ|FILE_SHARE_WRITE);
+       if(h < 0) return "";
+       string out = "";
+       while(!FileIsEnding(h)) out += FileReadString(h) + "\n";
+       FileClose(h);
+       return out;
+    }}
+
+    double JsonDouble(string json, string key)
+    {{
+       int p = StringFind(json, key);
+       if(p < 0) return 0;
+       p = StringFind(json, ":", p);
+       if(p < 0) return 0;
+       int q = StringFind(json, ",", p); if(q < 0) q = StringFind(json, "}}", p); if(q < 0) q = StringLen(json);
+       string sub = StringSubstr(json, p+1, q-p-1);
+       StringReplace(sub, " ", ""); StringReplace(sub, "\n", ""); StringReplace(sub, "\"", "");
+       return StringToDouble(sub);
+    }}
+
+    // runtime helpers that prefer override values
+    double RtOsMA_Fast() {{ return g_ov_osma_fast  > 0 ? g_ov_osma_fast  : OsMA_Fast; }}
+    double RtOsMA_Slow() {{ return g_ov_osma_slow  > 0 ? g_ov_osma_slow  : OsMA_Slow; }}
+    double RtOsMA_Sig()  {{ return g_ov_osma_sig   > 0 ? g_ov_osma_sig   : OsMA_Signal; }}
+    double RtHardSL()    {{ return g_ov_hard_sl    > 0 ? g_ov_hard_sl    : HardSL_pts; }}
+    double RtBE()        {{ return g_ov_be         > 0 ? g_ov_be         : BE_pts; }}
+    double RtBE_Lock()   {{ return g_ov_be_lock    > 0 ? g_ov_be_lock    : BE_lock_pts; }}
+    double RtTrail()     {{ return g_ov_trail      > 0 ? g_ov_trail      : Trail_pts; }}
+    double RtAdd()       {{ return g_ov_add        > 0 ? g_ov_add        : Add_pts; }}
+    double RtGBP()       {{ return g_ov_gbp_per_001> 0 ? g_ov_gbp_per_001: GBP_per_001; }}
 
 //--- OsMA[i] = MACD main - signal (MT5 iMACD buffer 0 = main = MACD line, buffer 1 = signal)
 double OsMA(int shift)
@@ -166,17 +262,18 @@ double EMAv(int shift){{ double e[1]; if(CopyBuffer(hEMA,0,shift,1,e)<1) return(
 double BullsP(int shift){{ double v[1]; if(CopyBuffer(hBulls,0,shift,1,v)<1) return(0); return(v[0]); }}
 double BearsP(int shift){{ double v[1]; if(CopyBuffer(hBears,0,shift,1,v)<1) return(0); return(v[0]); }}
 
-//--- session (broker/server time assumed ~UTC; adjust if your server offset differs)
-string CurSession()
-  {{
-   // Precedence: NewYork > London > Asian > Off.
-   // Must stay in sync with src/strategies/sessions.py::session_of(hour).
-   MqlDateTime dt; TimeToStruct(TimeCurrent(), dt); int h=dt.hour;
-   if(h>=12 && h<21) return("NewYork");
-   if(h>=7  && h<16) return("London");
-   if(h>=0  && h<9 ) return("Asian");
-   return("Off");
-   }}
+    //--- session (broker/server time converted to GMT using BrokerGMTOffset; keep in sync with src/strategies/sessions.py)
+    string CurSession()
+      {{
+       // Precedence: NewYork > London > Asian > Off.
+       // Must stay in sync with src/strategies/sessions.py::session_of(hour).
+       MqlDateTime dt; TimeToStruct(TimeCurrent(), dt); int h=dt.hour - BrokerGMTOffset;
+       if(h<0) h+=24; if(h>=24) h-=24;
+       if(h>=12 && h<21) return("NewYork");
+       if(h>=7  && h<16) return("London");
+       if(h>=0  && h<9 ) return("Asian");
+       return("Off");
+       }}
 void SessionFloors(string s, bool isLong, double &osma, double &ema, double &bulls, double &bears, double &atr)
   {{
    string side = isLong ? "Long" : "Short";
@@ -185,111 +282,184 @@ void SessionFloors(string s, bool isLong, double &osma, double &ema, double &bul
    else {{ osma=OsmaFloor_NewYork; ema=EmaAlign_NewYork; bulls=isLong?BullsFloor_NewYork_Long:BullsFloor_NewYork_Short; bears=isLong?BearsFloor_NewYork_Long:BearsFloor_NewYork_Short; atr=AtrFloor_NewYork; }}
    }}
 
-//+------------------------------------------------------------------+
-void OnTick()
-  {{
-   // one decision per new bar
-   datetime bt[]; if(CopyTime(_Symbol,{tf_enum},0,1,bt)<1) return;
-   if(bt[0]==lastBarTime) {{ ManageBasket(); return; }}
-   lastBarTime = bt[0];
-   ManageBasket();
+    //+------------------------------------------------------------------+
+    void OnTick()
+      {{
+       // one decision per new bar
+       datetime bt[]; if(CopyTime(_Symbol,{tf_enum},0,1,bt)<1) return;
+       if(bt[0]==lastBarTime) {{ ManageBasket(); return; }}
+       lastBarTime = bt[0];
+       ManageBasket();
 
-   string sess = CurSession();
-   if(sess=="Off") return;
+       if(!IsTradingAllowed()) return;
 
-   double o1=OsMA(1), o2=OsMA(2);                    // closed bars
-   bool crossUp   = (o2<=0 && o1>0);
-   bool crossDown = (o2>=0 && o1<0);
-   if(!crossUp && !crossDown) return;
+       string sess = CurSession();
+       if(sess=="Off") return;
 
-    double fOsma,fEma,fBulls,fBears,fAtr; SessionFloors(sess,crossUp,fOsma,fEma,fBulls,fBears,fAtr);
-   double osma_mag = MathAbs(o1);
-   double ema_slope = EMAv(1)-EMAv(4);               // slope over 3 bars
-   double ema_align = crossUp ? ema_slope : -ema_slope;
-    double atr = ATRv(1);
-   double bulls_al = crossUp ? BullsP(1) : -BullsP(1);   // aligned power (long wants +bulls)
-   double bears_al = crossUp ? BearsP(1) : -BearsP(1);
-   // KEEP-floor gates (0 = OFF => always passes; validated floors set the non-zero gate)
-   if(fOsma>0 && osma_mag < fOsma) return;
-   if(fEma!=0 && ema_align < fEma) return;
-   if(fAtr>0 && atr < fAtr) return;
-   if(fBulls>0 && bulls_al < fBulls) return;
-   if(fBears<0 && bears_al > fBears) return;         // bears floor is negative (deeper = stronger)
+       double o1=OsMA(1), o2=OsMA(2);                    // closed bars
+       bool crossUp   = (o2<=0 && o1>0);
+       bool crossDown = (o2>=0 && o1<0);
+       if(!crossUp && !crossDown) return;
 
-   OpenLeg(crossUp);
-   }}
+        double fOsma,fEma,fBulls,fBears,fAtr; SessionFloors(sess,crossUp,fOsma,fEma,fBulls,fBears,fAtr);
+       double osma_mag = MathAbs(o1);
+       double ema_slope = EMAv(1)-EMAv(4);               // slope over 3 bars
+       double ema_align = crossUp ? ema_slope : -ema_slope;
+        double atr = ATRv(1);
+       double bulls_al = crossUp ? BullsP(1) : -BullsP(1);   // aligned power (long wants +bulls)
+       double bears_al = crossUp ? BearsP(1) : -BearsP(1);
+       // KEEP-floor gates (0 = OFF => always passes; validated floors set the non-zero gate)
+       if(fOsma>0 && osma_mag < fOsma) return;
+       if(fEma!=0 && ema_align < fEma) return;
+       if(fAtr>0 && atr < fAtr) return;
+       if(fBulls>0 && bulls_al < fBulls) return;
+       if(fBears<0 && bears_al > fBears) return;         // bears floor is negative (deeper = stronger)
 
-//--- money-management size: floor(equity/GBP_per_001) x 0.01 total, split across MaxLegs,
-//--- margin- and 100-lot-capped. (Broker min lot / step assumed 0.01.)
-double PerLegLots()
-  {{
-   double eq = AccountInfoDouble(ACCOUNT_EQUITY);
-   int units = (int)MathFloor(eq / GBP_per_001);
-   double marginOne=0; if(!OrderCalcMargin(ORDER_TYPE_BUY,_Symbol,0.01,SymbolInfoDouble(_Symbol,SYMBOL_ASK),marginOne)) marginOne=0.94;
-   if(marginOne>0) units = (int)MathMin(units, MathFloor(eq/marginOne));
-   units = (int)MathMin(units, LotCapPerAccount*100);   // 100 lots = 10000 x 0.01
-   double perLeg = (units*0.01)/MaxLegs;
-   double step=SymbolInfoDouble(_Symbol,SYMBOL_VOLUME_STEP);
-   perLeg = MathFloor(perLeg/step)*step;
-   double vmin=SymbolInfoDouble(_Symbol,SYMBOL_VOLUME_MIN);
-   double lots = perLeg<vmin?0.0:perLeg;
-   Print("GoldShark PerLegLots: eq=", DoubleToString(eq,2), " units=", IntegerToString(units), " perLeg=", DoubleToString(perLeg,2), " lots=", DoubleToString(lots,2));
-   return(lots);
-   }}
+       OpenLeg(crossUp);
+       }}
 
-void OpenLeg(bool isLong)
-  {{
-   double lots = PerLegLots(); if(lots<=0) return;
-   double price = isLong?SymbolInfoDouble(_Symbol,SYMBOL_ASK):SymbolInfoDouble(_Symbol,SYMBOL_BID);
-   double sl = isLong? price-HardSL_pts*_Point : price+HardSL_pts*_Point;
-   MqlTradeRequest r; MqlTradeResult res; ZeroMemory(r);
-   r.action=TRADE_ACTION_DEAL; r.symbol=_Symbol; r.volume=lots;
-   r.type=isLong?ORDER_TYPE_BUY:ORDER_TYPE_SELL; r.price=price; r.sl=sl;
-   r.deviation=50; r.magic=Magic; r.comment="GoldShark_{sym}";
-   if(!OrderSend(r,res)){{ /* order rejected; skip */ }}
-   // update pyramid tracking
-   legCount = legCount + 1;
-   lastLegPrice = price;
-   }}
+    //--- money-management size: floor(balance/GBP_per_001) x 0.01 total, split across MaxLegs,
+    //--- margin- and lot-capped. Uses SYMBOL_VOLUME_MIN/MAX/STEP.
+    double PerLegLots()
+      {{
+       double balance = AccountInfoDouble(ACCOUNT_BALANCE);
+       int units = (int)MathFloor(balance / RtGBP());
+       double marginOne=0; if(!OrderCalcMargin(ORDER_TYPE_BUY,_Symbol,0.01,SymbolInfoDouble(_Symbol,SYMBOL_ASK),marginOne)) marginOne=0.94;
+       if(marginOne>0) units = (int)MathMin(units, MathFloor(balance/marginOne));
+       units = (int)MathMin(units, LotCapPerAccount*100);   // 100 lots = 10000 x 0.01
+       double perLeg = (units*0.01)/MaxLegs;
+       double step=SymbolInfoDouble(_Symbol,SYMBOL_VOLUME_STEP);
+       double maxLot=SymbolInfoDouble(_Symbol,SYMBOL_VOLUME_MAX);
+       perLeg = MathFloor(perLeg/step)*step;
+       double vmin=SymbolInfoDouble(_Symbol,SYMBOL_VOLUME_MIN);
+       if(perLeg>maxLot) perLeg=maxLot;
+       double lots = perLeg<vmin?0.0:perLeg;
+       return(lots);
+       }}
 
-//--- basket trailing stop (single stop behind best) + early pyramid add
-double basketBest=0; bool armed=false; int legCount=0; double lastLegPrice=0;
-void ManageBasket()
-  {{
-   if(PositionsTotalSym()==0){{ armed=false; basketBest=0; legCount=0; lastLegPrice=0; return; }}
-   bool isLong = NetLong();
-   double px = isLong?SymbolInfoDouble(_Symbol,SYMBOL_BID):SymbolInfoDouble(_Symbol,SYMBOL_ASK);
-   if(basketBest==0) basketBest=px;
-   basketBest = isLong?MathMax(basketBest,px):MathMin(basketBest,px);
-   double avgEntry=AvgEntry();
-   double profitPts = (isLong?(basketBest-avgEntry):(avgEntry-basketBest))/_Point * PositionsTotalSym();
-   // BE lock: once profit hits BE_pts, move SL to entry + BE_lock_pts (lock in minimum)
-   if(!armed && profitPts>=BE_pts)
-     {{
-      armed = true;
-      double lockSl = isLong ? avgEntry + BE_lock_pts*_Point : avgEntry - BE_lock_pts*_Point;
-      ModifyAllSL(lockSl);
-     }}
-   if(armed)
-     {{
-      double newSL = isLong? basketBest-Trail_pts*_Point : basketBest+Trail_pts*_Point;
-      ModifyAllSL(newSL);
-     }}
-   // early pyramid: add a leg if price advanced Add_pts beyond last leg and still early
-   // (heuristic: within first EarlyFrac of estimated cycle length; fallback to legCount<MaxLegs)
-   if(legCount>0 && legCount<MaxLegs)
-     {{
-      double adv=(isLong?(px-lastLegPrice):(lastLegPrice-px))/_Point;
-      if(adv>=Add_pts){{ OpenLeg(isLong); }}
-     }}
-   }}
-// --- helpers (position accounting for this symbol/magic) ---
-int PositionsTotalSym(){{ int c=0; for(int i=PositionsTotal()-1;i>=0;i--){{ if(PositionGetTicket(i)>0 && PositionGetString(POSITION_SYMBOL)==_Symbol) c++; }} return(c); }}
-bool NetLong(){{ double v=0; for(int i=PositionsTotal()-1;i>=0;i--){{ if(PositionGetTicket(i)>0 && PositionGetString(POSITION_SYMBOL)==_Symbol) v+=(PositionGetInteger(POSITION_TYPE)==POSITION_TYPE_BUY?1:-1); }} return(v>=0); }}
-double AvgEntry(){{ double s=0; int n=0; for(int i=PositionsTotal()-1;i>=0;i--){{ if(PositionGetTicket(i)>0 && PositionGetString(POSITION_SYMBOL)==_Symbol){{ s+=PositionGetDouble(POSITION_PRICE_OPEN); n++; }} }} return(n>0?s/n:0); }}
-void ModifyAllSL(double sl){{ for(int i=PositionsTotal()-1;i>=0;i--){{ ulong t=PositionGetTicket(i); if(t>0 && PositionGetString(POSITION_SYMBOL)==_Symbol){{ MqlTradeRequest r; MqlTradeResult res; ZeroMemory(r); r.action=TRADE_ACTION_SLTP; r.position=t; r.symbol=_Symbol; r.sl=sl; r.tp=0; if(!OrderSend(r,res)){{ /* skip */ }} }} }} }}
-//+------------------------------------------------------------------+
-'''
+    void OpenLeg(bool isLong)
+      {{
+       double lots = PerLegLots(); if(lots<=0) return;
+       double price = isLong?SymbolInfoDouble(_Symbol,SYMBOL_ASK):SymbolInfoDouble(_Symbol,SYMBOL_BID);
+       double sl = isLong? price-RtHardSL()*_Point : price+RtHardSL()*_Point;
+       int digits=(int)SymbolInfoInteger(_Symbol,SYMBOL_DIGITS);
+       sl = NormalizeDouble(sl,digits);
+       MqlTradeRequest r; MqlTradeResult res; ZeroMemory(r);
+       r.action=TRADE_ACTION_DEAL; r.symbol=_Symbol; r.volume=lots;
+       r.type=isLong?ORDER_TYPE_BUY:ORDER_TYPE_SELL; r.price=price; r.sl=sl;
+       r.deviation=50; r.magic=Magic; r.comment="GoldShark_{sym}";
+       if(!OrderSend(r,res)){{ /* order rejected; skip */ }}
+       else {{ LogEntry(isLong, price, sl, lots); }}
+       // update pyramid tracking
+       legCount = legCount + 1;
+       lastLegPrice = price;
+       }}
+
+    //--- risk / session guards
+    double g_dayStartBalance=0; datetime g_dayStart=0; bool g_dailyLock=false;
+    bool IsTradingAllowed()
+      {{
+       if(AccountInfoDouble(ACCOUNT_BALANCE) < MinAccountBalance) return(false);
+       double balance = AccountInfoDouble(ACCOUNT_BALANCE);
+       double equity  = AccountInfoDouble(ACCOUNT_EQUITY);
+       if(equity <= balance * (1.0 - MaxDrawdownPct/100.0)) {{ CloseAllBasket(); return(false); }}
+       datetime now = TimeCurrent();
+       MqlDateTime dt; TimeToStruct(now, dt);
+       if(g_dayStart==0 || dt.day != g_dayStart) {{ g_dayStart=dt.day; g_dayStartBalance=balance; g_dailyLock=false; }}
+       double dd = (g_dayStartBalance - equity) / g_dayStartBalance * 100.0;
+       if(!g_dailyLock && dd >= DailyDrawdownPct) {{ g_dailyLock=true; CloseAllBasket(); }}
+       if(g_dailyLock) return(false);
+       int wd = (int)dt.day_of_week;
+       if(wd==1 && !TradeMonday) return(false);
+       if(wd==2 && !TradeTuesday) return(false);
+       if(wd==3 && !TradeWednesday) return(false);
+       if(wd==4 && !TradeThursday) return(false);
+       if(wd==5 && !TradeFriday) return(false);
+       int h = dt.hour - BrokerGMTOffset; if(h<0) h+=24; if(h>=24) h-=24;
+       int m = h*60 + dt.min;
+       if(AvoidRollover) {{ int rb = 22*60 - RolloverBufferMins; int re = 23*60 + RolloverBufferMins; if(m>=rb && m<=re) return(false); }}
+       bool asian = (h>=0 && h<9)  && TradeAsian;
+       bool london= (h>=7 && h<16) && TradeLondon;
+       bool ny    = (h>=12 && h<21)&& TradeNewYork;
+       return(asian || london || ny);
+      }}
+
+    //--- basket trailing stop (single stop behind best) + early pyramid add
+    double basketBest=0; bool armed=false; int legCount=0; double lastLegPrice=0;
+    void ManageBasket()
+      {{
+       if(PositionsTotalSym()==0){{ armed=false; basketBest=0; legCount=0; lastLegPrice=0; return; }}
+       bool isLong = NetLong();
+       double px = isLong?SymbolInfoDouble(_Symbol,SYMBOL_BID):SymbolInfoDouble(_Symbol,SYMBOL_ASK);
+       if(basketBest==0) basketBest=px;
+       basketBest = isLong?MathMax(basketBest,px):MathMin(basketBest,px);
+       double avgEntry=AvgEntry();
+       double profitPts = (isLong?(basketBest-avgEntry):(avgEntry-basketBest))/_Point * PositionsTotalSym();
+       // BE lock: once profit hits RtBE, move SL to entry + RtBE_Lock (lock in minimum)
+       if(!armed && profitPts>=RtBE())
+         {{
+          armed = true;
+          double lockSl = isLong ? avgEntry + RtBE_Lock()*_Point : avgEntry - RtBE_Lock()*_Point;
+          ModifyAllSL(lockSl);
+         }}
+       if(armed)
+         {{
+          double newSL = isLong? basketBest-RtTrail()*_Point : basketBest+RtTrail()*_Point;
+          ModifyAllSL(newSL);
+         }}
+       // early pyramid: add a leg if price advanced RtAdd beyond last leg and still early
+       if(legCount>0 && legCount<MaxLegs)
+         {{
+          double adv=(isLong?(px-lastLegPrice):(lastLegPrice-px))/_Point;
+          if(adv>=RtAdd()){{ OpenLeg(isLong); }}
+         }}
+       }}
+
+    //--- lightweight CSV lifecycle log
+    int    hLog=-1; string logFolder="";
+    void EnsureLog()
+      {{
+       if(hLog!=INVALID_HANDLE && hLog>=0) return;
+       if(!LogToCSV) return;
+       logFolder = "GoldShark_Logs\\\\";
+       if(!FolderCreate(logFolder,FILE_COMMON)) {{ if(GetLastError()!=ERR_FOLDER_EXISTS) return; }}
+       string fn = logFolder + _Symbol + "_Lifecycle.csv";
+       hLog = FileOpen(fn, FILE_WRITE|FILE_READ|FILE_CSV|FILE_COMMON|FILE_SHARE_READ|FILE_SHARE_WRITE, ',');
+       if(hLog!=INVALID_HANDLE && FileSize(hLog)==0)
+         FileWrite(hLog,"TradeID","Ticket","Type","EntryTime","EntryPrice","EntrySL","Lots",
+                   "OsMA","EMA_Slope","Bulls","Bears","ATR","Session","Status","ExitTime","ExitPrice","ExitReason");
+      }}
+    void LogEntry(bool isLong, double price, double sl, double lots)
+      {{
+       if(!LogToCSV) return; EnsureLog(); if(hLog<0) return;
+       MqlDateTime dt; TimeToStruct(TimeCurrent(), dt);
+       string id = _Symbol + "_" + IntegerToString(Magic) + "_" + TimeToString(TimeCurrent(), TIME_DATE|TIME_MINUTES);
+       FileWrite(hLog, id, 0, isLong?"LONG":"SHORT", TimeToString(TimeCurrent()), DoubleToString(price, 5),
+                 DoubleToString(sl, 5), DoubleToString(lots, 3),
+                 DoubleToString(OsMA(1),5), DoubleToString(EMAv(1)-EMAv(4),5),
+                 DoubleToString(BullsP(1),5), DoubleToString(BearsP(1),5), DoubleToString(ATRv(1),5),
+                 CurSession(), "OPEN", "", "", "");
+      }}
+    void LogClose(string reason)
+      {{
+       if(!LogToCSV) return; EnsureLog(); if(hLog<0) return;
+       FileWrite(hLog, _Symbol + "_" + IntegerToString(Magic), 0, "", "", "", "", "", "", "", "", "", "",
+                 "", "CLOSED", TimeToString(TimeCurrent()), "", reason);
+      }}
+    void FlushAndCloseLog() {{ if(hLog>=0){{ FileClose(hLog); hLog=-1; }} }}
+
+    void CloseAllBasket()
+      {{
+       for(int i=PositionsTotal()-1;i>=0;i--){{ ulong t=PositionGetTicket(i); if(t>0 && PositionGetInteger(POSITION_MAGIC)==Magic && PositionGetString(POSITION_SYMBOL)==_Symbol){{ MqlTradeRequest r; MqlTradeResult res; ZeroMemory(r); r.action=TRADE_ACTION_DEAL; r.position=t; r.symbol=_Symbol; r.type=(PositionGetInteger(POSITION_TYPE)==POSITION_TYPE_BUY)?ORDER_TYPE_SELL:ORDER_TYPE_BUY; r.volume=PositionGetDouble(POSITION_VOLUME); r.deviation=50; if(!OrderSend(r,res)){{ /* skip */ }} }} }}
+       LogClose("RISK_HALT");
+      }}
+    // --- helpers (position accounting for this symbol/magic) ---
+    int PositionsTotalSym(){{ int c=0; for(int i=PositionsTotal()-1;i>=0;i--){{ if(PositionGetTicket(i)>0 && PositionGetInteger(POSITION_MAGIC)==Magic && PositionGetString(POSITION_SYMBOL)==_Symbol) c++; }} return(c); }}
+    bool NetLong(){{ double v=0; for(int i=PositionsTotal()-1;i>=0;i--){{ if(PositionGetTicket(i)>0 && PositionGetInteger(POSITION_MAGIC)==Magic && PositionGetString(POSITION_SYMBOL)==_Symbol) v+=(PositionGetInteger(POSITION_TYPE)==POSITION_TYPE_BUY?1:-1); }} return(v>=0); }}
+    double AvgEntry(){{ double s=0; int n=0; for(int i=PositionsTotal()-1;i>=0;i--){{ if(PositionGetTicket(i)>0 && PositionGetInteger(POSITION_MAGIC)==Magic && PositionGetString(POSITION_SYMBOL)==_Symbol){{ s+=PositionGetDouble(POSITION_PRICE_OPEN); n++; }} }} return(n>0?s/n:0); }}
+    void ModifyAllSL(double sl){{ int digits=(int)SymbolInfoInteger(_Symbol,SYMBOL_DIGITS); sl=NormalizeDouble(sl,digits); for(int i=PositionsTotal()-1;i>=0;i--){{ ulong t=PositionGetTicket(i); if(t>0 && PositionGetInteger(POSITION_MAGIC)==Magic && PositionGetString(POSITION_SYMBOL)==_Symbol){{ MqlTradeRequest r; MqlTradeResult res; ZeroMemory(r); r.action=TRADE_ACTION_SLTP; r.position=t; r.symbol=_Symbol; r.sl=sl; r.tp=0; if(!OrderSend(r,res)){{ /* skip */ }} }} }} }}
+    //+------------------------------------------------------------------+
+    '''
     set_hdr = f"; GoldShark_{sym}.set -- MT5 Strategy Tester optimiser ranges (auto-generated)\n; F=1 enables optimisation; 1=start 2=step 3=stop\n"
     set_src = set_hdr + "\n".join(setlines) + "\n"
     return mq5, set_src, manifest
