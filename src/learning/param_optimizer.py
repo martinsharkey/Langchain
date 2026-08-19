@@ -151,6 +151,7 @@ SYMBOL_BASELINES = {
         "osma_max_short": -0.2, "bulls_max_short": 0.0, "bears_max_short": -1.0,
         "max_momentum_age": 26, "rsi_long_max": 100.0, "rsi_short_min": 0.0,
         "sl_atr": 0.8, "tp_rr": 2.0, "min_confluence": 3,
+        "hard_sl_points": 1034.4,
     },
 }
 

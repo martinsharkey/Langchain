@@ -567,6 +567,25 @@ class ScalpEngine:
                 self._ensure_onboarded(base, adapter)
             except Exception as e:
                 logger.debug(f"onboard skip {base}: {e}")
+        self._warn_missing_qmmp_artifacts()
+
+    def _warn_missing_qmmp_artifacts(self):
+        """Warn for any traded symbol that lacks a QMMP model.json / EA. This is a
+        non-blocking alert: the symbol can still trade from baseline/tuned params, but
+        it has not completed the full QMMP onboarding pipeline."""
+        try:
+            qmmp_root = os.path.join(config.BASE_DIR, "data", "qmmp")
+            for base, adapter in list(self.adapters.items()):
+                key = base.upper()
+                sym_dir = os.path.join(qmmp_root, key)
+                model_path = os.path.join(sym_dir, "model.json")
+                if not os.path.exists(model_path):
+                    logger.warning(
+                        f"[ONBOARD] {base}: missing QMMP artifacts ({sym_dir}). "
+                        f"Run: python -m scripts.qmmp.onboard_pipeline {key}"
+                    )
+        except Exception:
+            pass
 
     def _ensure_onboarded(self, base, adapter) -> bool:
         """Kick off PATIENT background onboarding for ONE symbol if it has no baseline yet.
@@ -583,9 +602,21 @@ class ScalpEngine:
         base_cfg = next((v for p, v in SYMBOL_BASELINES.items() if key.startswith(p)), None)
         has_baseline = base_cfg is not None
         has_tuned = (key in self.param_optimizer.tuned or resolved.upper() in self.param_optimizer.tuned)
-        # A pre-seeded symbol still needs its per-symbol OsMA-CYCLE SL derived from its OWN
-        # data (R3) if the baseline lacks it (BTCUSD/GER40 shipped without hard_sl_points and
-        # ran on guessed seed exits). Derive it once even when a baseline exists.
+        # If a prior sl_only onboarding derived hard_sl_points, apply them to the
+        # baseline so needs_cycle_sl clears and onboarding does not re-trigger every
+        # restart.
+        if has_baseline and not (base_cfg or {}).get("hard_sl_points"):
+            try:
+                from src.learning.onboarding_tracker import OnboardingTracker
+                ot = OnboardingTracker()
+                st = ot.status(key) or {}
+                if st.get("hard_sl_points"):
+                    base_entry = next((p for p in SYMBOL_BASELINES if key.startswith(p)), None)
+                    if base_entry:
+                        SYMBOL_BASELINES[base_entry]["hard_sl_points"] = float(st["hard_sl_points"])
+                        base_cfg = SYMBOL_BASELINES[base_entry]
+            except Exception:
+                pass
         needs_cycle_sl = has_baseline and not (base_cfg or {}).get("hard_sl_points")
         if (has_baseline or has_tuned) and not needs_cycle_sl:
             return False
@@ -680,6 +711,15 @@ class ScalpEngine:
                 if not hasattr(self, "_exit_override"):
                     self._exit_override = {}
                 self._exit_override.setdefault(key, {}).update(ex)
+            # Persist derived exits into SYMBOL_BASELINES so needs_cycle_sl clears
+            # and onboarding does not re-trigger every restart.
+            try:
+                from src.learning.param_optimizer import SYMBOL_BASELINES
+                base_entry = next((p for p in SYMBOL_BASELINES if key.startswith(p)), None)
+                if base_entry and base_entry in SYMBOL_BASELINES:
+                    SYMBOL_BASELINES[base_entry].update(ex)
+            except Exception:
+                pass
             tracker.update(key, "baseline_set", source=src_used, mode="sl_only",
                            hard_sl_points=recipe.get("hard_sl_points"),
                            n_cycles=cyc.get("n_cycles"))
