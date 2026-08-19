@@ -6,7 +6,7 @@ Pure logic, no MT5/model. Uses a temp checkpoint file and a stub knowledge store
 import sys, os, tempfile
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from src.learning.config_checkpointer import ConfigCheckpointer
+from tests.conftest import isolated_data_dir
 
 
 class _KS:
@@ -19,10 +19,11 @@ class _KS:
 
 
 def _cp(tmp, ks=None):
+    from src.learning.config_checkpointer import ConfigCheckpointer
     return ConfigCheckpointer(knowledge_store=ks, path=tmp, min_sample=10, revert_margin=0.05)
 
 
-def test_first_config_becomes_baseline_and_best():
+def test_first_config_becomes_baseline_and_best(isolated_data_dir):
     with tempfile.TemporaryDirectory() as d:
         cp = _cp(os.path.join(d, "cp.json"))
         r = cp.evaluate("XAUUSD", {"sl_atr": 1.0, "tp_rr": 2.0}, current_expectancy=0.10, n=20)
@@ -30,7 +31,7 @@ def test_first_config_becomes_baseline_and_best():
         assert abs(cp.best_expectancy("XAUUSD") - 0.10) < 1e-9
 
 
-def test_improvement_updates_best():
+def test_improvement_updates_best(isolated_data_dir):
     with tempfile.TemporaryDirectory() as d:
         cp = _cp(os.path.join(d, "cp.json"))
         cp.evaluate("XAUUSD", {"tp_rr": 2.0}, 0.10, 20)
@@ -39,7 +40,7 @@ def test_improvement_updates_best():
         assert abs(cp.best_expectancy("XAUUSD") - 0.20) < 1e-9
 
 
-def test_degradation_reverts_and_learns():
+def test_degradation_reverts_and_learns(isolated_data_dir):
     with tempfile.TemporaryDirectory() as d:
         ks = _KS()
         cp = _cp(os.path.join(d, "cp.json"), ks=ks)
@@ -55,7 +56,7 @@ def test_degradation_reverts_and_learns():
         assert ks.remembered and ks.remembered[0]["kind"] == "correction"
 
 
-def test_within_noise_band_holds():
+def test_within_noise_band_holds(isolated_data_dir):
     with tempfile.TemporaryDirectory() as d:
         cp = _cp(os.path.join(d, "cp.json"))
         cp.evaluate("BTCUSD", {"tp_rr": 2.0}, 0.10, 20)
@@ -63,14 +64,14 @@ def test_within_noise_band_holds():
         assert r["action"] == "hold", r
 
 
-def test_insufficient_sample_holds():
+def test_insufficient_sample_holds(isolated_data_dir):
     with tempfile.TemporaryDirectory() as d:
         cp = _cp(os.path.join(d, "cp.json"))
         r = cp.evaluate("BTCUSD", {"tp_rr": 2.0}, 0.10, n=3)
         assert r["action"] == "hold"
 
 
-def test_stale_best_is_demoted_when_now_losing():
+def test_stale_best_is_demoted_when_now_losing(isolated_data_dir):
     """A best-known captured in a lucky window must not trap the bot: if we are
     ON the best-known config and it is now itself losing, demote it."""
     with tempfile.TemporaryDirectory() as d:
@@ -86,7 +87,7 @@ def test_stale_best_is_demoted_when_now_losing():
         assert r2["action"] == "checkpointed", r2
 
 
-def test_no_revert_to_a_losing_best():
+def test_no_revert_to_a_losing_best(isolated_data_dir):
     """Never force a revert TO a best-known that is itself unprofitable."""
     with tempfile.TemporaryDirectory() as d:
         cp = _cp(os.path.join(d, "cp.json"))
@@ -102,12 +103,4 @@ def test_no_revert_to_a_losing_best():
         assert "not reverting" in r["reason"] or "losing" in r["reason"]
 
 
-if __name__ == "__main__":
-    test_first_config_becomes_baseline_and_best()
-    test_improvement_updates_best()
-    test_degradation_reverts_and_learns()
-    test_within_noise_band_holds()
-    test_insufficient_sample_holds()
-    test_stale_best_is_demoted_when_now_losing()
-    test_no_revert_to_a_losing_best()
-    print("config checkpointer tests passed")
+
