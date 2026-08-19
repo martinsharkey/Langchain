@@ -159,6 +159,28 @@ def cycles_on(df):
     return out, osma
 
 
+def _adaptive_slip_pts(symbol):
+    try:
+        import MetaTrader5 as mt5
+        if mt5.initialize():
+            info = mt5.symbol_info(symbol)
+            if info:
+                pt_val = info.point or 0.01
+                if pt_val <= 0.0001:
+                    slip_pts = 2.0
+                elif pt_val <= 0.01:
+                    slip_pts = 20.0
+                else:
+                    slip_pts = 100.0
+            else:
+                slip_pts = 100.0
+            mt5.shutdown()
+            return slip_pts
+    except Exception:
+        pass
+    return 100.0
+
+
 def pt_value(symbol):
     try:
         import MetaTrader5 as mt5
@@ -440,25 +462,7 @@ def run(symbol, spread_pts=None, comm_per_lot=6.0, slip_pts=None, gbp_per_001=50
             except Exception:
                 spread_pts = 200.0
     if slip_pts is None:
-        try:
-            import MetaTrader5 as mt5
-            if mt5.initialize():
-                info = mt5.symbol_info(resolved)
-                if info:
-                    pt_val = info.point or 0.01
-                    if pt_val <= 0.0001:
-                        slip_pts = 2.0
-                    elif pt_val <= 0.01:
-                        slip_pts = 20.0
-                    else:
-                        slip_pts = 100.0
-                else:
-                    slip_pts = 100.0
-                mt5.shutdown()
-            else:
-                slip_pts = 100.0
-        except Exception:
-            slip_pts = 100.0
+        slip_pts = _adaptive_slip_pts(resolved)
     try:
         import MetaTrader5 as mt5
         if mt5.initialize():
