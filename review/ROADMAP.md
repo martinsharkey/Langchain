@@ -28,6 +28,7 @@ Goal: generated EAs are maintainable, verifiable, and safe to run live.
 
 | Item | Priority | Notes | GitHub issue(s) |
 |---|---|---|---|
+| Add Python source-code hot reload for `app.py` | high | Currently only `model.json` reloads dynamically (`MaybeReloadModel`). Python `.py` changes require full process restart. Use `watchdog` or `importlib`-based reload for `src/` + `scripts/` modules so fixes propagate without manual restart. Must handle stateful objects (MT5 connections, open positions, adapters) safely — snapshot + re-init, not blind reload. | |
 | Add unit tests for `ea_generator.py` output structure | high | Verify grouped inputs, magic, and manifest alignment. | |
 | Test `OnTimer` reload on missing/corrupt `model.json` | high | EA must not crash or load partial state. | |
 | Extend lifecycle log to modify / BE / close events | medium | Currently logs entry; add exit snapshots. | |
