@@ -79,10 +79,20 @@ VPS-ready — no editor/Kilo dependency). Change `src/core_rules.py` first if a 
 > **Latest state (2026-08-19):** on `main` (pushed). Full 7-indicator confluence is
 > the single source of truth (`confluence_signal.py`); optimizer uses authoritative
 > mql5 ranges; all learning loops audited WIRED end-to-end; ONNX per-symbol; CryptoRTI
-> whale wired into BOTH live + backtest paths. **202 tests passing** (1 skipped). CI
+> whale wired into BOTH live + backtest paths. **207 tests passing** (5 skipped). CI
 > active (`.github/workflows/ci.yml`). Workspace rules codified in `WORKSPACE_RULES.md`
 > (authoritative rulebook). Architecture: `ARCHITECTURE.md` + `ARCHITECTURE_OVERVIEW.md`;
 > testing: `TESTING.md`.
+>
+> **Test isolation (2026-08-19):** `tests/conftest.py` now redirects all cached
+> `DATA_DIR` paths to a temp copy by default, so `pytest tests/` never mutates live
+> proven-state files (`config_checkpoints.json`, `tuned_params.json`, `graduation.json`,
+> `symbol_evidence.json`, `trading_experience.db`). Live tests use `@pytest.mark.live`
+> and are skipped unless explicitly requested.
+>
+> **Snapshot service (2026-08-19):** `scripts/snapshot_state.py` provides atomic
+> snapshot/restore of critical live stores. This is the foundation for the safe
+> restart script planned in Phase 3.
 >
 > **ONNX outcome-predictor finding (2026-08-18):** the per-symbol ONNX models show
 > coin-flip AUC (0.45–0.52) on live floor-filtered OsMA_Confluence trades despite

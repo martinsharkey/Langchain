@@ -605,6 +605,60 @@ Investigate why the bot had not traded since this morning, recover to a healthy 
 
 ### Next
 - Monitor for a few cycles to confirm entries fire when signals clear.
-- Consider wiring `RUN_LIVE_RESTART=1` into a nightly CI step on a Windows runner if one becomes available.
 - Continue review-agent work in `review/`.
+- Implement Phase 2 (test isolation) and Phase 3 (safe restart script) per `review/PLAN_test_isolation_and_restart.md`.
+
+---
+
+## Session 2026-08-19 (continued) — Phase 1+2: snapshot service + test isolation
+
+**Branch:** main  
+**Mode:** LIVE_MICRO  
+**Status:** Committed and pushed. Full suite passes with live stores protected.
+
+### Goal
+Implement Phase 1 (snapshot service) and Phase 2 (test isolation) of the safe-restart plan, ensuring the live proven-state stores are never mutated by tests and the pipeline/learning loops remain intact.
+
+### What we did
+
+1. **Phase 1 — snapshot_state.py**
+   - Added `scripts/snapshot_state.py` with `create`, `list`, `restore`, `prune`, and `verify` commands.
+   - Snapshots `config_checkpoints.json`, `tuned_params.json`, `graduation.json`, `symbol_evidence.json`, `trading_experience.db`, `bot_status.json`, `symbol_status.json`, `risk_state.json`, and all `data/qmmp/*/model.json` files.
+   - Atomic restore via `.tmp` + `os.replace`.
+   - Added `tests/test_snapshot_state.py` with round-trip, prune, and corruption-detection tests.
+
+2. **Phase 2 — test isolation**
+   - Added `tests/conftest.py` with a session-scoped `_auto_isolate_data` fixture that:
+     - Copies `data/` to a temp directory (excluding `snapshots/`).
+     - Monkeypatches `src.config.DATA_DIR` to the temp directory.
+     - Monkeypatches module-level path constants in `config_checkpointer`, `param_optimizer`, `risk_manager`, `scalp_engine`, `symbol_stats`, `signal_client`, `correlation_miner`, `entry_strength`, and `onboarding_tracker`.
+   - Registered `@pytest.mark.live` marker in pytest.
+   - Marked `test_bot_restart.py` live tests with `@pytest.mark.live` (skipped by default).
+   - Verified existing tests that previously wrote to live stores (`test_self_correcting_loop.py`, `test_continual_researcher.py`, `test_symbol_governor.py`, `test_graduation.py`) no longer mutate live files.
+
+3. **Verification**
+   - Full pytest suite: **207 passed, 5 skipped, 1 warning**.
+   - Stopped the live bot and ran the full suite: **zero live data files changed** (hashes, sizes, and mtimes all unchanged).
+   - Ran suite again with bot running: only the live bot's own learning writes changed files; tests did not contribute.
+
+### Files changed
+- `scripts/snapshot_state.py` (new)
+- `tests/conftest.py` (new)
+- `tests/test_snapshot_state.py` (new)
+- `tests/test_bot_restart.py` (added `@pytest.mark.live`)
+
+### Commits
+- `fe91c24` feat(isolation): snapshot_state.py, conftest temp DATA_DIR, live marker, restart tests
+
+### Current state
+- Bot: **running** (PID 22252, `python app.py LIVE_MICRO`).
+- MT5: connected, demo account 1176166.
+- Dashboard: reachable at http://localhost:5000.
+- Tests: 207 passed, 5 skipped. Live stores protected by default.
+
+### Next
+- **Phase 3:** Implement `scripts/restart_bot.py` with snapshot, validation, and rollback.
+- **Phase 4:** Add CI workflow for isolated tests + gated live restart.
+- Review agent should update `review/ISSUES_LOG.md` with findings on the new isolation approach.
+
 
