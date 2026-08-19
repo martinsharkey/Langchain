@@ -180,6 +180,24 @@ def pt_value(symbol):
     return 0.01, 0.00007
 
 
+def _resolve_symbol(symbol):
+    """Map a base symbol to the broker's actual symbol name (mirrors ingest.py)."""
+    try:
+        import MetaTrader5 as mt5
+        if mt5.initialize():
+            if mt5.symbol_info(symbol):
+                mt5.shutdown()
+                return symbol
+            for s in mt5.symbols_get() or []:
+                if s.name.upper().startswith(symbol.upper()):
+                    mt5.shutdown()
+                    return s.name
+            mt5.shutdown()
+    except Exception:
+        pass
+    return symbol
+
+
 def build_rows(df, pdf, cyc, osma, pt, gbp_pt, cost_per_leg, exit_cfg, slip_pts):
     """Run the model on each cycle; return DataFrame with session, indicators, net$, win."""
     bulls = bp(df, 13).values; bears = bpw(df, 13).values
@@ -399,7 +417,8 @@ def stress_test(R, sizing_fn, start_bal, target, gbp_pt, max_legs=4):
 
 def run(symbol, spread_pts=None, comm_per_lot=6.0, slip_pts=100.0, gbp_per_001=50.0,
         max_legs=4, early_frac=0.15, start_bal=5000.0):
-    base = symbol.upper().split("-")[0].rstrip(".")
+    resolved = _resolve_symbol(symbol)
+    base = resolved.upper().split("-")[0].rstrip(".")
     d = os.path.join(QDIR, base); os.makedirs(d, exist_ok=True)
     log = []
     def L(s): print(s); log.append(s)

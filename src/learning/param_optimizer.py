@@ -239,6 +239,49 @@ class ParameterOptimizer:
                     if p.get(mk) is None:
                         p[mk] = 0.0
             return p
+        # no tuned entry — fall back to model.json if the QMMP pipeline produced one
+        try:
+            import os, json
+            model_path = os.path.join(config.DATA_DIR, "qmmp", key, "model.json")
+            if os.path.exists(model_path):
+                model = json.load(open(model_path, encoding="utf-8"))
+                # Start from baseline (if any) so model.json only overrides what it
+                # actually specifies; missing keys keep their baseline/default values.
+                p = dict(DEFAULTS)
+                for pref, base in SYMBOL_BASELINES.items():
+                    if key.startswith(pref):
+                        p.update(base)
+                        break
+                p.update({k: v for k, v in model.get("entry", {}).get("osma_params", {}).items() if k in ("fast", "slow", "signal")})
+                # normalize osma param names to the canonical keys used by tuned_params
+                if "fast" in p: p["osma_fast"] = p.pop("fast")
+                if "slow" in p: p["osma_slow"] = p.pop("slow")
+                if "signal" in p: p["osma_signal"] = p.pop("signal")
+                for fk in ("osma_mag", "ema_align", "bulls", "bears", "atr"):
+                    v = model.get("floors", {}).get(fk)
+                    if isinstance(v, dict):
+                        p[fk] = v
+                    elif isinstance(v, (int, float)) and v != 0:
+                        p[fk] = v
+                ex = model.get("exit", {})
+                p["tp_rr"] = 2.0
+                p["early_frac"] = float(ex.get("early", 0.15))
+                p["max_legs"] = int(ex.get("max_legs", 4))
+                # model.json stores raw SL/BE/trail/add in POINTS; tuned_params.json stores
+                # sl_atr as an ATR multiplier. We cannot safely convert without live ATR,
+                # so we keep the ATR multiplier from the baseline/defaults and ignore the
+                # raw points here. The EA reads raw points from model.json directly.
+                mm = model.get("money_management", {})
+                p["gbp_per_001"] = float(mm.get("gbp_per_001", 50.0))
+                p["lot_cap_per_account"] = int(mm.get("lot_cap_per_account", 100))
+                for fk in self._SHARED_STRUCT_KEYS:
+                    if (p.get(fk) in (None, 0, 0.0)) and gold.get(fk) not in (None, 0, 0.0):
+                        p[fk] = gold[fk]
+                for mk in self._MAGNITUDE_KEYS:
+                    p.setdefault(mk, 0.0)
+                return p
+        except Exception:
+            pass
         # no tuned entry
         for pref, base in SYMBOL_BASELINES.items():
             if key.startswith(pref):

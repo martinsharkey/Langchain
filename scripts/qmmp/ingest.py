@@ -54,7 +54,7 @@ def ingest_mt5(symbol: str):
     resolved = _resolve_symbol(symbol)
     mt5.symbol_select(resolved, True)
     now = datetime.now(timezone.utc)
-    outsym = os.path.join(OUTDIR, symbol.upper())
+    outsym = os.path.join(OUTDIR, resolved.upper().split("-")[0].rstrip("."))
     os.makedirs(outsym, exist_ok=True)
     summary = {}
     for tf, days in TF_DAYS.items():
