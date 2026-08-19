@@ -48,6 +48,7 @@ def _patch_cached_paths(data_dir: Path):
     import src.trading.symbol_stats as ss_mod
     import src.cryptorti.signal_client as sc_mod
     import src.cryptorti.correlation_miner as cm_mod
+    import src.cryptorti.whale_rag as wr_mod
     import src.learning.entry_strength as es_mod
     import src.learning.onboarding_tracker as ot_mod
 
@@ -58,6 +59,7 @@ def _patch_cached_paths(data_dir: Path):
     ss_mod.STATS_PATH = str(data_dir / "symbol_stats.json")
     sc_mod.SIGNALS_PATH = str(data_dir / "cryptorti_signals.json")
     cm_mod.TABLE_PATH = str(data_dir / "cryptorti_correlation.json")
+    wr_mod.WhalePatternRAG.PERSIST_DIR = str(data_dir / "chromadb_store")
     es_mod.ENTRY_RELAX_PATH = str(data_dir / "entry_relax_caps.json")
     ot_mod.BASE_PATH = str(data_dir)
 
