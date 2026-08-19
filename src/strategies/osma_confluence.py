@@ -23,8 +23,11 @@ falls back to MACD alignment (the bar-loop backtest enforces the full lead).
 
 from __future__ import annotations
 
+import pandas as pd
+
 from src.strategies.base import Signal
 from src.strategies.confluence_signal import evaluate_confluence_bar
+from src.strategies.sessions import session_of
 from src.utils.logger import get_logger
 
 logger = get_logger("strategy.osma_confluence")
@@ -67,6 +70,21 @@ def osma_confluence_signal(indicators: dict, params: dict) -> Signal:
         _mags = [abs(float(x)) for x in _recent if x is not None]
         if _mags:
             ind["osma_recent_avg"] = sum(_mags) / len(_mags)
+    except Exception:
+        pass
+
+    # PER-SESSION FLOORS: if the tuned params carry session-specific overrides,
+    # merge only the current session's overrides on top of the base params.
+    # This lets the live engine trade with different Asian/London/NewYork floors
+    # while keeping the shared confluence evaluator session-agnostic.
+    try:
+        ts = indicators.get("timestamp")
+        if ts is not None:
+            hour = int(pd.to_datetime(ts).hour)
+            sess = session_of(hour)
+            sess_key = f"session_{sess}"
+            if sess_key in p:
+                p = {**p, **p[sess_key]}
     except Exception:
         pass
 

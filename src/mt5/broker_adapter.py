@@ -449,6 +449,12 @@ class BrokerAdapter:
         Modify the BROKER-SIDE stop-loss (and optionally TP) of an open position.
         This is how the TradeManager moves to BE+/trails — the SL always lives on
         the broker, so the trade is never left unprotected.
+
+        Guards against broker minimum-stop and freeze-level rejections (retcode 10016):
+        - stops_level: clamp SL outward to the legal minimum distance so the trail
+          still moves, just not tighter than the broker allows.
+        - freeze_level: if price is inside the freeze zone, skip this cycle and retry
+          later — widening the SL cannot bypass a freeze.
         """
         t0 = time.time()
         if self.mode in ("OBSERVE", "PAPER"):
@@ -462,6 +468,48 @@ class BrokerAdapter:
                 if not pos:
                     return self._reject("modify", 0.0, f"position {ticket} not found")
                 p = pos[0]
+                si = mt5.symbol_info(p.symbol)
+                stops_level = getattr(si, "trade_stops_level", 0) or 0
+                freeze_level = getattr(si, "trade_freeze_level", 0) or 0
+                point = getattr(si, "point", 0.0) or 0.0
+                tick = mt5.symbol_info_tick(p.symbol)
+                # POSITION_TYPE_BUY/SELL is the correct enum for open positions; it
+                # happens to equal ORDER_TYPE_BUY/SELL numerically today, but this is
+                # the semantically correct field.
+                is_buy = p.type == mt5.POSITION_TYPE_BUY
+                cur_price = tick.bid if is_buy else tick.ask
+                existing_sl = float(getattr(p, "sl", 0.0) or 0.0)
+
+                # MT5 reports trade_stops_level in points. Convert to price distance.
+                # Use a small extra buffer (1 point) because some brokers reject exactly
+                # at the advertised boundary due to rounding or current spread.
+                min_dist_pts = max(stops_level, freeze_level) + 1
+                min_dist = min_dist_pts * point
+                if min_dist > 0:
+                    if is_buy:
+                        # SL for a buy must be below current price; freeze means any
+                        # modify inside min_dist is rejected, so skip if too close.
+                        if (cur_price - sl) < min_dist:
+                            # Clamp to the legal outward distance if stops_level is the
+                            # only constraint. If freeze_level is active, compare against
+                            # the EXISTING stop: freeze zone is around the current broker
+                            # stop, not the requested one. Skip the cycle if the existing
+                            # stop is inside the freeze distance and the requested value
+                            # would move it.
+                            if freeze_level > 0 and existing_sl > 0 and \
+                               abs(existing_sl - cur_price) < (freeze_level + 1) * point:
+                                return self._reject("modify", 0.0,
+                                                    f"existing SL within freeze_level {freeze_level}pts of price")
+                            sl = cur_price - min_dist
+                    else:
+                        # SL for a sell must be above current price
+                        if (sl - cur_price) < min_dist:
+                            if freeze_level > 0 and existing_sl > 0 and \
+                               abs(existing_sl - cur_price) < (freeze_level + 1) * point:
+                                return self._reject("modify", 0.0,
+                                                    f"existing SL within freeze_level {freeze_level}pts of price")
+                            sl = cur_price + min_dist
+
                 request = {
                     "action": mt5.TRADE_ACTION_SLTP,
                     "symbol": p.symbol,

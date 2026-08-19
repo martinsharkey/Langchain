@@ -51,6 +51,8 @@ def _make_fake_mt5():
     fake.TRADE_ACTION_SLTP = 6
     fake.ORDER_TYPE_BUY = 0
     fake.ORDER_TYPE_SELL = 1
+    fake.POSITION_TYPE_BUY = 0
+    fake.POSITION_TYPE_SELL = 1
     fake.ORDER_TIME_GTC = 0
     fake.ORDER_FILLING_IOC = 1
     fake.TRADE_RETCODE_DONE = 10009
@@ -165,19 +167,109 @@ def test_paper_and_observe_never_call_order_send():
     assert "observe-only" in or_.reason
 
 
+def _make_position(ptype=0, symbol="XAUUSD-ECN", volume=0.01, tp=2520.0, sl=0.0):
+    return SimpleNamespace(type=ptype, symbol=symbol, volume=volume, tp=tp, sl=sl)
+
+
 def test_close_and_modify_use_lock():
     sentinel = _Sentinel()
     adapter, fake = _make_adapter()
     fake.order_send = sentinel.call
-    fake.positions_get = lambda **kw: [
-        SimpleNamespace(type=0, symbol="XAUUSD-ECN", volume=0.01, tp=2520.0)
-    ]
+    fake.positions_get = lambda **kw: [_make_position()]
 
     adapter.close(123)
     adapter.modify_sl(123, 2495.0)
 
     assert sentinel.count == 2
     assert sentinel.max_concurrent <= 1
+
+
+def test_modify_sl_clamps_to_stops_level():
+    """If requested SL is inside trade_stops_level, adapter must clamp outward."""
+    adapter, fake = _make_adapter()
+    sent = []
+    fake.positions_get = lambda **kw: [_make_position(ptype=0, symbol="GER40.")]
+
+    class Info:
+        point = 0.1
+        trade_stops_level = 500   # 50 pts minimum stop distance
+        trade_freeze_level = 0
+
+    fake.symbol_info = lambda s: Info()
+    fake.symbol_info_tick = lambda s: SimpleNamespace(bid=26200.0, ask=26200.5)
+    fake.order_send = lambda req: (sent.append(req), SimpleNamespace(
+        retcode=10009, price=0.0, volume=0.0, order=123, comment="done"))[1]
+
+    # requested SL only ~6 pts below current price for a buy; should be clamped to 50+1 pts
+    adapter.modify_sl(123, 26195.0)
+    assert len(sent) == 1
+    assert sent[0]["sl"] == 26149.9  # 26200.0 - 51 pts (point=0.1)
+
+
+def test_modify_sl_skips_inside_freeze_level():
+    """If existing SL is inside trade_freeze_level of current price, skip."""
+    adapter, fake = _make_adapter()
+    sent = []
+    # position with existing SL only 5 pts below current price -> inside 50pt freeze
+    fake.positions_get = lambda **kw: [_make_position(ptype=0, symbol="GER40.", sl=26195.0)]
+
+    class Info:
+        point = 0.1
+        trade_stops_level = 100
+        trade_freeze_level = 500  # 50 pts freeze zone
+
+    fake.symbol_info = lambda s: Info()
+    fake.symbol_info_tick = lambda s: SimpleNamespace(bid=26200.0, ask=26200.5)
+    fake.order_send = lambda req: (sent.append(req), SimpleNamespace(
+        retcode=10009, price=0.0, volume=0.0, order=123, comment="done"))[1]
+
+    result = adapter.modify_sl(123, 26180.0)
+    assert not result.ok
+    assert "freeze_level" in result.reason
+    assert len(sent) == 0
+
+
+def test_modify_sl_allows_legal_sl():
+    """If requested SL is already beyond stops_level, it should pass through unchanged."""
+    adapter, fake = _make_adapter()
+    sent = []
+    fake.positions_get = lambda **kw: [_make_position(ptype=0, symbol="GER40.")]
+
+    class Info:
+        point = 0.1
+        trade_stops_level = 100   # 10 pts min distance
+        trade_freeze_level = 0
+
+    fake.symbol_info = lambda s: Info()
+    fake.symbol_info_tick = lambda s: SimpleNamespace(bid=26200.0, ask=26200.5)
+    fake.order_send = lambda req: (sent.append(req), SimpleNamespace(
+        retcode=10009, price=0.0, volume=0.0, order=123, comment="done"))[1]
+
+    adapter.modify_sl(123, 26180.0)  # 20 pts below price, legal
+    assert len(sent) == 1
+    assert sent[0]["sl"] == 26180.0
+
+
+def test_modify_sl_sell_clamps_above_price():
+    """For a sell position, SL must clamp upward above current price."""
+    adapter, fake = _make_adapter()
+    sent = []
+    fake.positions_get = lambda **kw: [_make_position(ptype=1, symbol="GER40.")]
+
+    class Info:
+        point = 0.1
+        trade_stops_level = 200   # 20 pts
+        trade_freeze_level = 0
+
+    fake.symbol_info = lambda s: Info()
+    fake.symbol_info_tick = lambda s: SimpleNamespace(bid=26200.0, ask=26200.5)
+    fake.order_send = lambda req: (sent.append(req), SimpleNamespace(
+        retcode=10009, price=0.0, volume=0.0, order=123, comment="done"))[1]
+
+    # requested SL only ~5 pts above ask for a sell; should clamp to 20+1 pts above ask
+    adapter.modify_sl(123, 26205.5)
+    assert len(sent) == 1
+    assert sent[0]["sl"] == 26220.6  # ask 26200.5 + 21 pts (point=0.1)
 
 
 if __name__ == "__main__":

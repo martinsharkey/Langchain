@@ -213,6 +213,9 @@ class ParameterOptimizer:
     _MAGNITUDE_KEYS = ("osma_min_long", "bulls_min_long", "osma_max_short",
                        "bears_max_short", "macd_min_long", "macd_max_short",
                        "bulls_max_short", "bears_min_long")
+    # PER-SESSION magnitude floors: each key can be overridden by session_{Asian,London,NewYork,Off}.
+    # The live engine merges the current session's overrides on top of the base params.
+    SESSION_KEYS = ("Asian", "London", "NewYork", "Off")
 
     def current_params(self, symbol: str) -> dict:
         key = self._key(symbol)
@@ -284,6 +287,37 @@ class ParameterOptimizer:
                         cand["osma_slow"] = _clamp(cand["osma_fast"] + 8, _lo, _hi, _k)
                     yield k, cand
 
+    def _mutate_session_floors(self, params: dict) -> dict:
+        """Nudge one or two per-session magnitude floors inside each active session.
+
+        We only mutate floor magnitudes (not structure/periods) per session, and we
+        keep the same base params untouched so a session-aware backtest can pick the
+        right override at decision time.
+        """
+        cand = dict(params)
+        mutated = False
+        for sess in self.SESSION_KEYS:
+            sess_key = f"session_{sess}"
+            if sess_key not in cand:
+                cand[sess_key] = {}
+            sess_params = dict(cand[sess_key])
+            # reuse the same strength keys as base mutation
+            strength = [k for k in ("osma_min_long", "osma_max_short", "macd_min_long",
+                                      "macd_max_short", "bulls_min_long", "bears_min_long",
+                                      "bears_max_short", "bulls_max_short") if k in PARAM_SPACE]
+            if not strength:
+                continue
+            # mutate at most 2 floors per session per cycle
+            n = min(2, len(strength))
+            for k in random.sample(strength, k=n):
+                lo, hi, step, kind = PARAM_SPACE[k]
+                cur = sess_params.get(k, cand.get(k, DEFAULTS[k]))
+                direction = random.choice([-1, 1])
+                sess_params[k] = _clamp(cur + direction * step, lo, hi, kind)
+                mutated = True
+            cand[sess_key] = sess_params
+        return cand, mutated
+
     def _mutate(self, params: dict, n_mutations: int = 2) -> dict:
         """Randomly nudge a few parameters, BIASED toward the highest-impact levers:
         the signed STRENGTH floors (osma/macd/bulls/bears magnitude) and the indicator
@@ -292,6 +326,8 @@ class ParameterOptimizer:
         candidate is likely to move a strength floor and/or a period — these change the
         signal itself, which is where the edge lives."""
         cand = dict(params)
+        # strip session overrides from the base so we don't accidentally mutate them twice
+        base_keys = [k for k in cand if not k.startswith("session_")]
         strength = [k for k in ("osma_min_long", "osma_max_short", "macd_min_long",
                                 "macd_max_short", "bulls_min_long", "bears_min_long",
                                 "bears_max_short", "bulls_max_short") if k in PARAM_SPACE]
@@ -446,6 +482,15 @@ class ParameterOptimizer:
                                     "score_gain": round(res["score"] - best_score, 3)})
                 best_score = res["score"]; best_params = cand; best_res = res
                 improved = True
+
+        # 3) PER-SESSION floor search: mutate session-specific magnitude overrides.
+        # Disabled until the backtest can compute per-session sub-scores. Using the
+        # aggregate window PF is invalid because a session-specific change only affects
+        # ~1/3 of trades in each window; the other sessions can drown out its true
+        # signal, accepting bad Asian floors because London/NY carried the aggregate,
+        # or rejecting good ones because the other sessions dragged it down. See
+        # claude_reviews/2026-08-19_session_floors_and_ger40_sl_rejection.md §#76.
+        sess_budget = 0   # was max(iterations // 3, 4)
 
         if improved:
             # rank the levers that actually gave the edge (biggest score gains)

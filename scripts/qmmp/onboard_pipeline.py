@@ -47,11 +47,15 @@ MIN_MOVE_COST_PREFILTER = 3.0    # only PRE-FILTER obviously-dead TFs; data deci
 
 
 def session_of(ep: int) -> str:
+    """Return trading session for a UTC epoch hour.
+
+    Delegates to the canonical session_of() so the onboarding pipeline and the
+    live/EA generator never drift. The per-cycle timestamp uses UTC, so hour is
+    the broker/server hour at the cycle close.
+    """
+    from src.strategies.sessions import session_of as _canonical
     h = datetime.fromtimestamp(ep, timezone.utc).hour
-    if 12 <= h < 21: return "NewYork"
-    if 7 <= h < 16: return "London"
-    if 0 <= h < 9: return "Asian"
-    return "Off"
+    return _canonical(h)
 
 
 def _sess_floor(floors, key, session, side=None, default=0.0):

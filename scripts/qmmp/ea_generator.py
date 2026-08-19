@@ -169,6 +169,8 @@ double BearsP(int shift){{ double v[1]; if(CopyBuffer(hBears,0,shift,1,v)<1) ret
 //--- session (broker/server time assumed ~UTC; adjust if your server offset differs)
 string CurSession()
   {{
+   // Precedence: NewYork > London > Asian > Off.
+   // Must stay in sync with src/strategies/sessions.py::session_of(hour).
    MqlDateTime dt; TimeToStruct(TimeCurrent(), dt); int h=dt.hour;
    if(h>=12 && h<21) return("NewYork");
    if(h>=7  && h<16) return("London");

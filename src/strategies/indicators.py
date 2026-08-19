@@ -462,6 +462,9 @@ def compute_full_indicators(data: list[dict], params: Optional[dict] = None) -> 
         "trend": trend,
         "price_change_5": pct_change(5), "price_change_10": pct_change(10),
         "body_ratio": body_ratio, "upper_wick": upper_wick, "lower_wick": lower_wick,
+        # broker/server timestamp of the latest closed bar so per-session floors
+        # can resolve to Asian/London/NewYork using the canonical session_of().
+        "timestamp": df.index[-1] if hasattr(df.index[-1], "hour") else None,
     }
 
 

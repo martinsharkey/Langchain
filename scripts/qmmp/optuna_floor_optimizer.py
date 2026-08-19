@@ -67,18 +67,9 @@ def _apply_floors(df: pd.DataFrame, ind: dict, floors: dict) -> pd.DataFrame:
     atr = ind["atr"]; ema = ind["ema"]
 
     # session labels (match live EA CurSession() exactly)
-    # Asian 0-8, London 7-16, NewYork 12-21, Off 21-23
-    def _session(h):
-        if 0 <= h < 8:
-            return "Asian"
-        elif 7 <= h < 16:
-            return "London"
-        elif 12 <= h < 21:
-            return "NewYork"
-        else:
-            return "Off"
+    from src.strategies.sessions import session_of
 
-    sessions = pd.Series(df.index.hour).apply(_session)
+    sessions = pd.Series(df.index.hour).apply(session_of)
     sessions.index = df.index
 
     # OsMA zero-cross entries
