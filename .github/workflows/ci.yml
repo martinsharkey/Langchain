@@ -1,8 +1,9 @@
 name: CI
 
-# Runs the offline test suite. Secrets are injected from GitHub Actions Secrets
-# (never committed) — see SECURITY.md. Live MT5 is NOT exercised in CI; tests are
-# offline/deterministic.
+# Runs the isolated test suite. `tests/conftest.py` redirects all cached `DATA_DIR`
+# paths to a temp copy by default, so this job never mutates live proven-state files.
+# Secrets are injected from GitHub Actions Secrets (never committed) — see SECURITY.md.
+# Live MT5 is NOT exercised in CI; tests are offline/deterministic.
 
 on:
   push:
@@ -10,6 +11,12 @@ on:
   pull_request:
     branches: [main]
   workflow_dispatch:
+    inputs:
+      run_live_tests:
+        description: "Run live restart tests (requires Windows runner with MT5)"
+        required: true
+        type: boolean
+        default: false
 
 jobs:
   test:
@@ -37,5 +44,32 @@ jobs:
           pip install pytest pandas numpy scikit-learn || true
           pip install -r requirements.txt || true
 
-      - name: Run offline test suite
+      - name: Run isolated test suite
         run: pytest tests/ -q
+
+  live-test:
+    # Live restart tests require a Windows runner with MT5 terminal installed.
+    # Enable manually from the Actions tab when a Windows runner is available.
+    if: ${{ github.event.inputs.run_live_tests == 'true' }}
+    runs-on: windows-latest
+    env:
+      MT5_ACCOUNT: ${{ secrets.MT5_ACCOUNT }}
+      MT5_PASSWORD: ${{ secrets.MT5_PASSWORD }}
+      MT5_SERVER: ${{ secrets.MT5_SERVER }}
+      RUN_LIVE_RESTART: "1"
+      TRADING_MODE: LIVE_MICRO
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install pytest psutil pywin32 || true
+          pip install -r requirements.txt || true
+
+      - name: Run live restart tests
+        run: pytest tests/test_bot_restart.py -m live -q

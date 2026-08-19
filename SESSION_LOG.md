@@ -646,18 +646,23 @@ Implement Phase 1 (snapshot service) and Phase 2 (test isolation) of the safe-re
 - `tests/conftest.py` (new)
 - `tests/test_snapshot_state.py` (new)
 - `tests/test_bot_restart.py` (added `@pytest.mark.live`)
+- `scripts/restart_bot.py` (new, Phase 3)
+- `tests/test_restart_bot.py` (new, Phase 3)
+- `tests/test_config_checkpointer.py` (deferred import + isolated_data_dir fixture)
 
 ### Commits
 - `fe91c24` feat(isolation): snapshot_state.py, conftest temp DATA_DIR, live marker, restart tests
+- `88b2ee9` docs(session): Phase 1+2 snapshot service, test isolation, bot restart
+- `5245ecc` fix(isolation): defer ConfigCheckpointer import, testable MT5 module ref
 
 ### Current state
-- Bot: **running** (PID 22252, `python app.py LIVE_MICRO`).
+- Bot: **not running** (stopped for clean verification).
 - MT5: connected, demo account 1176166.
 - Dashboard: reachable at http://localhost:5000.
-- Tests: 207 passed, 5 skipped. Live stores protected by default.
+- Tests: **214 passed, 5 skipped**. Live stores fully protected.
 
 ### Next
-- **Phase 3:** Implement `scripts/restart_bot.py` with snapshot, validation, and rollback.
+- **Phase 3 complete:** `restart_bot.py` implements dry-run, snapshot, stop, MT5 verify, start, dashboard poll, position magic check, EA verify, optional vectorbt replay, and rollback.
 - **Phase 4:** Add CI workflow for isolated tests + gated live restart.
 - Review agent should update `review/ISSUES_LOG.md` with findings on the new isolation approach.
 
