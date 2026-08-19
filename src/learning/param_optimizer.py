@@ -227,6 +227,26 @@ class ParameterOptimizer:
     # The live engine merges the current session's overrides on top of the base params.
     SESSION_KEYS = ("Asian", "London", "NewYork", "Off")
 
+    @staticmethod
+    def apply_session_overrides(params: dict, session: str) -> dict:
+        """Merge per-session magnitude overrides into base params.
+
+        `params` may contain keys like `session_Asian: {osma_min_long: 5.0, ...}`.
+        Returns a new dict with the current session's overrides applied on top of
+        the base magnitude / structure keys.
+        """
+        if not session or not params:
+            return params
+        sess_key = f"session_{session}"
+        overrides = params.get(sess_key)
+        if not overrides or not isinstance(overrides, dict):
+            return params
+        out = dict(params)
+        for k, v in overrides.items():
+            if v is not None:
+                out[k] = v
+        return out
+
     def current_params(self, symbol: str) -> dict:
         key = self._key(symbol)
         gold = SYMBOL_BASELINES.get("XAUUSD", {})
@@ -276,10 +296,18 @@ class ParameterOptimizer:
                 p["tp_rr"] = 2.0
                 p["early_frac"] = float(ex.get("early", 0.15))
                 p["max_legs"] = int(ex.get("max_legs", 4))
-                # model.json stores raw SL/BE/trail/add in POINTS; tuned_params.json stores
-                # sl_atr as an ATR multiplier. We cannot safely convert without live ATR,
-                # so we keep the ATR multiplier from the baseline/defaults and ignore the
-                # raw points here. The EA reads raw points from model.json directly.
+                # model.json stores raw SL/BE/trail/add in POINTS. Map them to the live
+                # param keys the trade manager expects so the Python bot can use the
+                # same symbol-derived exits the EA reads from model.json directly.
+                _pt_map = {
+                    "sl": "hard_sl_points",
+                    "trail": "trail_points",
+                    "be": "be_trigger_pts",
+                    "add": "add_points",
+                }
+                for src, dst in _pt_map.items():
+                    if src in ex and isinstance(ex[src], (int, float)) and ex[src] > 0:
+                        p[dst] = float(ex[src])
                 mm = model.get("money_management", {})
                 p["gbp_per_001"] = float(mm.get("gbp_per_001", 50.0))
                 p["lot_cap_per_account"] = int(mm.get("lot_cap_per_account", 100))

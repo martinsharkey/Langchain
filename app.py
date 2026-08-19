@@ -14,13 +14,17 @@ Trading mode is controlled by TRADING_MODE (.env or CLI arg):
     python app.py PAPER           # simulated fills at live prices
     python app.py OBSERVE         # analyze only, no orders
 
-The dashboard shows ONLY real data (live MT5 + engine status + learning DBs).
+Hot-reload (code watcher):
+    Set HOTRELOAD=1 to enable file-watcher hot-reload. When src/ or scripts/
+    change, the engine thread is restarted gracefully (state is preserved on
+    disk). The dashboard stays up.
 """
 
 import os
 import sys
 import time
 import threading
+from datetime import datetime, timezone
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
@@ -34,6 +38,12 @@ from dashboard.app import app as flask_app
 
 logger = get_logger("app")
 
+_ENGINE_THREAD = None
+_ENGINE_INSTANCE = None
+_RELOAD_DEBOUNCE_SECS = 2.0
+_LAST_RELOAD_TRIGGER = 0.0
+_RELOAD_LOCK = threading.Lock()
+
 
 def start_dashboard():
     """Run the Flask dashboard in a daemon thread (never blocks trading)."""
@@ -46,18 +56,103 @@ def start_dashboard():
     return t
 
 
+def _run_engine():
+    global _ENGINE_INSTANCE
+    try:
+        from src.trading.scalp_engine import ScalpEngine
+        engine = ScalpEngine()
+        _ENGINE_INSTANCE = engine
+        engine.run()
+    except Exception as e:
+        logger.error(f"Trading engine stopped: {e}", exc_info=True)
+        _ENGINE_INSTANCE = None
+
+
 def start_engine():
     """Run the trading engine in a daemon thread."""
-    from src.trading.scalp_engine import run_scalp_engine
+    global _ENGINE_THREAD
+    _ENGINE_THREAD = threading.Thread(target=_run_engine, daemon=True, name="engine")
+    _ENGINE_THREAD.start()
+    return _ENGINE_THREAD
 
-    def _run():
+
+def _restart_engine():
+    """Gracefully stop the current engine and start a fresh one."""
+    global _ENGINE_THREAD, _ENGINE_INSTANCE
+    engine = _ENGINE_INSTANCE
+    if engine is not None:
         try:
-            run_scalp_engine()
+            logger.info("[HOTRELOAD] stopping current engine…")
+            engine.stop()
         except Exception as e:
-            logger.error(f"Trading engine stopped: {e}", exc_info=True)
-    t = threading.Thread(target=_run, daemon=True, name="engine")
-    t.start()
-    return t
+            logger.warning(f"[HOTRELOAD] engine stop failed: {e}")
+    else:
+        logger.info("[HOTRELOAD] no running engine instance to stop")
+    if _ENGINE_THREAD is not None:
+        try:
+            _ENGINE_THREAD.join(timeout=30)
+        except Exception:
+            pass
+    logger.info("[HOTRELOAD] starting fresh engine…")
+    start_engine()
+
+
+def _trigger_reload():
+    """Debounced reload trigger."""
+    global _LAST_RELOAD_TRIGGER
+    now = time.time()
+    with _RELOAD_LOCK:
+        if now - _LAST_RELOAD_TRIGGER < _RELOAD_DEBOUNCE_SECS:
+            return
+        _LAST_RELOAD_TRIGGER = now
+    logger.info(f"[HOTRELOAD] code change detected at {datetime.now(timezone.utc).isoformat()}Z")
+    _restart_engine()
+
+
+def start_hot_reload():
+    """Start a file-watcher that restarts the engine when src/ or scripts/ change."""
+    if os.environ.get("HOTRELOAD", "").lower() not in ("1", "true", "yes"):
+        return None
+    try:
+        from watchdog.observers import Observer
+        from watchdog.events import FileSystemEventHandler, FileModifiedEvent, DirModifiedEvent
+    except Exception as e:
+        logger.warning(f"hot-reload unavailable (watchdog missing): {e}")
+        return None
+
+    class _Handler(FileSystemEventHandler):
+        def on_modified(self, event):
+            if event.is_directory:
+                return
+            src = event.src_path
+            if not (src.endswith(".py") or src.endswith(".json")):
+                return
+            # Only watch src/ and scripts/ (ignore data/, .git/, __pycache__)
+            parts = src.replace("\\", "/").split("/")
+            if len(parts) < 2:
+                return
+            if parts[-2] not in ("src", "scripts"):
+                return
+            if any(part in (".git", "__pycache__", "data", "chromadb_store") for part in parts):
+                return
+            _trigger_reload()
+
+    watch_dirs = []
+    root = os.path.dirname(os.path.abspath(__file__))
+    for d in ("src", "scripts"):
+        p = os.path.join(root, d)
+        if os.path.isdir(p):
+            watch_dirs.append(p)
+
+    if not watch_dirs:
+        return None
+
+    obs = Observer()
+    for d in watch_dirs:
+        obs.schedule(_Handler(), path=d, recursive=True)
+    obs.start()
+    logger.info(f"[HOTRELOAD] watching {', '.join(watch_dirs)} for code changes")
+    return obs
 
 
 def start_research_best_effort():
@@ -123,6 +218,11 @@ def main():
     start_engine()
     console.print(f"  [green]Trading engine started[/green] (mode={mode})\n")
 
+    # 4) hot-reload watcher (opt-in via HOTRELOAD=1)
+    reload_observer = start_hot_reload()
+    if reload_observer:
+        console.print("  [green]Hot-reload:[/green] watching src/ + scripts/ for changes")
+
     if mode == "OBSERVE":
         console.print("  [yellow]OBSERVE mode:[/yellow] analyzing only — no orders will be placed.")
         console.print("  Run 'python app.py LIVE_MICRO' to trade the demo account.\n")
@@ -134,6 +234,12 @@ def main():
             time.sleep(1)
     except KeyboardInterrupt:
         console.print("\n  Shutting down…", style="yellow")
+        if reload_observer:
+            try:
+                reload_observer.stop()
+                reload_observer.join(timeout=5)
+            except Exception:
+                pass
         console.print("  Stopped.\n", style="green")
 
 

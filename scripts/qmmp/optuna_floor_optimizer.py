@@ -26,6 +26,9 @@ import vectorbt as vbt
 from optuna.samplers import TPESampler
 
 from src.strategies.indicators import osma as osma_fn, bulls_power as bp, bears_power as bpw, atr as atr_fn, ema as ema_fn
+from src.utils.logger import get_logger
+
+logger = get_logger("optuna_floor_optimizer")
 
 D = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "data", "qmmp")
 FAST, SLOW, SIG = 12, 26, 9
@@ -388,4 +391,104 @@ def run_study(
     with open(trial_path, "w", encoding="utf-8") as f:
         json.dump(result, f, indent=2)
 
+    _try_promote(base, trial_path)
+
     return result
+
+
+def _latest_trial_path(symbol: str) -> str | None:
+    base = _resolve_symbol(symbol).upper().split("-")[0].rstrip(".")
+    trials_dir = os.path.join(D, base, "optuna", "trials")
+    if not os.path.isdir(trials_dir):
+        return None
+    candidates = sorted(
+        [f for f in os.listdir(trials_dir) if f.startswith("best_floors_") and f.endswith(".json")],
+        reverse=True,
+    )
+    if not candidates:
+        return None
+    return os.path.join(trials_dir, candidates[0])
+
+
+def _try_promote(symbol: str, trial_path: str) -> dict:
+    """Promote Optuna best_floors into model.json + tuned_params.json when held-out
+    metrics beat the current baseline. Never overwrites a worse result."""
+    try:
+        with open(trial_path, encoding="utf-8") as f:
+            result = json.load(f)
+    except Exception:
+        return {"promoted": False, "reason": "cannot_read_trial"}
+
+    base = _resolve_symbol(symbol).upper().split("-")[0].rstrip(".")
+    model_path = os.path.join(D, base, "model.json")
+    current_model = {}
+    if os.path.exists(model_path):
+        try:
+            with open(model_path, encoding="utf-8") as f:
+                current_model = json.load(f)
+        except Exception:
+            current_model = {}
+
+    held = result.get("held_out_metrics", {})
+    cur_held = current_model.get("validation", {}).get("held_out_metrics", {})
+    cur_wr = float(cur_held.get("win_rate", 0) or 0)
+    cur_trades = int(cur_held.get("total_trades", 0) or 0)
+    new_wr = float(held.get("win_rate", 0) or 0)
+    new_trades = int(held.get("total_trades", 0) or 0)
+
+    if new_trades < 10 or (cur_trades >= 10 and new_wr <= cur_wr):
+        return {"promoted": False, "reason": f"held-out WR {new_wr:.1f}% (n={new_trades}) does not beat baseline {cur_wr:.1f}% (n={cur_trades})"}
+
+    new_floors = result.get("floors", {})
+    if not new_floors:
+        return {"promoted": False, "reason": "no_floors_in_trial"}
+
+    merged = dict(current_model)
+    merged["floors"] = new_floors
+    merged["floors_detail"] = {
+        k: {"value": v, "helps": 1, "folds": 1, "summary": "promoted from Optuna"}
+        for k, v in new_floors.items()
+    }
+    merged["build"] = int(merged.get("build", 0) or 0) + 1
+    merged.setdefault("validation", {})
+    merged["validation"]["held_out_metrics"] = held
+    merged["validation"]["promoted_at"] = datetime.now(timezone.utc).isoformat()
+    merged["validation"]["promoted_from"] = os.path.basename(trial_path)
+
+    try:
+        os.makedirs(os.path.dirname(model_path), exist_ok=True)
+        tmp = model_path + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(merged, f, indent=2)
+        os.replace(tmp, model_path)
+    except Exception as e:
+        return {"promoted": False, "reason": f"model_write_failed: {e}"}
+
+    _promote_to_tuned_params(base, new_floors)
+
+    return {"promoted": True, "build": merged["build"], "win_rate": new_wr, "trades": new_trades}
+
+
+def _promote_to_tuned_params(symbol: str, floors: dict) -> None:
+    """Flatten per-session Optuna floors into the tuned_params.json schema
+    (session_Asian / session_London / session_NewYork overrides)."""
+    try:
+        from src.learning.param_optimizer import ParameterOptimizer, TUNED_PATH
+        opt = ParameterOptimizer(registry=None, backtest_fn=lambda *a, **k: None)
+        key = opt._key(symbol)
+        entry = opt.tuned.get(key, {})
+        params = dict(entry.get("params", {}))
+        for fk, fv in floors.items():
+            if isinstance(fv, dict):
+                for sess, val in fv.items():
+                    sess_key = f"session_{sess}"
+                    if sess_key not in params:
+                        params[sess_key] = {}
+                    params[sess_key][fk] = val
+            elif isinstance(fv, (int, float)) and fv != 0:
+                params[fk] = fv
+        entry["params"] = params
+        opt.tuned[key] = entry
+        opt._persist()
+    except Exception as e:
+        logger.warning(f"Optuna promote to tuned_params failed: {e}")

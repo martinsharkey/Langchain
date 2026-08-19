@@ -954,6 +954,15 @@ class ScalpEngine:
 
 
     # ── main loop ─────────────────────────────────────────────────────
+    def stop(self):
+        """Request a graceful shutdown. Flushes status to disk and exits the run loop."""
+        self.running = False
+        try:
+            self._write_status()
+        except Exception:
+            pass
+        logger.info("ScalpEngine shutdown requested")
+
     def run(self, max_cycles: Optional[int] = None):
         if not self.initialize():
             return
@@ -2066,8 +2075,16 @@ class ScalpEngine:
             rates = adapter.get_rates(timeframe=config.entry_timeframe_for(resolved), count=300)
             if not rates:
                 return False
-            ind = compute_full_indicators(rates, self._tuned_params(resolved))
-            sig = self.registry.get_focused_signal(ind, self._tuned_params(resolved))
+            _session = None
+            try:
+                from src.strategies.sessions import session_of
+                _ts = rates[-1].get("timestamp") or rates[-1].get("time")
+                if isinstance(_ts, (int, float)):
+                    _session = session_of(int(_ts))
+            except Exception:
+                _session = None
+            ind = compute_full_indicators(rates, self._tuned_params(resolved, session=_session))
+            sig = self.registry.get_focused_signal(ind, self._tuned_params(resolved, session=_session))
             return bool(sig and getattr(sig, "action", None) == action)
         except Exception as e:
             logger.debug(f"pyramid dir-check skip {base}: {e}")
@@ -2575,16 +2592,24 @@ class ScalpEngine:
             (health["pending_trades"] or 0) > 10 or self._last_learning_error)
         return health
 
-    def _tuned_params(self, resolved_symbol: str) -> dict:
+    def _tuned_params(self, resolved_symbol: str, session: str = None) -> dict:
         """Optimizer-tuned indicator params for this symbol (or {} = defaults),
         merged with the LEARNED per-symbol entry-strength thresholds (osma/power
-        minimums) so the confluence gate uses what the model learned is reliable."""
+        minimums) so the confluence gate uses what the model learned is reliable.
+        If `session` is provided, per-session magnitude overrides are applied on top.
+        """
         params = {}
         if self.param_optimizer is not None:
             try:
                 params = dict(self.param_optimizer.current_params(resolved_symbol) or {})
             except Exception:
                 params = {}
+        if session:
+            try:
+                from src.learning.param_optimizer import ParameterOptimizer
+                params = ParameterOptimizer.apply_session_overrides(params, session)
+            except Exception:
+                pass
         # learned per-symbol ENTRY-QUALITY recipe (the mined gates that lift entry-
         # direction success toward the EA's ~95%): accel_min / max_stretch_atr /
         # dom_min / runway_min. Applied only where the learner proved they help.
@@ -2959,10 +2984,18 @@ class ScalpEngine:
         if not rates or len(rates) < 30:
             logger.warning(f"{base}: insufficient rate data")
             return
+        _session = None
+        try:
+            from src.strategies.sessions import session_of
+            _ts = rates[-1].get("timestamp") or rates[-1].get("time")
+            if isinstance(_ts, (int, float)):
+                _session = session_of(int(_ts))
+        except Exception:
+            _session = None
 
         # Use the optimizer's TUNED indicator params for this symbol if the
         # self-learning loop has found a validated improvement (else defaults).
-        tuned = self._tuned_params(resolved)
+        tuned = self._tuned_params(resolved, session=_session)
         indicators = compute_full_indicators(rates, tuned)
         if not indicators or indicators.get("close") is None:
             return
