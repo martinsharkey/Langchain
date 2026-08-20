@@ -78,8 +78,26 @@ def _adaptive_slip_pts(symbol, allow_mt5: bool = True):
     return 100.0
 
 
-def _load_data(symbol: str, tf: str = "H1") -> pd.DataFrame:
-    """Load parquet data for a symbol/timeframe."""
+def _load_data(symbol: str, tf: str = "H1", broker: str | None = None) -> pd.DataFrame:
+    """Load parquet data for a symbol/timeframe.
+
+    Priority:
+      1. DataManager (offline parquet, auto-refresh) when broker is provided
+      2. Direct parquet path (data/qmmp/) as fallback
+    """
+    if broker is not None:
+        try:
+            from src.data_acquisition import DataManager, DataSourceConfig
+            dm = DataManager(DataSourceConfig(broker=broker))
+            bars = dm.get_rates(symbol, tf, count=12000)
+            if bars:
+                df = pd.DataFrame(bars)
+                df["time"] = pd.to_datetime(df["timestamp"], unit="s", utc=True)
+                df = df.set_index("time")
+                return df
+        except Exception as e:
+            logger.warning(f"[OPTUNA] DataManager unavailable for {symbol} {tf}: {e}")
+
     resolved = _resolve_symbol(symbol)
     base = resolved.upper().split("-")[0].rstrip(".")
     d = os.path.join(D, base)
@@ -294,6 +312,7 @@ def run_study(
     spread_pts: float | None = None,
     slip_pts: float | None = None,
     allow_mt5: bool = True,
+    broker: str | None = None,
 ) -> dict:
     """Run Optuna study for floor optimization on a symbol.
 
@@ -310,7 +329,7 @@ def run_study(
     """
     resolved = _resolve_symbol(symbol, allow_mt5=allow_mt5)
     base = resolved.upper().split("-")[0].rstrip(".")
-    df = _load_data(symbol, tf)
+    df = _load_data(symbol, tf, broker=broker)
     ind = _compute_indicators(df)
 
     pt, gbp_pt = pt_value(symbol)
@@ -510,7 +529,8 @@ def _promote_to_tuned_params(symbol: str, floors: dict) -> None:
         logger.warning(f"Optuna promote to tuned_params failed: {e}")
 
 
-def run_daily_studies(symbols: list[str], n_trials: int = 50, allow_mt5: bool = False) -> dict:
+def run_daily_studies(symbols: list[str], n_trials: int = 50, allow_mt5: bool = False,
+                       broker: str | None = None, timeframes: list[str] | None = None) -> dict:
     """Run Optuna floor studies for a list of symbols (intended for daily autonomous cycle).
 
     Args:
@@ -519,6 +539,10 @@ def run_daily_studies(symbols: list[str], n_trials: int = 50, allow_mt5: bool = 
         allow_mt5: If False (default for live-bot daily cycle), skip MT5 spread/slip queries
                    and use conservative defaults. This prevents the study runner from
                    disrupting an active MT5 terminal session.
+        broker: Optional broker name for DataManager (e.g. "vt_markets"). When provided,
+                uses DataManager for data loading with auto-refresh.
+        timeframes: Optional list of timeframes to test (e.g. ["M15", "H1"]). When provided,
+                    runs a study per timeframe and returns the best result per symbol.
 
     Returns:
         Summary dict keyed by symbol with study results or error strings.
@@ -526,10 +550,22 @@ def run_daily_studies(symbols: list[str], n_trials: int = 50, allow_mt5: bool = 
     results = {}
     for sym in symbols:
         try:
-            logger.info(f"[OPTUNA] daily study START for {sym} ({n_trials} trials)")
-            result = run_study(sym, n_trials=n_trials, allow_mt5=allow_mt5)
-            results[sym] = result
-            logger.info(f"[OPTUNA] daily study DONE for {sym}: best_value={result.get('best_value')}")
+            tf_list = timeframes or ["M15"]
+            best_result = None
+            best_value = -float("inf")
+            for tf in tf_list:
+                logger.info(f"[OPTUNA] daily study START for {sym} {tf} ({n_trials} trials)")
+                result = run_study(sym, tf=tf, n_trials=n_trials, allow_mt5=allow_mt5, broker=broker)
+                value = result.get("best_value", -float("inf"))
+                if value > best_value:
+                    best_value = value
+                    best_result = result
+                logger.info(f"[OPTUNA] daily study DONE for {sym} {tf}: best_value={value}")
+            if best_result:
+                best_result["tested_timeframes"] = tf_list
+                results[sym] = best_result
+            else:
+                results[sym] = "error: no valid timeframe"
         except Exception as e:
             logger.warning(f"[OPTUNA] daily study FAILED for {sym}: {e}")
             results[sym] = f"error: {e}"

@@ -156,9 +156,7 @@ class ScalpEngine:
         try:
             from src.learning.backtester import Backtester
             from src.learning.param_optimizer import ParameterOptimizer
-            _bt = Backtester(self.registry,
-                             rates_fn=_duka_source.get_rates if _duka_source else None,
-                             ticks_fn=_duka_source.get_ticks if _duka_source else None)
+            _bt = self._make_backtester()
             self.param_optimizer = ParameterOptimizer(
                 self.registry,
                 lambda sym, params, sl_atr, tp_rr: _bt.walkforward_focused(
@@ -237,10 +235,8 @@ class ScalpEngine:
             from src.learning.edge_discovery import EdgeDiscovery
             from src.learning.backtester import Backtester
             self.edge_discovery = EdgeDiscovery(
-                self.registry, Backtester(self.registry,
-                                          rates_fn=_duka_source.get_rates if _duka_source else None,
-                                          ticks_fn=_duka_source.get_ticks if _duka_source else None),
-                knowledge_store=self.knowledge_store)
+                 self.registry, self._make_backtester(),
+                 knowledge_store=self.knowledge_store)
         except Exception as e:
             logger.warning(f"EdgeDiscovery unavailable: {e}")
         try:
@@ -272,10 +268,7 @@ class ScalpEngine:
                 def _duka_backtest(sym, params, sl_atr=None, tp_rr=None):
                     if _duka_source is None:
                         return None
-                    bt = _BT(self.registry, rates_fn=_duka_source.get_rates, ticks_fn=_duka_source.get_ticks)
-                    # M5 keeps it light enough for a research cycle while clearing the
-                    # 2000-bar floor (BTC 24/7 gets ~3000; gold/GER40 ~2200 from the
-                    # cached ~13-day window). Cached per-day in gold_evidence.
+                    bt = self._make_backtester()
                     return bt.walkforward_focused(sym, params,
                                                   sl_atr=(sl_atr if sl_atr is not None else params.get("sl_atr", 1.0)),
                                                   tp_rr=(tp_rr if tp_rr is not None else params.get("tp_rr", 2.0)),
@@ -326,12 +319,14 @@ class ScalpEngine:
             # promotion (issue #80).
             if self.adaptive is not None and _duka_source is not None:
                 try:
+                    rates_fn = self.data_manager.get_rates if self.data_manager else _duka_source.get_rates
+                    ticks_fn = self.data_manager.get_ticks if self.data_manager else _duka_source.get_ticks
                     self.adaptive = AdaptiveLoop(
                         self.experience_db, self.registry,
                         symbol_resolver=lambda b: (self.adapters[b].resolved_symbol
                                                    if b in self.adapters else b),
-                        rates_fn=_duka_source.get_rates,
-                        ticks_fn=_duka_source.get_ticks,
+                        rates_fn=rates_fn,
+                        ticks_fn=ticks_fn,
                     )
                 except Exception as e:
                     logger.debug(f"Adaptive loop Dukascopy wiring unavailable: {e}")
@@ -396,6 +391,20 @@ class ScalpEngine:
             self.param_optimizer.learning_log = self.learning_log
         if getattr(self, "change_validator", None) is not None:
             self.change_validator.learning_log = self.learning_log
+
+        # Data acquisition layer: broker-agnostic, auto-refreshing, offline-first
+        self.data_manager = None
+        self.refresh_manager = None
+        try:
+            from src.data_acquisition import DataManager, DataSourceConfig, DataRefreshManager
+            self.data_manager = DataManager(DataSourceConfig(broker="vt_markets"))
+            self.refresh_manager = DataRefreshManager(
+                broker="vt_markets",
+                data_manager=self.data_manager,
+            )
+            logger.info("DataManager + DataRefreshManager initialized (offline-first)")
+        except Exception as e:
+            logger.warning(f"DataManager unavailable: {e}")
 
         # #36: intelligent per-symbol ReAct fixer (applies post-mortem fixes LIVE,
         # escalates exit-fix -> retune -> strategy-switch -> research). Non-fatal.
@@ -589,12 +598,71 @@ class ScalpEngine:
                 logger.debug(f"entry-strength startup learn skip: {e}")
         return True
 
+    def _make_backtester(self):
+        """Create a Backtester wired to the best available data source.
+
+        Priority:
+          1. DataManager (offline parquet, auto-refresh)
+          2. DukascopySource (if available)
+          3. Live MT5 (fallback)
+        """
+        from src.learning.backtester import Backtester
+
+        rates_fn = None
+        ticks_fn = None
+
+        if self.data_manager is not None:
+            rates_fn = self.data_manager.get_rates
+            ticks_fn = self.data_manager.get_ticks
+
+        if rates_fn is None:
+            try:
+                from src.data_sources.dukascopy import DukascopySource
+                _duka = DukascopySource(use_cache=True)
+                rates_fn = _duka.get_rates
+                ticks_fn = _duka.get_ticks
+            except Exception:
+                pass
+
+        return Backtester(
+            self.registry,
+            rates_fn=rates_fn,
+            ticks_fn=ticks_fn,
+            data_manager=self.data_manager,
+            refresh_manager=self.refresh_manager,
+        )
+
+    def _refresh_data_if_needed(self, symbol: str, timeframe: str = "M15"):
+        """Trigger background refresh if data is stale. Non-blocking."""
+        if self.refresh_manager is not None:
+            self.refresh_manager.ensure_fresh(symbol, timeframe)
+
+    def _entry_timeframe_for(self, base: str) -> str:
+        """Return the best entry timeframe for a symbol.
+
+        Priority:
+          1. tuned_params["timeframe"] (discovered by onboarding)
+          2. config.SYMBOL_ENTRY_TIMEFRAME (manually set)
+          3. config.ENTRY_TIMEFRAME (global default)
+        """
+        key = base.upper()
+        # Check tuned_params first (onboarding-discovered)
+        if self.param_optimizer is not None:
+            entry = self.param_optimizer.tuned.get(key, {})
+            tf = entry.get("timeframe")
+            if tf:
+                return tf
+        # Fall back to config
+        from src.config import entry_timeframe_for
+        return entry_timeframe_for(base)
+
     def _onboard_new_symbols(self):
         """Auto-onboard EVERY traded symbol that lacks a proven baseline/tuned entry:
         backtest + forward-test on its own history + OsMA-cycle SL sampling, then persist
         the baseline. Fully automatic (no manual discover_floors step). Idempotent."""
         for base, adapter in list(self.adapters.items()):
             try:
+                self._refresh_data_if_needed(base, "M15")
                 self._ensure_onboarded(base, adapter)
             except Exception as e:
                 logger.debug(f"onboard skip {base}: {e}")
@@ -720,8 +788,9 @@ class ScalpEngine:
             logger.debug(f"session override promotion skip {base}: {e}")
 
     def _run_onboarding(self, base, adapter, sl_only: bool = False):
-        """Background worker: patient Dukascopy-primary acquisition + full discovery, then
-        MT5 as a SECONDARY validation/fallback. Persists the baseline + tracks progress.
+        """Background worker: multi-timeframe floor discovery + best-TF selection.
+        Tests M1, M5, M15, M30, H1, H4 on the best available data source, picks the
+        timeframe with the strongest forward-test, and persists the baseline.
         Patience over speed: no premature give-up on data acquisition.
         sl_only: the symbol already has a proven ENTRY baseline (e.g. gold pass5469) but no
         OsMA-cycle SL — derive ONLY the exit magnitudes from its own data and apply them as
@@ -733,38 +802,103 @@ class ScalpEngine:
         self._onboard_tracker = tracker
         key = base.upper(); resolved = adapter.resolved_symbol
         _pt = getattr(getattr(adapter, "spec", None), "point", 0.01) or 0.01
-        tracker.update(key, "acquiring_dukascopy", source="dukascopy", note="primary baseline")
-        recipe = None; src_used = None
 
-        # ── PRIMARY: Dukascopy (best tick quality, broker-independent baseline) ──
-        try:
-            from src.data_sources.dukascopy import DukascopySource
-            dk = DukascopySource(use_cache=True)
-            def _rates(sym, timeframe="M1", count=60000):
-                # patient: single worker, big retry budget handled in fetch layer
-                return dk.get_rates(sym, timeframe=timeframe, count=count)
-            fd = FloorDiscovery(dk.get_rates, dk.get_ticks)
-            tracker.update(key, "backtesting", source="dukascopy")
-            recipe = fd.onboard(base, point=_pt)
-            if recipe:
-                src_used = "dukascopy"
-        except Exception as e:
-            tracker.update(key, "dukascopy_error", error=str(e)[:200])
+        # Auto-refresh data before onboarding if needed
+        self._refresh_data_if_needed(base, "M1")
+        self._refresh_data_if_needed(base, "M15")
 
-        # ── SECONDARY / FALLBACK: MT5 (only if Dukascopy could not produce a baseline) ──
+        # Timeframes to test during onboarding
+        _ONBOARD_TFS = ["M1", "M5", "M15", "M30", "H1", "H4"]
+        # Adaptive min-trades-per-day: higher TFs naturally produce fewer signals.
+        # Scale down so a symbol isn't penalised for trading on a higher TF.
+        _MIN_TPD = {"M1": 3.0, "M5": 1.5, "M15": 0.8, "M30": 0.5, "H1": 0.3, "H4": 0.2}
+
+        def _score_recipe(recipe: dict) -> float:
+            """Score a recipe by its forward-test quality. Higher = better."""
+            fwd = recipe.get("_forward") or {}
+            green = fwd.get("green_pct", 0)
+            pf = fwd.get("pf", 0)
+            tpd = fwd.get("per_day", 0)
+            return (green / 100.0) * max(pf, 0.01) * min(tpd / 10.0, 1.5)
+
+        def _try_timeframes(get_rates_fn, get_ticks_fn, source_name: str) -> tuple[Optional[dict], str]:
+            """Test all timeframes for a given data source. Returns (best_recipe, best_tf)."""
+            best_recipe = None
+            best_score = -1.0
+            best_tf = None
+            for tf in _ONBOARD_TFS:
+                try:
+                    min_tpd = _MIN_TPD.get(tf, 0.5)
+                    fd = FloorDiscovery(get_rates_fn, get_ticks_fn, min_trades_per_day=min_tpd)
+                    tracker.update(key, f"backtesting_{tf}", source=source_name, note=f"testing {tf}")
+                    recipe = fd.onboard(base, point=_pt, timeframe=tf)
+                    if recipe:
+                        score = _score_recipe(recipe)
+                        fwd = recipe.get("_forward") or {}
+                        logger.info(f"[ONBOARD] {base} {source_name} {tf}: "
+                                    f"fwd green {fwd.get('green_pct', 0):.0f}% "
+                                    f"PF {fwd.get('pf', 0):.2f} "
+                                    f"score {score:.2f}")
+                        if score > best_score:
+                            best_score = score
+                            best_recipe = recipe
+                            best_tf = tf
+                except Exception as e:
+                    logger.debug(f"onboard {base} {tf} skip: {e}")
+            return best_recipe, best_tf
+
+        recipe = None; src_used = None; best_tf = None
+
+        # ── PRIMARY: DataManager parquet (offline, auto-refresh) ──
+        if self.data_manager is not None:
+            try:
+                tracker.update(key, "backtesting_parquet", source="parquet", note="primary baseline")
+                recipe, best_tf = _try_timeframes(self.data_manager.get_rates, self.data_manager.get_ticks, "parquet")
+                if recipe:
+                    src_used = f"parquet[{best_tf}]"
+            except Exception as e:
+                tracker.update(key, "parquet_error", error=str(e)[:200])
+
+        # ── SECONDARY: Dukascopy (if parquet couldn't produce a baseline) ──
         if not recipe:
-            tracker.update(key, "fallback_mt5", source="mt5", note="dukascopy unavailable")
+            tracker.update(key, "acquiring_dukascopy", source="dukascopy", note="fallback baseline")
+            try:
+                from src.data_sources.dukascopy import DukascopySource
+                dk = DukascopySource(use_cache=True)
+                def _rates(sym, timeframe="M1", count=60000):
+                    return dk.get_rates(sym, timeframe=timeframe, count=count)
+                recipe, best_tf = _try_timeframes(_rates, dk.get_ticks, "dukascopy")
+                if recipe:
+                    src_used = f"dukascopy[{best_tf}]"
+            except Exception as e:
+                tracker.update(key, "dukascopy_error", error=str(e)[:200])
+
+        # ── TERTIARY: MT5 live (last resort) ──
+        if not recipe:
+            tracker.update(key, "fallback_mt5", source="mt5", note="last resort baseline")
             try:
                 from src.mt5.data import get_rates as _gr, get_ticks as _gt
-                recipe = FloorDiscovery(_gr, _gt).onboard(resolved, point=_pt)
+                recipe, best_tf = _try_timeframes(_gr, _gt, "mt5")
                 if recipe:
-                    src_used = "mt5(fallback)"
+                    src_used = f"mt5[{best_tf}]"
             except Exception as e:
                 tracker.update(key, "mt5_error", error=str(e)[:200])
 
         if not recipe:
-            tracker.update(key, "failed", note="no baseline from dukascopy or mt5; trades structure-only")
+            tracker.update(key, "failed", note="no baseline from any source/timeframe; trades structure-only")
             return
+
+        # Record the best timeframe that won
+        recipe["timeframe"] = best_tf
+        # Update config so the live engine uses the best timeframe automatically
+        try:
+            from src.config import SYMBOL_ENTRY_TIMEFRAME
+            SYMBOL_ENTRY_TIMEFRAME[key] = best_tf
+        except Exception:
+            pass
+        logger.warning(f"[ONBOARD] {base}: BEST TIMEFRAME = {best_tf} (source={src_used}) | "
+                       f"fwd green {recipe['_forward']['green_pct']:.0f}% "
+                       f"PF {recipe['_forward']['pf']:.2f}")
 
         cyc = recipe.get("_osma_cycle_sample") or {}
         tracker.update(key, "sampling_cycles", n_cycles=cyc.get("n_cycles"),
@@ -2764,6 +2898,13 @@ class ScalpEngine:
         def _work():
             self._adaptive_running = True
             try:
+                # Refresh data for all active symbols before adaptive cycle
+                for base, adapter in list(self.adapters.items()):
+                    try:
+                        self._refresh_data_if_needed(base, config.ENTRY_TIMEFRAME)
+                    except Exception:
+                        pass
+
                 summary = self.adaptive.run_once(
                     list(self.adapters.keys()),
                     timeframe=config.ENTRY_TIMEFRAME,
@@ -2875,15 +3016,18 @@ class ScalpEngine:
                                 self._optuna_study_threads = {}
                             for base, adapter in self.adapters.items():
                                 sym = adapter.resolved_symbol
+                                self._refresh_data_if_needed(base, "M15")
                                 t = self._optuna_study_threads.get(sym)
                                 if t and t.is_alive():
                                     continue
                                 try:
                                     from scripts.qmmp.optuna_floor_optimizer import run_daily_studies
+                                    tf = config.entry_timeframe_for(base)
                                     th = threading.Thread(
                                         target=run_daily_studies,
                                         args=([sym],),
-                                        kwargs={"n_trials": 50, "allow_mt5": False},
+                                        kwargs={"n_trials": 50, "allow_mt5": False,
+                                                "broker": "vt_markets", "timeframes": [tf]},
                                         name=f"optuna-study-{base}",
                                         daemon=True,
                                     )
@@ -2906,6 +3050,7 @@ class ScalpEngine:
                             self._optuna_last_run_day = today
                             for base, adapter in self.adapters.items():
                                 sym = adapter.resolved_symbol
+                                self._refresh_data_if_needed(base, "M15")
                                 try:
                                     res = self.optuna_bridge.propose_and_apply(sym)
                                     if res.get("applied"):
