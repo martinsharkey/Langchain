@@ -160,19 +160,8 @@ def get_rates(
                 "close": float(rate["close"]),
                 "volume": int(rate["tick_volume"]),
                 "spread": int(rate["spread"]) if "spread" in rates.dtype.names else 0,
+                "point": 0.01,
             })
-
-        try:
-            import MetaTrader5 as _mt5
-            if _mt5.initialize():
-                info = _mt5.symbol_info(symbol)
-                if info:
-                    pt = getattr(info, "point", 0.01) or 0.01
-                    for r in result:
-                        r["point"] = pt
-                _mt5.shutdown()
-        except Exception:
-            pass
 
         return result
 
