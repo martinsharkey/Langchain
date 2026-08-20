@@ -39,6 +39,7 @@ logger = get_logger("optuna_live_bridge")
 
 SESSIONS = ("Asian", "London", "NewYork")
 D = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "data", "qmmp")
+MAX_STUDY_AGE_DAYS = 7
 
 
 def _resolve_symbol(symbol: str) -> str:
@@ -78,6 +79,12 @@ def _load_best_trial_from_study(symbol: str) -> Optional[dict]:
         if study.best_trial is None or study.best_trial.value is None:
             logger.debug(f"Optuna study for {symbol} has no completed trials")
             return None
+        completed_at = getattr(study.best_trial, "datetime_complete", None)
+        if completed_at is not None:
+            age_days = (datetime.now(timezone.utc) - completed_at.replace(tzinfo=timezone.utc)).total_seconds() / 86400.0
+            if age_days > MAX_STUDY_AGE_DAYS:
+                logger.debug(f"Optuna study for {symbol} is stale ({age_days:.1f} days > {MAX_STUDY_AGE_DAYS})")
+                return None
         return dict(study.best_trial.params)
     except Exception as e:
         logger.warning(f"Failed to load Optuna study for {symbol}: {e}")
