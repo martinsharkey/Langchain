@@ -390,19 +390,25 @@ _result = _init_result
         if self._connected:
             return True
         
+        # Resolve MT5_PATH to a terminal executable if the user supplied a
+        # directory. Passing the full terminal64.exe path makes MT5 attach to
+        # that specific terminal even when multiple instances are installed.
+        mt5_path = MT5_PATH
+        if mt5_path and not mt5_path.lower().endswith("terminal64.exe"):
+            candidate = os.path.join(mt5_path, "terminal64.exe")
+            if os.path.isfile(candidate):
+                mt5_path = candidate
+        
         for attempt in range(1, retries + 1):
             logger.info(f"Connecting to MT5 natively (attempt {attempt}/{retries})...")
             
-            # Strategy:
-            # 1. Try initialize() WITHOUT path first. If a terminal is already running,
-            #    MT5 will attach to it. Passing `path` makes MT5 try to LAUNCH a new
-            #    terminal, which fails when one is already running (error -10003).
-            # 2. Only fall back to path-based init if no terminal is running yet.
             init_kwargs = {
                 "login": MT5_ACCOUNT if MT5_ACCOUNT > 0 else None,
                 "password": MT5_PASSWORD if MT5_PASSWORD else None,
                 "server": MT5_SERVER if MT5_SERVER else None,
             }
+            if mt5_path:
+                init_kwargs["path"] = mt5_path
             
             initialized = mt5.initialize(**init_kwargs)
             
@@ -414,24 +420,6 @@ _result = _init_result
             
             error = mt5.last_error() if hasattr(mt5, 'last_error') else "Unknown"
             logger.warning(f"MT5 connection failed: {error}")
-            
-            if not MT5_PATH or attempt < retries:
-                if attempt < retries:
-                    time.sleep(delay)
-                continue
-            
-            init_kwargs["path"] = MT5_PATH
-            logger.info(f"Retrying with explicit terminal path: {MT5_PATH}")
-            initialized = mt5.initialize(**init_kwargs)
-            
-            if initialized:
-                self._connected = True
-                self._account_info = self._get_account_info()
-                logger.info(f"Connected to MT5 successfully via explicit path")
-                return True
-            
-            error = mt5.last_error() if hasattr(mt5, 'last_error') else "Unknown"
-            logger.warning(f"MT5 connection with path failed: {error}")
             
             if attempt < retries:
                 time.sleep(delay)
