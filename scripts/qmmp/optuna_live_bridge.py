@@ -40,6 +40,8 @@ logger = get_logger("optuna_live_bridge")
 SESSIONS = ("Asian", "London", "NewYork")
 D = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "data", "qmmp")
 MAX_STUDY_AGE_DAYS = 7
+AGGREGATE_FALLBACK = True
+_aggregate_fallback_count = 0
 
 
 def _resolve_symbol(symbol: str) -> str:
@@ -170,6 +172,15 @@ class OptunaLiveBridge:
         ``applied``, and ``reason``.
         """
         proposed = propose_live_params(symbol)
+        has_session_overrides = bool(proposed) and any(k.startswith("session_") for k in proposed)
+        if has_session_overrides and AGGREGATE_FALLBACK:
+            global _aggregate_fallback_count
+            _aggregate_fallback_count += 1
+            logger.warning(f"[OPTUNA] {symbol}: using AGGREGATE-FALLBACK validation "
+                           f"(per-session floors collapsed to base + session_* overrides; "
+                           f"ChangeValidator scores aggregate path. Per-session sub-scores "
+                           f"available in walkforward_focused since #76 prerequisite. "
+                           f"Fallback count: {_aggregate_fallback_count})")
         summary = {
             "symbol": symbol,
             "proposed": proposed is not None,
