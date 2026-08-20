@@ -666,4 +666,36 @@ Implement Phase 1 (snapshot service) and Phase 2 (test isolation) of the safe-re
 - **Phase 4:** Add CI workflow for isolated tests + gated live restart.
 - Review agent should update `review/ISSUES_LOG.md` with findings on the new isolation approach.
 
+## Session 2026-08-20 — Hot-reload, MT5 diagnosis, learning pipeline verification
+**Branch:** main
+**Mode:** LIVE_MICRO
+**Status:** Bot running; hot-reload active; MT5 connected; learning pipeline armed
+
+### What we did
+- Verified hot-reload function in `app.py` (watchdog-based, opt-in via `HOTRELOAD=1`, engine-thread restart).
+- Diagnosed `CRITICAL: Cannot connect to MetaTrader 5` as stale `sys.modules` state from a prior failed startup; full process restart cleared it.
+- Fixed `_make_backtester()` init-order bug in `scalp_engine.py` — `DataManager` now initializes before `ParameterOptimizer` so backtester wiring succeeds.
+- Restarted bot; confirmed connection to DEMO `1176166` (VTMarkets-Demo), adoption of 3 open positions, and hot-reload watcher active.
+- Verified autonomous learning status: checkpointer/exit-lock/ONNX active now; ParameterOptimizer/ChangeValidator/Optuna time-gated (adaptive cycle ~18:52, Optuna daily next UTC day).
+- Deleted stale `BACKLOG_OPTUNA_BRIDGE_AUDIT.md` — all 11 backlog items already resolved in commits `4854efc`, `e4a8f12`, `3339aa8`, `f044f89`, `3570562`, `38dfc5c`, `0a55b07`, `3cc04e7`, `f247dcc`.
+- Deleted temp diagnostic files (`test_startup.py`, `bot_diag.out/err`).
+- Committed remaining uncommitted changes.
+
+### What changed
+- Files: `LEARNING_LOG.md`, `src/learning/backtester.py`, `src/learning/floor_discovery.py`, `src/trading/scalp_engine.py`
+- Commits: `4ab4c4b` feat(learning): wire DataManager into backtester and fix init order in scalp_engine
+
+### Current state
+- Bot: running (PID 25596, started 18:00)
+- MT5: connected DEMO login=1176166 server=VTMarkets-Demo
+- Hot-reload: active, watching `src/` + `scripts/`
+- Open positions: GER40 #610782066, XAUUSD-ECN #611182673, BTCUSD #611002116
+- Dashboard: http://localhost:5000
+- Open issues: #118, #119, #120 (negative expectancy investigations)
+
+### Next
+- Monitor ~18:52 adaptive cycle for `[OPTIMIZER]` / `[VALIDATE]` log entries.
+- Review and resolve GitHub issues #118–#120 (negative expectancy on XAUUSD/GER40/BTCUSD).
+- Close out `test_refresh.py` verification if still pending.
+
 
