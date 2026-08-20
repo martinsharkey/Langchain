@@ -206,7 +206,7 @@ def _backtest_floors(df: pd.DataFrame, ind: dict, floors: dict, pt: float = 0.01
     stats = pf.stats()
     trades = pf.trades.records_readable
 
-    expectancy = float(stats.get("Win Rate [%]", 0)) / 100.0 * float(stats.get("Total Trades", 0))
+    expectancy = float(stats.get("Expectancy", 0))
     sharpe = float(stats.get("Sharpe Ratio", 0))
     max_dd = float(stats.get("Max Drawdown [%]", 100))
 
@@ -484,12 +484,13 @@ def _promote_to_tuned_params(symbol: str, floors: dict) -> None:
     """Flatten per-session Optuna floors into the tuned_params.json schema
     (session_Asian / session_London / session_NewYork overrides)."""
     try:
-        from src.learning.param_optimizer import ParameterOptimizer, TUNED_PATH
+        from src.learning.param_optimizer import ParameterOptimizer, TUNED_PATH, qmmp_floors_to_live_params
         opt = ParameterOptimizer(registry=None, backtest_fn=lambda *a, **k: None)
         key = opt._key(symbol)
         entry = opt.tuned.get(key, {})
         params = dict(entry.get("params", {}))
-        for fk, fv in floors.items():
+        live_floors = qmmp_floors_to_live_params(floors)
+        for fk, fv in live_floors.items():
             if isinstance(fv, dict):
                 for sess, val in fv.items():
                     sess_key = f"session_{sess}"

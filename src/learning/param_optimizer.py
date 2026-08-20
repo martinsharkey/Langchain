@@ -170,6 +170,107 @@ def _clamp(v, lo, hi, kind):
     return int(round(v)) if kind is int else round(v, 2)
 
 
+def qmmp_floors_to_live_params(floors: dict) -> dict:
+    """Convert QMMP model.json floor names to the live tuned_params schema.
+
+    QMMP schema (model.json ``floors``):
+      - ``osma_mag``: per-session magnitude (e.g. ``{"Asian": 2.0, ...}``)
+      - ``ema_align``: per-session EMA alignment (e.g. ``{"Asian": 0.205, ...}``)
+      - ``bulls``: per-session+side (e.g. ``{"Asian_long": 0.7, "Asian_short": -1.5, ...}``)
+      - ``bears``: per-session+side (e.g. ``{"Asian_long": -1.8, ...}``)
+      - ``atr``: per-session (e.g. ``{"Asian": 1.4, ...}``)
+
+    Live schema (what ``confluence_signal`` reads):
+      - ``osma_min_long`` / ``osma_max_short``
+      - ``min_ema_slope``
+      - ``bulls_min_long`` / ``bulls_max_short``
+      - ``bears_min_long`` / ``bears_max_short``
+      - ``atr_min``
+      - ``session_{Session}``: dict of per-session overrides using the canonical keys above.
+    """
+    out: dict = {}
+
+    def _first_session_value(d: dict):
+        for v in d.values():
+            if isinstance(v, (int, float)) and v != 0:
+                return v
+        return 0.0
+
+    # osma_mag -> osma_min_long + osma_max_short (negative for short side)
+    osma_mag = floors.get("osma_mag", {})
+    if isinstance(osma_mag, dict) and osma_mag:
+        base_mag = _first_session_value(osma_mag)
+        if base_mag != 0:
+            out["osma_min_long"] = base_mag
+            out["osma_max_short"] = -base_mag
+        for sess, val in osma_mag.items():
+            if isinstance(val, (int, float)) and val != 0:
+                out.setdefault(f"session_{sess}", {})
+                out[f"session_{sess}"]["osma_min_long"] = val
+                out[f"session_{sess}"]["osma_max_short"] = -val
+    elif isinstance(osma_mag, (int, float)) and osma_mag != 0:
+        out["osma_min_long"] = osma_mag
+        out["osma_max_short"] = -osma_mag
+
+    # ema_align -> min_ema_slope
+    ema_align = floors.get("ema_align", {})
+    if isinstance(ema_align, dict) and ema_align:
+        base_val = _first_session_value(ema_align)
+        if base_val != 0:
+            out["min_ema_slope"] = base_val
+        for sess, val in ema_align.items():
+            if isinstance(val, (int, float)) and val != 0:
+                out.setdefault(f"session_{sess}", {})
+                out[f"session_{sess}"]["min_ema_slope"] = val
+    elif isinstance(ema_align, (int, float)) and ema_align != 0:
+        out["min_ema_slope"] = ema_align
+
+    # bulls -> bulls_min_long / bulls_max_short
+    bulls = floors.get("bulls", {})
+    if isinstance(bulls, dict) and bulls:
+        for sess in ("Asian", "London", "NewYork", "Off"):
+            long_val = bulls.get(f"{sess}_long")
+            short_val = bulls.get(f"{sess}_short")
+            if isinstance(long_val, (int, float)) and long_val != 0:
+                out.setdefault("bulls_min_long", long_val)
+                out.setdefault(f"session_{sess}", {})
+                out[f"session_{sess}"]["bulls_min_long"] = long_val
+            if isinstance(short_val, (int, float)) and short_val != 0:
+                out.setdefault("bulls_max_short", short_val)
+                out.setdefault(f"session_{sess}", {})
+                out[f"session_{sess}"]["bulls_max_short"] = short_val
+
+    # bears -> bears_min_long / bears_max_short
+    bears = floors.get("bears", {})
+    if isinstance(bears, dict) and bears:
+        for sess in ("Asian", "London", "NewYork", "Off"):
+            long_val = bears.get(f"{sess}_long")
+            short_val = bears.get(f"{sess}_short")
+            if isinstance(long_val, (int, float)) and long_val != 0:
+                out.setdefault("bears_min_long", long_val)
+                out.setdefault(f"session_{sess}", {})
+                out[f"session_{sess}"]["bears_min_long"] = long_val
+            if isinstance(short_val, (int, float)) and short_val != 0:
+                out.setdefault("bears_max_short", short_val)
+                out.setdefault(f"session_{sess}", {})
+                out[f"session_{sess}"]["bears_max_short"] = short_val
+
+    # atr -> atr_min
+    atr = floors.get("atr", {})
+    if isinstance(atr, dict) and atr:
+        base_val = _first_session_value(atr)
+        if base_val != 0:
+            out["atr_min"] = base_val
+        for sess, val in atr.items():
+            if isinstance(val, (int, float)) and val != 0:
+                out.setdefault(f"session_{sess}", {})
+                out[f"session_{sess}"]["atr_min"] = val
+    elif isinstance(atr, (int, float)) and atr != 0:
+        out["atr_min"] = atr
+
+    return out
+
+
 class ParameterOptimizer:
     def __init__(self, registry, backtest_fn, mql5_knowledge=None,
                  is_failed_fn=None, config_fingerprint_fn=None):
@@ -286,12 +387,12 @@ class ParameterOptimizer:
                 if "fast" in p: p["osma_fast"] = p.pop("fast")
                 if "slow" in p: p["osma_slow"] = p.pop("slow")
                 if "signal" in p: p["osma_signal"] = p.pop("signal")
+                qmmp_floors = {}
                 for fk in ("osma_mag", "ema_align", "bulls", "bears", "atr"):
                     v = model.get("floors", {}).get(fk)
-                    if isinstance(v, dict):
-                        p[fk] = v
-                    elif isinstance(v, (int, float)) and v != 0:
-                        p[fk] = v
+                    if v is not None:
+                        qmmp_floors[fk] = v
+                p.update(qmmp_floors_to_live_params(qmmp_floors))
                 ex = model.get("exit", {})
                 p["tp_rr"] = 2.0
                 p["early_frac"] = float(ex.get("early", 0.15))

@@ -121,9 +121,10 @@ def test_gold_proven_edge_baseline_is_the_starting_point():
     assert p["osma_min_long"] > 0, p          # non-zero strength floor (edge, not sign-only)
     assert p["bulls_min_long"] > 0, p
     assert p["osma_max_short"] < 0, p         # short floor is negative
-    # BTCUSD is onboarded on H1 (QMMP): M1-scale strength floors do NOT transfer to H1,
-    # so its baseline uses the BARE OsMA cross (floors zeroed, min_confluence=1). This is
-    # symbol-specific by design (R5) and independently derived, NOT borrowed from gold.
-    assert o.current_params("BTCUSD")["osma_min_long"] == SYMBOL_BASELINES["BTCUSD"]["osma_min_long"]
+    # BTCUSD is onboarded on H1 (QMMP): when a model.json exists, its QMMP floors are
+    # mapped to live confluence keys and override the zeroed baseline. This is correct:
+    # the model.json was produced on H1, so its floors ARE H1-scale.
+    btc = o.current_params("BTCUSD")
+    assert btc["osma_min_long"] == pytest.approx(17.971, abs=0.01), btc
+    assert btc["min_confluence"] == SYMBOL_BASELINES["BTCUSD"]["min_confluence"]
     assert SYMBOL_BASELINES["BTCUSD"]["osma_min_long"] != SYMBOL_BASELINES["XAUUSD"]["osma_min_long"]
-    assert o.current_params("BTCUSD")["min_confluence"] == SYMBOL_BASELINES["BTCUSD"]["min_confluence"]
