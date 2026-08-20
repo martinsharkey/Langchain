@@ -106,7 +106,8 @@ class ChangeValidator:
                   f"score {score:.2f} <= best-ever {best:.2f}+{self.margin}")
         out = {"passed": passed, "score": round(score, 3), "forward_pf": round(forward_pf, 2),
                "generalizes": generalizes, "best_ever": round(best, 3),
-               "n_total": res.get("n_total"), "reason": reason}
+               "n_total": res.get("n_total"), "reason": reason,
+               "session_scores": res.get("session_scores")}
         if passed:
             self._best[sym] = {"score": round(score, 3), "source": source,
                                "at": datetime.now(timezone.utc).isoformat(),

@@ -23,6 +23,7 @@ from datetime import datetime
 from typing import Optional, Callable
 
 from src.strategies.indicators import compute_indicator_series
+from src.strategies.sessions import session_of
 from src.utils.logger import get_logger
 
 logger = get_logger("backtester")
@@ -193,16 +194,65 @@ class Backtester:
             return tot, (round(w / tot * 100, 1) if tot else 0), pf, round(gw - gl, 1)
 
         pfs = []; wrs = []; n_total = 0
+        session_scores = {
+            s: {"trades": 0, "wins": 0, "losses": 0, "gross_win_r": 0.0, "gross_loss_r": 0.0}
+            for s in ("Asian", "London", "NewYork", "Off")
+        }
+
+        def _sim(lo, hi):
+            w = l = 0; gw = gl = 0.0; ot = None
+            for i in range(lo, hi):
+                ind = series[i]
+                if not ind or not ind.get("close"):
+                    continue
+                price = ind["close"]; atr = ind.get("atr") or 0
+                if atr <= 0:
+                    continue
+                if ot:
+                    r = _resolve_open(ot, i, price, giveback)
+                    if r is not None:
+                        try:
+                            ts = rates[i]["timestamp"]
+                            hour = datetime.fromtimestamp(int(ts)).hour
+                            sess = session_of(hour)
+                        except Exception:
+                            sess = "Off"
+                        if r > 0:
+                            w += 1; gw += r
+                            session_scores[sess]["wins"] += 1
+                            session_scores[sess]["gross_win_r"] += r
+                        else:
+                            l += 1; gl += abs(r)
+                            session_scores[sess]["losses"] += 1
+                            session_scores[sess]["gross_loss_r"] += abs(r)
+                        session_scores[sess]["trades"] += 1
+                        ot = None
+                if ot:
+                    continue
+
         for k in range(windows):
             lo = warmup + k * seg; hi = warmup + (k + 1) * seg if k < windows - 1 else n
             tot, wr, pf, R = _sim(lo, hi)
             if tot < 15:      # too few trades in a window -> unreliable
+                for s, d in session_scores.items():
+                    if d["gross_loss_r"] > 0:
+                        d["pf"] = round(d["gross_win_r"] / d["gross_loss_r"], 2)
+                    else:
+                        d["pf"] = round(d["gross_win_r"], 2) if d["gross_win_r"] else 0.0
+                    d["wr"] = round(d["wins"] / d["trades"] * 100, 1) if d["trades"] else 0.0
                 return {"pfs": pfs, "wrs": wrs, "n_total": n_total,
-                        "generalizes": False, "score": -1.0}
+                        "generalizes": False, "score": -1.0, "session_scores": session_scores}
             pfs.append(pf); wrs.append(wr); n_total += tot
         generalizes = all(p >= 1.0 for p in pfs)
+        for s, d in session_scores.items():
+            if d["gross_loss_r"] > 0:
+                d["pf"] = round(d["gross_win_r"] / d["gross_loss_r"], 2)
+            else:
+                d["pf"] = round(d["gross_win_r"], 2) if d["gross_win_r"] else 0.0
+            d["wr"] = round(d["wins"] / d["trades"] * 100, 1) if d["trades"] else 0.0
         return {"pfs": pfs, "wrs": wrs, "n_total": n_total,
-                "generalizes": generalizes, "score": min(pfs) if pfs else -1.0}
+                "generalizes": generalizes, "score": min(pfs) if pfs else -1.0,
+                "session_scores": session_scores}
 
     def _load_history(self, symbol: str, timeframe: str, bars: int) -> list[dict]:
         # MT5 copy_rates_from_pos caps around ~ tens of thousands; request in one call.

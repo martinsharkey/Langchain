@@ -187,14 +187,28 @@ class OptunaLiveBridge:
         if not validation.get("passed"):
             summary["reason"] = f"validation failed: {validation.get('reason')}"
             logger.warning(f"[OPTUNA] {symbol}: {summary['reason']}")
+            session_scores = validation.get("session_scores") or {}
+            if session_scores:
+                session_parts = []
+                for sess, d in session_scores.items():
+                    if d.get("trades", 0) > 0:
+                        session_parts.append(f"{sess}:PF={d.get('pf', 0):.2f} WR={d.get('wr', 0):.1f}% n={d.get('trades', 0)}")
+                if session_parts:
+                    logger.warning(f"[OPTUNA] {symbol}: per-session breakdown — {'; '.join(session_parts)}")
             if self.learning_log is not None:
                 try:
+                    metric = (f"score={validation.get('score')} fwdPF={validation.get('forward_pf')} "
+                              f"n={validation.get('n_total')}")
+                    if session_scores:
+                        metric += " | " + "; ".join(
+                            f"{s}={d.get('pf', 0):.2f}" for s, d in session_scores.items() if d.get("trades", 0) > 0
+                        )
                     self.learning_log.record(
                         kind="OPTUNA",
                         symbol=symbol,
                         what="proposed params rejected by best-ever gate",
                         why=validation.get("reason", ""),
-                        metric=f"score={validation.get('score')} fwdPF={validation.get('forward_pf')}",
+                        metric=metric,
                     )
                 except Exception:
                     pass
