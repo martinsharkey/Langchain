@@ -8,7 +8,7 @@ ML. Owner contact: Dan Cooke. Bucket: `s3://crypto-rti-prod-us-east-1` (us-east-
 
 ## 0. SECURITY (do this — non-negotiable)
 
-- The AWS keys (`AKIA537WLRYPCFXW5SQJ`) and mTLS certs were shared in chat and are
+- The AWS keys (`AKIA...[REDACTED-ROTATE]`) and mTLS certs were shared in chat and are
   therefore **compromised**. **Rotate the AWS key and re-issue the client cert**
   after this work. Ask Danny to revoke the current client cert and issue a fresh one.
 - Certs live in `langchain/cryptorti/certs/` and are **git-ignored** (see `.gitignore`).

@@ -696,6 +696,5 @@ Implement Phase 1 (snapshot service) and Phase 2 (test isolation) of the safe-re
 ### Next
 - Monitor ~18:52 adaptive cycle for `[OPTIMIZER]` / `[VALIDATE]` log entries.
 - Review and resolve GitHub issues #118–#120 (negative expectancy on XAUUSD/GER40/BTCUSD).
-- Close out `test_refresh.py` verification if still pending.
 
 

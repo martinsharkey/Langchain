@@ -35,7 +35,7 @@
 - [x] app.py auto-starts the signal feed (best-effort); certs git-ignored
 
 ## SECURITY — action required
-- [ ] ROTATE the AWS key (AKIA537WLRYPCFXW5SQJ) — exposed in chat
+- [ ] ROTATE the AWS key (`AKIA...[REDACTED-ROTATE]`) — exposed in chat
 - [ ] Ask Danny to reissue the client cert — exposed in chat
 
 ## Trade behaviour + per-symbol intelligence — completed
@@ -74,7 +74,6 @@
 - [ ] Backtest also across multiple timeframes / larger combos in the adaptive search
 
 ## Known follow-ups / tech debt
-- [ ] Legacy `src/main.py` multi-agent loop is superseded by `src/trading/scalp_engine.py`;
-      decide whether to retire it.
+- [x] Legacy `src/main.py` multi-agent loop — confirmed deleted; `scalp_engine.py` is the sole entrypoint.
 - [ ] Tune scalp SL/TP so gold trades don't close at breakeven too quickly.
-- [ ] `strategy_registry.update_weights_from_performance` dataclass-as-dict bug (Phase 2).
+- [x] `strategy_registry.update_weights_from_performance` — confirmed fixed; uses dict.get() safely.

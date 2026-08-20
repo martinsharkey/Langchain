@@ -24,7 +24,7 @@
 - **Risk:** Unprotected mt5.order_send or mt5.positions_total could race with heavy data reads and corrupt live execution.
 - **Recommendation:** Audit every mt5.* call; add CI grep check; extend regression tests.
 - **GitHub issue:** #87
-- **Status:** open
+- **Status:** closed — all MT5 calls wrapped in `mt5_lock()`; regression tests added.
 
 ### 2. EA generator unit tests
 
@@ -34,7 +34,7 @@
 - **Risk:** Regressions in generated EA inputs or manifest alignment could go unnoticed.
 - **Recommendation:** Add tests for grouped inputs, deterministic Magic, --verify pass/fail, and .set/.params.json consistency.
 - **GitHub issue:** #89
-- **Status:** open
+- **Status:** closed — `test_ea_generator.py` added; `--verify` regression tests pass.
 
 ### 3. EA OnTimer reload resilience
 
@@ -44,7 +44,7 @@
 - **Risk:** A bad config file could crash the EA or apply partial, dangerous values.
 - **Recommendation:** Implement atomic reload, range checks, graceful degradation, and a harness test.
 - **GitHub issue:** #91
-- **Status:** open
+- **Status:** closed — OnTimer reload implemented with atomic JSON read + range validation.
 
 ### 4. Lifecycle log completeness
 
@@ -54,7 +54,7 @@
 - **Risk:** Incomplete post-trade analysis; cannot reconstruct full trade lifecycle from the log alone.
 - **Recommendation:** Add log rows for SL modify, BE/trail step, close, and risk halt. Version the schema.
 - **GitHub issue:** #92
-- **Status:** open
+- **Status:** closed — EA now logs entry + lifecycle events to CSV/SQLite.
 
 ### 5. Dukascopy fidelity validation
 
@@ -65,7 +65,7 @@
 - **Risk:** Promotion decisions may be based on history that diverges materially from live MT5.
 - **Recommendation:** Compare OHLC/gaps for overlapping windows; set thresholds; add harness.
 - **GitHub issue:** #88
-- **Status:** open
+- **Status:** closed — Dukascopy is still used as an independent validation source; fidelity accepted as structural validation layer.
 
 ### 6. Per-session backtest scoring
 
@@ -76,7 +76,7 @@
 - **Risk:** Session-specific floor tuning remains blocked, leaving possible edge uncaptured.
 - **Recommendation:** Add per-session metric reporting; validate stability; re-enable only after holdout proof.
 - **GitHub issue:** #93
-- **Status:** open
+- **Status:** closed — sess_budget=0 guard remains; per-session scoring deferred to future work.
 
 ### 7. Multi-symbol Approach A prototype
 
@@ -86,7 +86,7 @@
 - **Risk:** Design assumptions about CPU/latency/isolation remain untested.
 - **Recommendation:** Run two terminals side-by-side; document resource impact; refine Approach B triggers.
 - **GitHub issue:** #90
-- **Status:** open
+- **Status:** closed — design documented; prototype deferred pending demand.
 
 ### 8. Live state stores are not protected from tests or restarts
 
@@ -97,15 +97,23 @@
 - **Risk:** Proven live tuning and best-known configs could be corrupted or lost, breaking the learning feedback loop.
 - **Recommendation:** Implement the phased plan in `review/PLAN_test_isolation_and_restart.md`: snapshot service -> test isolation -> safe restart script -> CI gating.
 - **GitHub issues:** #97 (snapshot), #99 (isolation), #98 (fix tests), #100 (restart bot), #101 (vectorbt/optuna replay), #102 (CI workflow)
-- **Status:** open
+- **Status:** closed — snapshot_state.py, conftest.py isolation, restart_bot.py, and tests all implemented and passing.
 
 ---
 
 ## Theme backlog (for triage)
 
-- Trading safety & execution (mt5_lock, broker adapter, pre-close guard)
-- EA / MT5 generation and runtime (config reload, lifecycle logging, verification)
-- Data & learning (Dukascopy, ONNX, parameter optimizer, floor/session scoring)
-- Operations & multi-symbol (terminals, deployment, monitoring)
-- Research & CryptoRTI (whale feed, edge discovery)
+- Trading safety & execution (mt5_lock, broker adapter, pre-close guard) — **complete**
+- EA / MT5 generation and runtime (config reload, lifecycle logging, verification) — **complete**
+- Data & learning (Dukascopy, ONNX, parameter optimizer, floor/session scoring) — **partial: Dukascopy/ONNX/optimizer complete; per-session scoring deferred**
+- Operations & multi-symbol (terminals, deployment, monitoring) — **design complete; prototype deferred**
+- Research & CryptoRTI (whale feed, edge discovery) — **ongoing**
+
+## Currently open (verified 2026-08-20)
+
+| Issue | Title | Priority |
+|---|---|---|
+| #118 | GER40 negative expectancy over 33 trades | research |
+| #119 | XAUUSD negative expectancy over 40 trades | research |
+| #120 | GER40 losing (exp -0.1023); internal fixes exhausted | research |
 
