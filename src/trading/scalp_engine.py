@@ -146,6 +146,20 @@ class ScalpEngine:
         self._edge_cache = {}
         self._symbol_profit_cache = {}
 
+        # Data acquisition layer: broker-agnostic, auto-refreshing, offline-first
+        self.data_manager = None
+        self.refresh_manager = None
+        try:
+            from src.data_acquisition import DataManager, DataSourceConfig, DataRefreshManager
+            self.data_manager = DataManager(DataSourceConfig(broker="vt_markets"))
+            self.refresh_manager = DataRefreshManager(
+                broker="vt_markets",
+                data_manager=self.data_manager,
+            )
+            logger.info("DataManager + DataRefreshManager initialized (offline-first)")
+        except Exception as e:
+            logger.warning(f"DataManager unavailable: {e}")
+
         # Self-learning parameter optimizer (autonomous indicator tuning)
         _duka_source = None
         try:
@@ -391,20 +405,6 @@ class ScalpEngine:
             self.param_optimizer.learning_log = self.learning_log
         if getattr(self, "change_validator", None) is not None:
             self.change_validator.learning_log = self.learning_log
-
-        # Data acquisition layer: broker-agnostic, auto-refreshing, offline-first
-        self.data_manager = None
-        self.refresh_manager = None
-        try:
-            from src.data_acquisition import DataManager, DataSourceConfig, DataRefreshManager
-            self.data_manager = DataManager(DataSourceConfig(broker="vt_markets"))
-            self.refresh_manager = DataRefreshManager(
-                broker="vt_markets",
-                data_manager=self.data_manager,
-            )
-            logger.info("DataManager + DataRefreshManager initialized (offline-first)")
-        except Exception as e:
-            logger.warning(f"DataManager unavailable: {e}")
 
         # #36: intelligent per-symbol ReAct fixer (applies post-mortem fixes LIVE,
         # escalates exit-fix -> retune -> strategy-switch -> research). Non-fatal.

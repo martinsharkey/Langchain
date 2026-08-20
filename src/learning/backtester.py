@@ -50,11 +50,14 @@ class BacktestResult:
 
 class Backtester:
     def __init__(self, registry, rates_fn: Optional[Callable] = None,
-                 ticks_fn: Optional[Callable] = None):
+                 ticks_fn: Optional[Callable] = None, data_manager=None,
+                 refresh_manager=None):
         """rates_fn/ticks_fn default to the live MT5 data layer. Inject alternatives
-        (e.g. src.data_sources.dukascopy.DukascopySource) to backtest the SAME engine
-        on a DIFFERENT data source — used for continuous per-symbol Dukascopy tuning.
-        Both must match src.mt5.data.get_rates / get_ticks signatures."""
+        (e.g. src.data_sources.dukascopy.DukascopySource, DataManager) to backtest
+        the SAME engine on a DIFFERENT data source.
+        Both must match src.mt5.data.get_rates / get_ticks signatures.
+        data_manager: optional DataManager instance for freshness checks.
+        refresh_manager: optional DataRefreshManager for auto-refresh."""
         self.registry = registry
         if rates_fn is None or ticks_fn is None:
             from src.mt5.data import get_rates as _gr, get_ticks as _gt
@@ -62,6 +65,8 @@ class Backtester:
             ticks_fn = ticks_fn or _gt
         self._get_rates = rates_fn
         self._get_ticks = ticks_fn
+        self.data_manager = data_manager
+        self.refresh_manager = refresh_manager
 
     def walkforward_focused(self, symbol, params, sl_atr=1.0, tp_rr=2.0,
                             giveback=0.55, arm=0.5, timeframe="M15",
@@ -75,6 +80,11 @@ class Backtester:
         """
         from src.strategies.indicators import compute_indicator_series
         from src.learning.edge_weights import focused_rules
+
+        # Auto-refresh: ensure data is fresh before backtesting
+        if self.refresh_manager is not None:
+            self.refresh_manager.ensure_fresh(symbol, timeframe)
+
         rates = self._get_rates(symbol, timeframe=timeframe, count=bars)
         if not rates or len(rates) < 2000:
             logger.warning(f"[BACKTEST] {symbol} {timeframe}: only {len(rates) if rates else 0} bars "

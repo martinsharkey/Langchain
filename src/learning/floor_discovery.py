@@ -174,13 +174,19 @@ class FloorDiscovery:
             "safety_tp_points": round(safety_tp, 1),
         }
 
-    def onboard(self, symbol: str, point: float = 0.01) -> Optional[dict]:
+    def onboard(self, symbol: str, point: float = 0.01, timeframe: str = "M1") -> Optional[dict]:
         """Backtest + forward-test the symbol's own history; return the best floor recipe.
         Split: first 70% = train (search), last 30% = forward-test (validate). Picks the
         floor combo with the best TRAIN score that also holds up in the FORWARD window and
-        keeps >= min_trades_per_day (never chokes, never zero)."""
+        keeps >= min_trades_per_day (never chokes, never zero).
+
+        Args:
+            symbol: base symbol (e.g. "XAUUSD")
+            point: tick size for SL/TP calculation
+            timeframe: bar timeframe to test (e.g. "M1", "M5", "M15", "H1")
+        """
         try:
-            rates = self._rates(symbol, timeframe="M1", count=self.bars)
+            rates = self._rates(symbol, timeframe=timeframe, count=self.bars)
         except Exception as e:
             logger.info(f"[ONBOARD] {symbol}: no rates ({e})"); return None
         if not rates or len(rates) < 5000:
