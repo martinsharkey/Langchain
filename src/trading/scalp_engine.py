@@ -156,7 +156,9 @@ class ScalpEngine:
         try:
             from src.learning.backtester import Backtester
             from src.learning.param_optimizer import ParameterOptimizer
-            _bt = Backtester(self.registry, rates_fn=_duka_source.get_rates if _duka_source else None)
+            _bt = Backtester(self.registry,
+                             rates_fn=_duka_source.get_rates if _duka_source else None,
+                             ticks_fn=_duka_source.get_ticks if _duka_source else None)
             self.param_optimizer = ParameterOptimizer(
                 self.registry,
                 lambda sym, params, sl_atr, tp_rr: _bt.walkforward_focused(
@@ -235,7 +237,9 @@ class ScalpEngine:
             from src.learning.edge_discovery import EdgeDiscovery
             from src.learning.backtester import Backtester
             self.edge_discovery = EdgeDiscovery(
-                self.registry, Backtester(self.registry, rates_fn=_duka_source.get_rates if _duka_source else None),
+                self.registry, Backtester(self.registry,
+                                          rates_fn=_duka_source.get_rates if _duka_source else None,
+                                          ticks_fn=_duka_source.get_ticks if _duka_source else None),
                 knowledge_store=self.knowledge_store)
         except Exception as e:
             logger.warning(f"EdgeDiscovery unavailable: {e}")
