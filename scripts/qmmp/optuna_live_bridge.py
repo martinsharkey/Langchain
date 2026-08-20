@@ -42,11 +42,14 @@ D = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath
 
 
 def _resolve_symbol(symbol: str) -> str:
-    try:
-        from scripts.qmmp.onboard_pipeline import _resolve_symbol as _rs
-        return _rs(symbol)
-    except Exception:
-        return symbol
+    """Resolve symbol to broker format WITHOUT touching MT5.
+
+    The live bot already has an active MT5 terminal session. Calling
+    mt5.initialize()/shutdown() from a daily-cycle background task can
+    disrupt live data feeds. This resolver uses a static approximation
+    (same logic as the study runner's allow_mt5=False path).
+    """
+    return symbol.upper().split("-")[0].rstrip(".")
 
 
 def _load_best_trial_from_study(symbol: str) -> Optional[dict]:
