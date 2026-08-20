@@ -347,6 +347,22 @@ class ScalpEngine:
             except Exception as e:
                 logger.debug(f"optimizer ReAct wiring skip: {e}")
 
+        # Optuna → live bridge: takes the best completed Optuna study floors for a
+        # symbol, translates them to the live tuned_params schema, validates them
+        # through ChangeValidator, and on pass writes directly to tuned[symbol].
+        # Runs once per UTC day per symbol (aggregate fallback — see module docstring).
+        self.optuna_bridge = None
+        try:
+            from scripts.qmmp.optuna_live_bridge import OptunaLiveBridge
+            self.optuna_bridge = OptunaLiveBridge(
+                param_optimizer=self.param_optimizer,
+                change_validator=self.change_validator,
+                learning_log=getattr(self, "learning_log", None),
+            )
+            self._optuna_last_run_day = None
+        except Exception as e:
+            logger.debug(f"OptunaLiveBridge unavailable: {e}")
+
         # #24: per-symbol graduation (edge -> size-up gate). Non-fatal.
         self.graduation = None
         try:
@@ -2802,6 +2818,30 @@ class ScalpEngine:
                                                 f"min-PF {r['score']} params {r['params']}")
                         except Exception as e:
                             logger.debug(f"optimizer {sym} skip: {e}")
+
+                # OPTUNA → LIVE BRIDGE (#76 follow-up): once per UTC day, read the
+                # best completed Optuna study for each symbol, translate floors to the
+                # live schema, validate through ChangeValidator, and apply if it beats
+                # the best-ever gate. Aggregate fallback — see optuna_live_bridge.py.
+                if self.optuna_bridge is not None:
+                    try:
+                        today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+                        if getattr(self, "_optuna_last_run_day", None) != today:
+                            self._optuna_last_run_day = today
+                            for base, adapter in self.adapters.items():
+                                sym = adapter.resolved_symbol
+                                try:
+                                    res = self.optuna_bridge.propose_and_apply(sym)
+                                    if res.get("applied"):
+                                        logger.info(f"[OPTUNA] {sym}: applied best Optuna floors "
+                                                    f"score={res['validation'].get('score')}")
+                                    elif res.get("proposed"):
+                                        logger.debug(f"[OPTUNA] {sym}: proposed but not applied — "
+                                                     f"{res.get('reason')}")
+                                except Exception as e:
+                                    logger.debug(f"optuna bridge {sym} skip: {e}")
+                    except Exception as e:
+                        logger.debug(f"optuna bridge skip: {e}")
 
                 # CONTINUAL RESEARCHER (#32): once-per-day ReAct pass that reviews
                 # per-symbol results, queries the mql5 RAG for better techniques,
