@@ -88,7 +88,7 @@ def get_rates(
     """
     connector = get_connector()
 
-    if not connector.is_connected():
+    if not connector.ensure_connected():
         raise ConnectionError("MT5 not connected. Cannot fetch rates.")
 
     def _fetch():
@@ -194,6 +194,10 @@ def get_ticks(symbol: str, from_epoch: float, to_epoch: float, max_ticks: int = 
     if not MT5_AVAILABLE:
         return None
 
+    connector = get_connector()
+    if not connector.ensure_connected():
+        return None
+
     def _fetch():
         try:
             import datetime as _dt
@@ -236,7 +240,7 @@ def get_last_price(symbol: str = "XAUUSD") -> Optional[dict]:
     """
     connector = get_connector()
     
-    if not connector.is_connected():
+    if not connector.ensure_connected():
         raise ConnectionError("MT5 not connected. Cannot fetch price.")
     
     # Try silicon-metatrader5 Docker bridge first (macOS)

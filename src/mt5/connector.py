@@ -25,7 +25,7 @@ import threading
 from typing import Optional, Callable, Any
 from functools import wraps
 
-from src.config import MT5_ACCOUNT, MT5_PASSWORD, MT5_SERVER
+from src.config import MT5_ACCOUNT, MT5_PASSWORD, MT5_SERVER, MT5_PATH
 from src.utils.logger import get_logger
 
 logger = get_logger("mt5")
@@ -391,12 +391,18 @@ _result = _init_result
         for attempt in range(1, retries + 1):
             logger.info(f"Connecting to MT5 natively (attempt {attempt}/{retries})...")
             
-            # Initialize MT5 connection
-            initialized = mt5.initialize(
-                login=MT5_ACCOUNT if MT5_ACCOUNT > 0 else None,
-                password=MT5_PASSWORD if MT5_PASSWORD else None,
-                server=MT5_SERVER if MT5_SERVER else None,
-            )
+            # Build initialize kwargs. If MT5_PATH is set, pass it as the first
+            # positional arg so we attach to the intended terminal instead of
+            # whichever terminal MT5 finds first.
+            init_kwargs = {
+                "login": MT5_ACCOUNT if MT5_ACCOUNT > 0 else None,
+                "password": MT5_PASSWORD if MT5_PASSWORD else None,
+                "server": MT5_SERVER if MT5_SERVER else None,
+            }
+            if MT5_PATH:
+                init_kwargs["path"] = MT5_PATH
+            
+            initialized = mt5.initialize(**init_kwargs)
             
             if initialized:
                 self._connected = True
@@ -444,6 +450,20 @@ _result = _init_result
                 return False
 
         return self._connected
+    
+    def ensure_connected(self) -> bool:
+        """Ensure MT5 is connected; reconnect if the connection dropped."""
+        if self.is_connected():
+            return True
+        logger.warning("MT5 connection lost — attempting reconnect...")
+        self._connected = False
+        try:
+            if self._connect_native(retries=3, delay=2):
+                logger.info("MT5 reconnect successful")
+                return True
+        except Exception as e:
+            logger.warning(f"MT5 reconnect failed: {e}")
+        return False
     
     @property
     def bridge_available(self) -> bool:
