@@ -490,15 +490,11 @@ def _promote_to_tuned_params(symbol: str, floors: dict) -> None:
         entry = opt.tuned.get(key, {})
         params = dict(entry.get("params", {}))
         live_floors = qmmp_floors_to_live_params(floors)
-        for fk, fv in live_floors.items():
-            if isinstance(fv, dict):
-                for sess, val in fv.items():
-                    sess_key = f"session_{sess}"
-                    if sess_key not in params:
-                        params[sess_key] = {}
-                    params[sess_key][fk] = val
-            elif isinstance(fv, (int, float)) and fv != 0:
-                params[fk] = fv
+        for k, v in live_floors.items():
+            if k.startswith("session_") and isinstance(v, dict):
+                params.setdefault(k, {}).update(v)
+            elif isinstance(v, (int, float)) and v != 0:
+                params[k] = v
         entry["params"] = params
         opt.tuned[key] = entry
         opt._persist()

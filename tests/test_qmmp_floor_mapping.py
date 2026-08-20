@@ -123,3 +123,25 @@ class TestQMMPFloorsToLiveParams:
         out = qmmp_floors_to_live_params(floors)
         assert out["osma_min_long"] == 2.5
         assert out["osma_max_short"] == -2.5
+
+    def test_promote_merge_session_dicts(self):
+        """Simulate _promote_to_tuned_params merge: session_* dicts must merge
+        directly, not be re-nested."""
+        live_floors = qmmp_floors_to_live_params({
+            "osma_mag": {"Asian": 2.0, "London": 3.0},
+            "bulls": {"Asian_long": 0.7, "London_short": -1.5},
+        })
+        params = {}
+        for k, v in live_floors.items():
+            if k.startswith("session_") and isinstance(v, dict):
+                params.setdefault(k, {}).update(v)
+            elif isinstance(v, (int, float)) and v != 0:
+                params[k] = v
+
+        assert params["osma_min_long"] == 2.0
+        assert params["osma_max_short"] == -2.0
+        assert params["session_Asian"]["osma_min_long"] == 2.0
+        assert params["session_Asian"]["bulls_min_long"] == 0.7
+        assert params["session_London"]["osma_min_long"] == 3.0
+        assert params["session_London"]["bulls_max_short"] == -1.5
+        assert "session_osma_min_long" not in params
