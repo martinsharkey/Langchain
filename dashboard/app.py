@@ -534,6 +534,128 @@ def api_cryptorti():
         return jsonify({"connected": False, "error": str(e), "signals": []})
 
 
+# ─────────────────────────── pipeline APIs ─────────────────────
+@app.route("/api/pipeline/status")
+def api_pipeline_status():
+    """Autonomous learning pipeline overview: Optuna, optimizer, bridge, data freshness."""
+    status = _read_status() or {}
+    symbols = status.get("symbols", []) or status.get("open_positions", [])
+    sym_names = []
+    for s in symbols:
+        if isinstance(s, dict):
+            sym_names.append(s.get("base") or s.get("symbol", ""))
+        else:
+            sym_names.append(str(s))
+    if not sym_names:
+        sym_names = [s.get("symbol", "") for s in _query(EXPERIENCE_DB,
+            "SELECT DISTINCT symbol FROM trades ORDER BY symbol LIMIT 10")]
+
+    # tuned params snapshot
+    tuned_path = os.path.join(DATA_DIR, "tuned_params.json")
+    tuned = {}
+    if os.path.exists(tuned_path):
+        try:
+            with open(tuned_path) as f:
+                tuned = json.load(f)
+        except Exception:
+            pass
+
+    # Optuna study status per symbol
+    optuna_status = {}
+    for sym in sym_names:
+        sym_dir = os.path.join(DATA_DIR, "qmmp", sym, "optuna")
+        db_path = os.path.join(sym_dir, "study.db")
+        if not os.path.exists(db_path):
+            optuna_status[sym] = {"status": "no_study", "path": db_path}
+            continue
+        try:
+            import optuna
+            study = optuna.load_study(study_name=f"floors_{sym}",
+                                      storage=f"sqlite:///{db_path}")
+            best = study.best_trial
+            optuna_status[sym] = {
+                "status": "ready",
+                "n_trials": len(study.trials),
+                "best_value": best.value if best else None,
+                "best_params": best.params if best else None,
+                "completed_at": best.datetime_complete.isoformat() if best and best.datetime_complete else None,
+            }
+        except Exception as e:
+            optuna_status[sym] = {"status": "error", "error": str(e)[:120], "path": db_path}
+
+    # learning log recent entries
+    learning_log_path = os.path.join(DATA_DIR, "LEARNING_LOG.md")
+    recent_learning = []
+    if os.path.exists(learning_log_path):
+        try:
+            with open(learning_log_path, encoding="utf-8") as f:
+                lines = f.readlines()
+            for line in lines[:20]:
+                line = line.strip()
+                if line.startswith("- **"):
+                    recent_learning.append(line)
+        except Exception:
+            pass
+
+    return jsonify({
+        "engine_running": status.get("running", False),
+        "mode": status.get("mode"),
+        "symbols": sym_names,
+        "tuned_symbols": list(tuned.keys()),
+        "optuna": optuna_status,
+        "recent_learning": recent_learning[:10],
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+    })
+
+
+@app.route("/api/pipeline/optimizer")
+def api_pipeline_optimizer():
+    """ParameterOptimizer state: tuned params, recent improvements, attribution."""
+    tuned_path = os.path.join(DATA_DIR, "tuned_params.json")
+    tuned = {}
+    if os.path.exists(tuned_path):
+        try:
+            with open(tuned_path) as f:
+                tuned = json.load(f)
+        except Exception:
+            pass
+
+    # compact tuned view (drop large nested session dicts for overview)
+    compact = {}
+    for key, entry in tuned.items():
+        params = entry.get("params", {})
+        compact[key] = {
+            "score": entry.get("score"),
+            "source": entry.get("source"),
+            "updated_at": entry.get("updated_at"),
+            "forward_pf": entry.get("forward_pf"),
+            "params": {k: v for k, v in params.items()
+                       if not k.startswith("session_") and not isinstance(v, dict)},
+        }
+        sessions = {k: v for k, v in params.items() if k.startswith("session_")}
+        if sessions:
+            compact[key]["session_overrides"] = sessions
+
+    return jsonify({"tuned": compact, "count": len(compact)})
+
+
+@app.route("/api/pipeline/bridge")
+def api_pipeline_bridge():
+    """Optuna bridge apply history from LEARNING_LOG.md."""
+    learning_log_path = os.path.join(DATA_DIR, "LEARNING_LOG.md")
+    entries = []
+    if os.path.exists(learning_log_path):
+        try:
+            with open(learning_log_path, encoding="utf-8") as f:
+                for line in f:
+                    line = line.strip()
+                    if "[OPTUNA]" in line or "[VALIDATE]" in line or "[OPTIMIZER]" in line:
+                        entries.append(line)
+        except Exception:
+            pass
+    return jsonify({"recent": entries[:20], "count": len(entries)})
+
+
 @app.route("/")
 def index():
     tpl = os.path.join(os.path.dirname(__file__), "templates", "dashboard.html")

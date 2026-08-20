@@ -3014,6 +3014,8 @@ class ScalpEngine:
                             self._optuna_study_run_day = today
                             if not hasattr(self, "_optuna_study_threads"):
                                 self._optuna_study_threads = {}
+                            if not hasattr(self, "_optuna_study_completed"):
+                                self._optuna_study_completed = set()
                             for base, adapter in self.adapters.items():
                                 sym = adapter.resolved_symbol
                                 self._refresh_data_if_needed(base, "M15")
@@ -3036,31 +3038,48 @@ class ScalpEngine:
                                     logger.info(f"[OPTUNA] daily study thread STARTED for {sym}")
                                 except Exception as e:
                                     logger.debug(f"optuna study thread {sym} skip: {e}")
+                        # Mark any finished study threads as completed
+                        for sym, t in list(getattr(self, "_optuna_study_threads", {}).items()):
+                            if t is not None and not t.is_alive():
+                                self._optuna_study_completed.add(sym)
                     except Exception as e:
                         logger.debug(f"optuna study runner skip: {e}")
 
-                # OPTUNA → LIVE BRIDGE (#76 follow-up): once per UTC day, read the
+                # OPTUNA → LIVE BRIDGE (#76 follow-up): once per UTC day per symbol, read the
                 # best completed Optuna study for each symbol, translate floors to the
                 # live schema, validate through ChangeValidator, and apply if it beats
                 # the best-ever gate. Aggregate fallback — see optuna_live_bridge.py.
+                # Bridge waits for the study thread to complete to avoid applying stale
+                # or missing studies (same-day ordering race fix).
                 if self.optuna_bridge is not None:
                     try:
                         today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
                         if getattr(self, "_optuna_last_run_day", None) != today:
                             self._optuna_last_run_day = today
-                            for base, adapter in self.adapters.items():
-                                sym = adapter.resolved_symbol
+                        for base, adapter in self.adapters.items():
+                            sym = adapter.resolved_symbol
+                            # Skip if study is still running for this symbol today
+                            t = getattr(self, "_optuna_study_threads", {}).get(sym)
+                            if t is not None and t.is_alive():
+                                logger.debug(f"[OPTUNA] bridge {sym}: study still running, will retry next cycle")
+                                continue
+                            # Skip if already applied today
+                            applied_today = getattr(self, "_optuna_applied_today", set())
+                            if sym in applied_today:
+                                continue
+                            try:
                                 self._refresh_data_if_needed(base, "M15")
-                                try:
-                                    res = self.optuna_bridge.propose_and_apply(sym)
-                                    if res.get("applied"):
-                                        logger.info(f"[OPTUNA] {sym}: applied best Optuna floors "
-                                                    f"score={res['validation'].get('score')}")
-                                    elif res.get("proposed"):
-                                        logger.debug(f"[OPTUNA] {sym}: proposed but not applied — "
-                                                     f"{res.get('reason')}")
-                                except Exception as e:
-                                    logger.debug(f"optuna bridge {sym} skip: {e}")
+                                res = self.optuna_bridge.propose_and_apply(sym)
+                                if res.get("applied"):
+                                    logger.info(f"[OPTUNA] {sym}: applied best Optuna floors "
+                                                f"score={res['validation'].get('score')}")
+                                    applied_today.add(sym)
+                                elif res.get("proposed"):
+                                    logger.debug(f"[OPTUNA] {sym}: proposed but not applied — "
+                                                 f"{res.get('reason')}")
+                                    applied_today.add(sym)
+                            except Exception as e:
+                                logger.debug(f"optuna bridge {sym} skip: {e}")
                     except Exception as e:
                         logger.debug(f"optuna bridge skip: {e}")
 
