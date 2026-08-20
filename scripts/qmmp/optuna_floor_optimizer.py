@@ -433,11 +433,22 @@ def _try_promote(symbol: str, trial_path: str) -> dict:
     cur_held = current_model.get("validation", {}).get("held_out_metrics", {})
     cur_wr = float(cur_held.get("win_rate", 0) or 0)
     cur_trades = int(cur_held.get("total_trades", 0) or 0)
+    cur_exp = float(cur_held.get("expectancy", 0) or 0)
     new_wr = float(held.get("win_rate", 0) or 0)
     new_trades = int(held.get("total_trades", 0) or 0)
+    new_exp = float(held.get("expectancy", 0) or 0)
 
-    if new_trades < 10 or (cur_trades >= 10 and new_wr <= cur_wr):
-        return {"promoted": False, "reason": f"held-out WR {new_wr:.1f}% (n={new_trades}) does not beat baseline {cur_wr:.1f}% (n={cur_trades})"}
+    if new_trades < 10:
+        return {"promoted": False, "reason": f"held-out n={new_trades} < 10"}
+
+    if cur_trades >= 10:
+        if new_wr <= cur_wr:
+            return {"promoted": False, "reason": f"held-out WR {new_wr:.1f}% <= baseline {cur_wr:.1f}%"}
+        if new_exp <= cur_exp:
+            return {"promoted": False, "reason": f"held-out expectancy {new_exp:.3f} <= baseline {cur_exp:.3f}"}
+    else:
+        if new_wr < 50.0:
+            return {"promoted": False, "reason": f"held-out WR {new_wr:.1f}% < 50% (no baseline)"}
 
     new_floors = result.get("floors", {})
     if not new_floors:
