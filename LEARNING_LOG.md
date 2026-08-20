@@ -3,6 +3,21 @@
 > Auto-generated digest of what the self-learning loop changed and why.
 > Most-recent-first. Reporting only — never gates a live decision (#45.1).
 
+- **2026-08-20 17:39** [EXIT-LOCK] `BTCUSD` exit set sl_atr 1.93 tp_rr 0.89 -- why: robust -- metric: recent expectancy 0.418 (n=30)
+- **2026-08-20 17:23** [EXIT-LOCK] `BTCUSD` exit set sl_atr 1.86 tp_rr 0.77 -- why: excursion -- metric: recent expectancy 0.418 (n=30)
+- **2026-08-20 17:23** [EXIT-LOCK] `BTCUSD` exit set sl_atr 1.86 tp_rr 0.77 -- why: excursion -- metric: recent expectancy 0.418 (n=30)
+- **2026-08-20 17:22** [OPTIMIZER] `GER40.` tried 31 candidates, best score 1.11 -- why: no improvement -- metric: min-PF 1.11, tried 31
+- **2026-08-20 17:21** [OPTIMIZER] `GER40.` tried 31 candidates, best score 1.11 -- why: no improvement -- metric: min-PF 1.11, tried 31
+- **2026-08-20 17:19** [OPTIMIZER] `GER40.` tried 0 candidates, best score 1.11 -- why: optimization started -- metric: base generalizes=True, n_total=2192
+- **2026-08-20 17:19** [OPTIMIZER] `GER40.` tried 0 candidates, best score 1.11 -- why: optimization started -- metric: base generalizes=True, n_total=2192
+- **2026-08-20 17:19** [OPTIMIZER] `BTCUSD` tried 31 candidates, best score -1.00 -- why: no improvement -- metric: min-PF -1.00, tried 31
+- **2026-08-20 17:18** [OPTIMIZER] `BTCUSD` tried 31 candidates, best score -1.00 -- why: no improvement -- metric: min-PF -1.00, tried 31
+- **2026-08-20 17:14** [OPTIMIZER] `BTCUSD` tried 0 candidates, best score -1.00 -- why: optimization started -- metric: base generalizes=False, n_total=2770
+- **2026-08-20 17:14** [OPTIMIZER] `XAUUSD-ECN` tried 0 candidates, best score -1.00 -- why: no baseline data -- metric: backtest returned None
+- **2026-08-20 17:14** [OPTIMIZER] `BTCUSD` tried 0 candidates, best score -1.00 -- why: optimization started -- metric: base generalizes=False, n_total=2770
+- **2026-08-20 17:14** [OPTIMIZER] `XAUUSD-ECN` tried 0 candidates, best score -1.00 -- why: no baseline data -- metric: backtest returned None
+- **2026-08-20 17:13** [VALIDATE] `BTCUSD` PASS score 1.75 fwdPF 1.75 -- why: beats best-ever -- metric: trades=254
+- **2026-08-20 17:12** [EXIT-LOCK] `BTCUSD` exit set sl_atr 1.94 tp_rr 0.9 -- why: robust -- metric: recent expectancy 0.0 (n=0)
 - **2026-08-20 17:04** [EXIT-LOCK] `BTCUSD` exit set sl_atr 1.88 tp_rr 0.8 -- why: excursion -- metric: recent expectancy 0.418 (n=30)
 - **2026-08-20 17:04** [VALIDATE] `GER40.` PASS score 1.46 fwdPF 1.46 -- why: beats best-ever -- metric: trades=732
 - **2026-08-20 17:04** [OPTIMIZER] `GER40.` tried 31 candidates, best score 1.11 -- why: IMPROVED -- metric: min-PF 1.11, tried 31

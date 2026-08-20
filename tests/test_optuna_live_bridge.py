@@ -211,6 +211,58 @@ class TestOptunaLiveBridge:
         assert result["applied"] is True
         assert mock_po.apply_tuned.called
 
+    def test_bridge_apply_merges_floors_into_existing_params(self):
+        """Bridge apply_tuned must merge floor-only proposed params into existing tuned params,
+        not replace the full params dict. This preserves exits/periods/BE/pyramid keys."""
+        from src.learning.param_optimizer import ParameterOptimizer
+        po = ParameterOptimizer(registry=None, backtest_fn=lambda *a, **k: None)
+        key = po._key("XAUUSD")
+        existing = {
+            "params": {
+                "osma_min_long": 1.0,
+                "sl_atr": 1.5,
+                "tp_rr": 2.0,
+                "hard_sl_points": 138.0,
+                "trail_points": 23.0,
+                "be_trigger_pts": 23.0,
+                "early_frac": 0.15,
+                "max_legs": 4,
+                "add_points": 23.0,
+                "gbp_per_001": 50.0,
+                "lot_cap_per_account": 100,
+                "ema_period": 13,
+                "atr_period": 14,
+                "rsi_period": 14,
+                "min_confluence": 3,
+                "session_Asian": {"osma_min_long": 1.5},
+            },
+            "score": 1.2,
+            "source": "param_optimizer",
+        }
+        po.tuned[key] = existing
+        proposed = {
+            "osma_min_long": 2.0,
+            "session_Asian": {"osma_min_long": 2.5},
+        }
+        entry = po.apply_tuned("XAUUSD", proposed, score=1.3, forward_pf=1.1, source="optuna")
+        merged = entry["params"]
+        assert merged["osma_min_long"] == 2.0
+        assert merged["sl_atr"] == 1.5
+        assert merged["tp_rr"] == 2.0
+        assert merged["hard_sl_points"] == 138.0
+        assert merged["trail_points"] == 23.0
+        assert merged["be_trigger_pts"] == 23.0
+        assert merged["early_frac"] == 0.15
+        assert merged["max_legs"] == 4
+        assert merged["add_points"] == 23.0
+        assert merged["gbp_per_001"] == 50.0
+        assert merged["lot_cap_per_account"] == 100
+        assert merged["ema_period"] == 13
+        assert merged["atr_period"] == 14
+        assert merged["rsi_period"] == 14
+        assert merged["min_confluence"] == 3
+        assert merged["session_Asian"]["osma_min_long"] == 2.5
+
     def test_no_validator_skips(self):
         bridge = self._make_bridge(
             change_validator=None,

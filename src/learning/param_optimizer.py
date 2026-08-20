@@ -318,10 +318,22 @@ class ParameterOptimizer:
                     **extra) -> dict:
         """Single writer for tuned params. Both optimize() and external bridges
         (e.g. OptunaLiveBridge) MUST use this to ensure consistent dict shape
-        and atomic persist."""
+        and atomic persist.
+
+        Params are MERGED into the existing entry, not replaced. Scalar keys
+        overlay directly; `session_*` dicts are deep-merged so per-session
+        floors do not wipe unrelated keys (exits, periods, etc.).
+        """
         key = self._key(symbol)
         entry = dict(self.tuned.get(key, {}))
-        entry["params"] = params
+        merged = dict(entry.get("params", {}))
+        for k, v in params.items():
+            if k.startswith("session_") and isinstance(v, dict) and isinstance(merged.get(k), dict):
+                merged[k] = dict(merged[k])
+                merged[k].update(v)
+            else:
+                merged[k] = v
+        entry["params"] = merged
         entry["score"] = round(score, 3)
         if forward_pf is not None:
             entry["forward_pf"] = forward_pf
