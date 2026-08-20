@@ -110,6 +110,8 @@ class MT5Connector:
         self._silicon_mt5: Optional[SiliconMetaTrader5] = None
         self._bridge_available = False  # True if Docker bridge is reachable
         self._mt5_api_available = False  # True if remote mt5.initialize() succeeded
+        self._reconnect_lock = threading.Lock()
+        self._last_reconnect_attempt = 0.0
         
         if SILICON_MT5_AVAILABLE:
             logger.info(
@@ -463,7 +465,17 @@ _result = _init_result
 
         if MT5_AVAILABLE:
             try:
-                return self._connected and mt5.terminal_info() is not None
+                if not self._connected:
+                    return False
+                # terminal_info() can be flaky on fast cycles; treat exceptions
+                # as "still connected" rather than forcing a reconnect storm.
+                try:
+                    ti = mt5.terminal_info()
+                    if ti is not None:
+                        return True
+                except Exception:
+                    pass
+                return self._connected
             except Exception:
                 return False
 
@@ -473,15 +485,23 @@ _result = _init_result
         """Ensure MT5 is connected; reconnect if the connection dropped."""
         if self.is_connected():
             return True
-        logger.warning("MT5 connection lost — attempting reconnect...")
-        self._connected = False
-        try:
-            if self._connect_native(retries=3, delay=2):
-                logger.info("MT5 reconnect successful")
+        
+        with self._reconnect_lock:
+            now = time.time()
+            if self.is_connected():
                 return True
-        except Exception as e:
-            logger.warning(f"MT5 reconnect failed: {e}")
-        return False
+            if now - self._last_reconnect_attempt < 2.0:
+                return False
+            self._last_reconnect_attempt = now
+            logger.warning("MT5 connection lost — attempting reconnect...")
+            self._connected = False
+            try:
+                if self._connect_native(retries=3, delay=2):
+                    logger.info("MT5 reconnect successful")
+                    return True
+            except Exception as e:
+                logger.warning(f"MT5 reconnect failed: {e}")
+            return False
     
     @property
     def bridge_available(self) -> bool:
