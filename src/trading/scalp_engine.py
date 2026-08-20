@@ -147,10 +147,16 @@ class ScalpEngine:
         self._symbol_profit_cache = {}
 
         # Self-learning parameter optimizer (autonomous indicator tuning)
+        _duka_source = None
+        try:
+            from src.data_sources.dukascopy import DukascopySource
+            _duka_source = DukascopySource(use_cache=True)
+        except Exception as e:
+            logger.debug(f"DukascopySource unavailable for optimizer: {e}")
         try:
             from src.learning.backtester import Backtester
             from src.learning.param_optimizer import ParameterOptimizer
-            _bt = Backtester(self.registry)
+            _bt = Backtester(self.registry, rates_fn=_duka_source.get_rates if _duka_source else None)
             self.param_optimizer = ParameterOptimizer(
                 self.registry,
                 lambda sym, params, sl_atr, tp_rr: _bt.walkforward_focused(
@@ -229,7 +235,7 @@ class ScalpEngine:
             from src.learning.edge_discovery import EdgeDiscovery
             from src.learning.backtester import Backtester
             self.edge_discovery = EdgeDiscovery(
-                self.registry, Backtester(self.registry),
+                self.registry, Backtester(self.registry, rates_fn=_duka_source.get_rates if _duka_source else None),
                 knowledge_store=self.knowledge_store)
         except Exception as e:
             logger.warning(f"EdgeDiscovery unavailable: {e}")
