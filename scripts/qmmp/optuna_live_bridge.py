@@ -222,6 +222,26 @@ class OptunaLiveBridge:
 
         try:
             key = self.param_optimizer._key(symbol)
+            existing = self.param_optimizer.tuned.get(key)
+            incoming_score = validation.get("score", 0) or 0
+            if existing is not None and isinstance(existing, dict):
+                existing_score = existing.get("score")
+                if isinstance(existing_score, (int, float)) and incoming_score < existing_score:
+                    summary["reason"] = (f"skipped: incoming score {incoming_score:.3f} "
+                                         f"< existing tuned score {existing_score:.3f}")
+                    logger.warning(f"[OPTUNA] {symbol}: {summary['reason']}")
+                    if self.learning_log is not None:
+                        try:
+                            self.learning_log.record(
+                                kind="OPTUNA",
+                                symbol=symbol,
+                                what="skipped applying Optuna floors to preserve higher-scoring tuned params",
+                                why=summary["reason"],
+                                metric=f"incoming={incoming_score:.3f} existing={existing_score:.3f}",
+                            )
+                        except Exception:
+                            pass
+                    return summary
             self.param_optimizer.tuned[key] = {
                 "params": proposed,
                 "score": validation.get("score"),
