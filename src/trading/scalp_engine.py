@@ -293,7 +293,8 @@ class ScalpEngine:
                 tuned entry so it goes live (checkpointer still guards realised expectancy)."""
                 if self.param_optimizer is None:
                     return
-                self.param_optimizer.tuned[sym.upper()] = {
+                key = self.param_optimizer._key(sym)
+                self.param_optimizer.tuned[key] = {
                     "params": dict(params), "score": None, "source": source}
                 try:
                     self.param_optimizer._persist()
@@ -391,6 +392,10 @@ class ScalpEngine:
             self.learning_log = LearningLog()
         except Exception as e:
             logger.warning(f"LearningLog unavailable: {e}")
+        if getattr(self, "param_optimizer", None) is not None:
+            self.param_optimizer.learning_log = self.learning_log
+        if getattr(self, "change_validator", None) is not None:
+            self.change_validator.learning_log = self.learning_log
 
         # #36: intelligent per-symbol ReAct fixer (applies post-mortem fixes LIVE,
         # escalates exit-fix -> retune -> strategy-switch -> research). Non-fatal.
@@ -657,6 +662,7 @@ class ScalpEngine:
             if not hasattr(self, "_onboard_tracker"):
                 self._onboard_tracker = OnboardingTracker()
             if self._onboard_tracker.is_done(key):
+                self._promote_session_overrides(base)
                 return True
             # BACKOFF: if a prior attempt FAILED, don't re-spawn a heavy Dukascopy pull every
             # cycle — wait a cooldown before retrying (prevents per-cycle network hammering).
@@ -676,6 +682,42 @@ class ScalpEngine:
                        f"({'SL-only (pre-seeded)' if needs_cycle_sl else 'full'}; "
                        f"Dukascopy primary, MT5 fallback) — will not block trading.")
         return True
+
+    def _promote_session_overrides(self, base: str):
+        """Promote per-session QMMP model.json floors into the live tuned_params entry
+        for `base` so the live engine can read session_* overrides."""
+        try:
+            if self.param_optimizer is None:
+                return
+            key = base.upper()
+            model_path = os.path.join(config.BASE_DIR, "data", "qmmp", key, "model.json")
+            if not os.path.exists(model_path):
+                return
+            with open(model_path, "r", encoding="utf-8") as f:
+                model = json.load(f)
+            floors = model.get("floors") or {}
+            if not floors:
+                return
+            from src.learning.param_optimizer import qmmp_floors_to_live_params
+            live_overrides = qmmp_floors_to_live_params(floors)
+            if not live_overrides:
+                return
+            session_keys = {k: v for k, v in live_overrides.items() if k.startswith("session_")}
+            if not session_keys:
+                return
+            entry = dict(self.param_optimizer.tuned.get(key, {}))
+            params = dict(entry.get("params", {}))
+            for k, v in session_keys.items():
+                params[k] = v
+            entry["params"] = params
+            entry.setdefault("sources", [])
+            entry["sources"].append("model.json session floors")
+            self.param_optimizer.tuned[key] = entry
+            self.param_optimizer._persist()
+            logger.info(f"[SESSION] {base}: promoted {len(session_keys)} session overrides "
+                        f"from model.json -> tuned_params")
+        except Exception as e:
+            logger.debug(f"session override promotion skip {base}: {e}")
 
     def _run_onboarding(self, base, adapter, sl_only: bool = False):
         """Background worker: patient Dukascopy-primary acquisition + full discovery, then
@@ -754,7 +796,8 @@ class ScalpEngine:
             return
         params = dict(DEFAULTS)
         params.update({k: v for k, v in recipe.items() if not k.startswith("_")})
-        self.param_optimizer.tuned[resolved.upper()] = {
+        key = self.param_optimizer._key(resolved)
+        self.param_optimizer.tuned[key] = {
             "params": params, "score": None,
             "source": f"onboarding[{src_used}] fwd green {recipe['_forward']['green_pct']:.0f}% "
                       f"PF {recipe['_forward']['pf']:.2f}"}
@@ -767,6 +810,7 @@ class ScalpEngine:
                        hard_sl_points=recipe.get("hard_sl_points"),
                        fwd_pf=round(recipe["_forward"]["pf"], 2),
                        fwd_green_pct=round(recipe["_forward"]["green_pct"], 1))
+        self._promote_session_overrides(base)
 
     def _load_seeded_signatures(self):
         """Populate _reversal_signatures at startup from whatever the DB already holds
@@ -1907,7 +1951,7 @@ class ScalpEngine:
             try:
                 param_keys = {k: v for k, v in best_cfg.items() if k != "giveback"}
                 if param_keys:
-                    key = resolved.upper()
+                    key = self.param_optimizer._key(resolved)
                     entry = self.param_optimizer.tuned.get(key, {})
                     entry["params"] = {**entry.get("params", {}), **param_keys}
                     entry["reverted_at"] = datetime.now(timezone.utc).isoformat()

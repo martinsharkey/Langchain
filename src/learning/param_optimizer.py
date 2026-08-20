@@ -273,7 +273,7 @@ def qmmp_floors_to_live_params(floors: dict) -> dict:
 
 class ParameterOptimizer:
     def __init__(self, registry, backtest_fn, mql5_knowledge=None,
-                 is_failed_fn=None, config_fingerprint_fn=None):
+                 is_failed_fn=None, config_fingerprint_fn=None, learning_log=None):
         """
         registry: StrategyRegistry (for focused pockets + regime).
         backtest_fn: callable(symbol, params, sl_atr, tp_rr) -> walk-forward result
@@ -284,12 +284,14 @@ class ParameterOptimizer:
         is_failed_fn: optional callable(symbol, params_dict)->bool (#25) so the
           search AVOIDS directions the #27 checkpointer already marked as failed.
         config_fingerprint_fn: optional callable(params_dict)->str for logging.
+        learning_log: optional LearningLog instance to record optimizer outcomes.
         """
         self.registry = registry
         self.backtest_fn = backtest_fn
         self.mql5_knowledge = mql5_knowledge
         self.is_failed_fn = is_failed_fn
         self.config_fingerprint_fn = config_fingerprint_fn
+        self.learning_log = learning_log
         self.tuned = self._load()
 
     def _load(self) -> dict:
@@ -455,7 +457,7 @@ class ParameterOptimizer:
         return merged
 
     def _key(self, symbol: str) -> str:
-        return symbol.upper()
+        return symbol.upper().split("-")[0].rstrip(".")
 
     def _directed_candidates(self, base: dict):
         """DIRECTED, non-random coordinate search over the highest-impact levers, in
@@ -633,6 +635,8 @@ class ParameterOptimizer:
         base = self.current_params(symbol)
         base_res = self.backtest_fn(symbol, base, base.get("sl_atr", 1.0), base.get("tp_rr", 2.0))
         if not base_res:
+            if self.learning_log:
+                self.learning_log.optimizer(symbol, 0, -1.0, "no baseline data", "backtest returned None")
             return {"symbol": symbol, "status": "no baseline data"}
         best_params = base
         best_score = base_res["score"] if base_res.get("generalizes") else -1.0
@@ -640,6 +644,9 @@ class ParameterOptimizer:
         improved = False
         tried = 0
         directive_worked = False
+        if self.learning_log:
+            self.learning_log.optimizer(symbol, 0, best_score, "optimization started",
+                                        f"base generalizes={base_res.get('generalizes')}, n_total={base_res.get('n_total')}")
 
         # candidate list: reflection-guided first, then a #25 mql5-grounded
         # candidate, then a DIRECTED coordinate search over the high-impact levers
@@ -705,6 +712,9 @@ class ParameterOptimizer:
                         f"(edge lever: {edge['param'] if edge else 'guided'} "
                         f"{edge['from'] if edge else ''}->{edge['to'] if edge else ''}) "
                         f"tried {tried}, from_reflection={directive_worked}")
+            if self.learning_log:
+                self.learning_log.optimizer(symbol, tried, best_score, "IMPROVED",
+                                            f"min-PF {best_score:.2f}, tried {tried}")
             # MINE THE SUCCESS into the RAG: which adjustment worked, so it is
             # semantically recallable for future decisions (symmetric with the
             # failed-direction memory the checkpointer already records).
@@ -714,6 +724,9 @@ class ParameterOptimizer:
                     "from_reflection": directive_worked, "attribution": attribution[:5]}
 
         logger.info(f"[OPTIMIZER] {symbol}: no improvement over min-PF {best_score:.2f} (tried {tried})")
+        if self.learning_log:
+            self.learning_log.optimizer(symbol, tried, best_score, "no improvement",
+                                        f"min-PF {best_score:.2f}, tried {tried}")
         return {"symbol": symbol, "improved": False, "score": best_score, "tried": tried}
 
     def _remember_success(self, symbol, params, score, attribution, from_reflection):

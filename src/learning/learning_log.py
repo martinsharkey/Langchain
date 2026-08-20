@@ -89,6 +89,17 @@ class LearningLog:
         self.record("ONNX", symbol, f"model retrained (kept={kept})",
                     "per-symbol chronological holdout", f"AUC {auc} over n={n}")
 
+    def optimizer(self, symbol, tried: int, best_score: float, status: str, metric: str = ""):
+        self.record("OPTIMIZER", symbol,
+                    f"tried {tried} candidates, best score {best_score:.2f}",
+                    status, metric)
+
+    def validate(self, symbol, source: str, passed: bool, score: float,
+                 forward_pf: float, reason: str, n_total: int = 0):
+        what = ("PASS" if passed else "REJECT") + f" score {score:.2f} fwdPF {forward_pf:.2f}"
+        self.record("VALIDATE", symbol, what, reason,
+                    f"trades={n_total}" if n_total else "")
+
     def _split(self, text: str):
         title = ("# Learning & Adjustments Log\n\n"
                  "> Auto-generated digest of what the self-learning loop changed and why.\n"

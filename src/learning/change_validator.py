@@ -23,12 +23,15 @@ logger = get_logger("change_validator")
 
 
 class ChangeValidator:
-    def __init__(self, backtest_fn: Callable, knowledge_store=None, margin: float = 0.05):
+    def __init__(self, backtest_fn: Callable, knowledge_store=None, margin: float = 0.05,
+                 learning_log=None):
         """backtest_fn(symbol, params, sl_atr, tp_rr) -> {score, generalizes, pfs, wrs, n_total}
-        (the real walk-forward backtester). knowledge_store: RAG for outcome memory."""
+        (the real walk-forward backtester). knowledge_store: RAG for outcome memory.
+        learning_log: optional LearningLog to record validation outcomes."""
         self.backtest_fn = backtest_fn
         self.ks = knowledge_store
         self.margin = margin
+        self.learning_log = learning_log
         try:
             from src import config
             self._path = os.path.join(config.DATA_DIR, "best_ever_scores.json")
@@ -117,6 +120,9 @@ class ChangeValidator:
         self._memo[mk] = out
         logger.warning(f"[VALIDATE] {sym} ({source}): {'PASS' if passed else 'REJECT'} "
                        f"score {out.get('score')} fwdPF {out.get('forward_pf')} vs best {out['best_ever']} — {reason}")
+        if self.learning_log:
+            self.learning_log.validate(sym, source, passed, out.get("score", -1.0),
+                                       out.get("forward_pf", 0.0), reason, out.get("n_total", 0))
         return out
 
     def _remember(self, sym, params, out, source):
