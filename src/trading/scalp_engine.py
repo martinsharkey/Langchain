@@ -2819,6 +2819,38 @@ class ScalpEngine:
                         except Exception as e:
                             logger.debug(f"optimizer {sym} skip: {e}")
 
+                # OPTUNA DAILY STUDY RUN (#76 follow-up): once per UTC day, kick off a
+                # background thread that runs Optuna floor optimization for each symbol.
+                # Uses allow_mt5=False to avoid disrupting the live MT5 terminal.
+                if hasattr(self, "optuna_bridge") and self.optuna_bridge is not None:
+                    try:
+                        today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+                        if getattr(self, "_optuna_study_run_day", None) != today:
+                            self._optuna_study_run_day = today
+                            if not hasattr(self, "_optuna_study_threads"):
+                                self._optuna_study_threads = {}
+                            for base, adapter in self.adapters.items():
+                                sym = adapter.resolved_symbol
+                                t = self._optuna_study_threads.get(sym)
+                                if t and t.is_alive():
+                                    continue
+                                try:
+                                    from scripts.qmmp.optuna_floor_optimizer import run_daily_studies
+                                    th = threading.Thread(
+                                        target=run_daily_studies,
+                                        args=([sym],),
+                                        kwargs={"n_trials": 50, "allow_mt5": False},
+                                        name=f"optuna-study-{base}",
+                                        daemon=True,
+                                    )
+                                    self._optuna_study_threads[sym] = th
+                                    th.start()
+                                    logger.info(f"[OPTUNA] daily study thread STARTED for {sym}")
+                                except Exception as e:
+                                    logger.debug(f"optuna study thread {sym} skip: {e}")
+                    except Exception as e:
+                        logger.debug(f"optuna study runner skip: {e}")
+
                 # OPTUNA → LIVE BRIDGE (#76 follow-up): once per UTC day, read the
                 # best completed Optuna study for each symbol, translate floors to the
                 # live schema, validate through ChangeValidator, and apply if it beats

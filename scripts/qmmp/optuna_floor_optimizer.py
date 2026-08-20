@@ -19,6 +19,7 @@ import sqlite3
 from datetime import datetime, timezone
 from typing import Any
 
+import argparse
 import numpy as np
 import optuna
 import pandas as pd
@@ -35,7 +36,9 @@ FAST, SLOW, SIG = 12, 26, 9
 SESSIONS = ("Asian", "London", "NewYork")
 
 
-def _resolve_symbol(symbol):
+def _resolve_symbol(symbol, allow_mt5: bool = True):
+    if not allow_mt5:
+        return symbol.upper().split("-")[0].rstrip(".")
     try:
         from scripts.qmmp.onboard_pipeline import _resolve_symbol as _rs
         return _rs(symbol)
@@ -51,7 +54,9 @@ def pt_value(symbol):
         return 0.01, 0.00007
 
 
-def _adaptive_slip_pts(symbol):
+def _adaptive_slip_pts(symbol, allow_mt5: bool = True):
+    if not allow_mt5:
+        return 100.0
     try:
         import MetaTrader5 as mt5
         if mt5.initialize():
@@ -286,6 +291,9 @@ def run_study(
     folds: int = 3,
     study_name: str | None = None,
     storage: str | None = None,
+    spread_pts: float | None = None,
+    slip_pts: float | None = None,
+    allow_mt5: bool = True,
 ) -> dict:
     """Run Optuna study for floor optimization on a symbol.
 
@@ -300,26 +308,26 @@ def run_study(
     Returns:
         Best trial params + metrics, including held-out evaluation.
     """
-    resolved = _resolve_symbol(symbol)
+    resolved = _resolve_symbol(symbol, allow_mt5=allow_mt5)
     base = resolved.upper().split("-")[0].rstrip(".")
     df = _load_data(symbol, tf)
     ind = _compute_indicators(df)
 
     pt, gbp_pt = pt_value(symbol)
-    spread_pts = 0.0
-    try:
-        import MetaTrader5 as mt5
-        if mt5.initialize():
-            info = mt5.symbol_info(resolved)
-            if info and info.spread > 0:
-                spread_pts = float(info.spread)
-            mt5.shutdown()
-    except Exception:
-        pass
-    if spread_pts <= 0:
-        spread_pts = 200.0
-
-    slip_pts = _adaptive_slip_pts(resolved)
+    if spread_pts is None:
+        if allow_mt5:
+            try:
+                import MetaTrader5 as mt5
+                if mt5.initialize():
+                    info = mt5.symbol_info(resolved)
+                    if info and info.spread > 0:
+                        spread_pts = float(info.spread)
+                    mt5.shutdown()
+            except Exception:
+                pass
+        spread_pts = spread_pts or 200.0
+    if slip_pts is None:
+        slip_pts = _adaptive_slip_pts(resolved, allow_mt5=allow_mt5)
 
     if study_name is None:
         study_name = f"floors_{base}"
@@ -500,3 +508,48 @@ def _promote_to_tuned_params(symbol: str, floors: dict) -> None:
         opt._persist()
     except Exception as e:
         logger.warning(f"Optuna promote to tuned_params failed: {e}")
+
+
+def run_daily_studies(symbols: list[str], n_trials: int = 50, allow_mt5: bool = False) -> dict:
+    """Run Optuna floor studies for a list of symbols (intended for daily autonomous cycle).
+
+    Args:
+        symbols: List of symbol names (e.g. ["XAUUSD", "BTCUSD"]).
+        n_trials: Trials per symbol.
+        allow_mt5: If False (default for live-bot daily cycle), skip MT5 spread/slip queries
+                   and use conservative defaults. This prevents the study runner from
+                   disrupting an active MT5 terminal session.
+
+    Returns:
+        Summary dict keyed by symbol with study results or error strings.
+    """
+    results = {}
+    for sym in symbols:
+        try:
+            logger.info(f"[OPTUNA] daily study START for {sym} ({n_trials} trials)")
+            result = run_study(sym, n_trials=n_trials, allow_mt5=allow_mt5)
+            results[sym] = result
+            logger.info(f"[OPTUNA] daily study DONE for {sym}: best_value={result.get('best_value')}")
+        except Exception as e:
+            logger.warning(f"[OPTUNA] daily study FAILED for {sym}: {e}")
+            results[sym] = f"error: {e}"
+    return results
+
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="Run Optuna floor optimization studies")
+    parser.add_argument("--symbol", required=True, help="Symbol to optimize (e.g. XAUUSD)")
+    parser.add_argument("--n-trials", type=int, default=50, help="Number of Optuna trials")
+    parser.add_argument("--tf", default="H1", help="Timeframe (default H1)")
+    parser.add_argument("--folds", type=int, default=3, help="Walk-forward folds")
+    parser.add_argument("--allow-mt5", action="store_true", help="Allow MT5 spread/slip queries (disrupts live terminal)")
+    args = parser.parse_args()
+
+    result = run_study(
+        args.symbol,
+        tf=args.tf,
+        n_trials=args.n_trials,
+        folds=args.folds,
+        allow_mt5=args.allow_mt5,
+    )
+    print(json.dumps(result, indent=2, default=str))
