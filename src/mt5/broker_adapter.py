@@ -286,6 +286,9 @@ class BrokerAdapter:
         if not self.spec:
             return None
         with mt5_lock():
+            connector = get_connector()
+            if not connector.ensure_connected():
+                return None
             t = mt5.symbol_info_tick(self.spec.resolved)
             # Defensive: unwrap MagicMock so tests and RPyC return the same shape.
             if t is None:
