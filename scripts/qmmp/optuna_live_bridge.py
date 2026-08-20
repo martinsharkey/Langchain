@@ -38,7 +38,7 @@ from src.utils.logger import get_logger
 logger = get_logger("optuna_live_bridge")
 
 SESSIONS = ("Asian", "London", "NewYork")
-D = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "data", "qmmp")
+D = os.path.join(config.DATA_DIR, "qmmp")
 MAX_STUDY_AGE_DAYS = 7
 AGGREGATE_FALLBACK = True
 _aggregate_fallback_count = 0

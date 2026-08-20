@@ -3,7 +3,6 @@
 import json
 import os
 import shutil
-import sqlite3
 import tempfile
 from datetime import datetime, timezone
 from unittest.mock import MagicMock, patch
