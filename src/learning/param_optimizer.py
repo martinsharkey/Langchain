@@ -311,6 +311,25 @@ class ParameterOptimizer:
         except Exception as e:
             logger.warning(f"tuned params persist failed: {e}")
 
+    def apply_tuned(self, symbol: str, params: dict, score: float,
+                    forward_pf: float | None = None, source: str = "param_optimizer",
+                    **extra) -> dict:
+        """Single writer for tuned params. Both optimize() and external bridges
+        (e.g. OptunaLiveBridge) MUST use this to ensure consistent dict shape
+        and atomic persist."""
+        key = self._key(symbol)
+        entry = dict(self.tuned.get(key, {}))
+        entry["params"] = params
+        entry["score"] = round(score, 3)
+        if forward_pf is not None:
+            entry["forward_pf"] = forward_pf
+        entry["source"] = source
+        entry["updated_at"] = __import__("datetime").datetime.now(__import__("datetime").timezone.utc).isoformat()
+        entry.update({k: v for k, v in extra.items() if k not in entry})
+        self.tuned[key] = entry
+        self._persist()
+        return entry
+
     # STRUCTURE keys are symbol-AGNOSTIC and safe to share (counts / ATR-relative /
     # switches): the indicator COMBINATION is universal. These fall back to the gold
     # baseline for any symbol lacking its own value.
@@ -677,16 +696,10 @@ class ParameterOptimizer:
         if improved:
             # rank the levers that actually gave the edge (biggest score gains)
             attribution.sort(key=lambda a: -a["score_gain"])
-            self.tuned[key] = {
-                "params": best_params,
-                "score": round(best_score, 3),
-                "pfs": best_res.get("pfs"),
-                "wrs": best_res.get("wrs"),
-                "n": best_res.get("n_total"),
-                "attribution": attribution[:5],   # which param changes drove the edge
-                "updated_at": __import__("datetime").datetime.now(__import__("datetime").timezone.utc).isoformat(),
-            }
-            self._persist()
+            self.apply_tuned(symbol, best_params, best_score,
+                             pfs=best_res.get("pfs"), wrs=best_res.get("wrs"),
+                             n=best_res.get("n_total"), attribution=attribution[:5],
+                             source="param_optimizer")
             edge = attribution[0] if attribution else None
             logger.info(f"[OPTIMIZER] {symbol}: IMPROVED -> min-PF {best_score:.2f} "
                         f"(edge lever: {edge['param'] if edge else 'guided'} "

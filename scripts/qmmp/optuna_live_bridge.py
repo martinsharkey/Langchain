@@ -252,14 +252,11 @@ class OptunaLiveBridge:
                         except Exception:
                             pass
                     return summary
-            self.param_optimizer.tuned[key] = {
-                "params": proposed,
-                "score": validation.get("score"),
-                "forward_pf": validation.get("forward_pf"),
-                "source": "optuna",
-                "updated_at": datetime.now(timezone.utc).isoformat(),
-            }
-            self.param_optimizer._persist()
+            self.param_optimizer.apply_tuned(
+                symbol, proposed, validation.get("score"),
+                forward_pf=validation.get("forward_pf"),
+                source="optuna",
+            )
             summary["applied"] = True
             summary["reason"] = "applied"
             logger.info(f"[OPTUNA] {symbol}: APPLIED score={validation.get('score')} "

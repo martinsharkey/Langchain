@@ -210,8 +210,7 @@ class TestOptunaLiveBridge:
             result = bridge.propose_and_apply("XAUUSD")
         assert result["proposed"] is True
         assert result["applied"] is True
-        assert mock_po.tuned.__setitem__.called
-        assert mock_po._persist.called
+        assert mock_po.apply_tuned.called
 
     def test_no_validator_skips(self):
         bridge = self._make_bridge(
