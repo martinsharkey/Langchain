@@ -266,3 +266,89 @@ class TestOptunaLiveBridge:
         call = mock_log.record.call_args
         assert call.kwargs["kind"] == "OPTUNA"
         assert "applied" in call.kwargs["what"]
+
+    def test_end_to_end_study_to_tuned(self):
+        tmp = tempfile.mkdtemp()
+        try:
+            optuna_dir = os.path.join(tmp, "XAUUSD", "optuna")
+            os.makedirs(optuna_dir)
+            storage = f"sqlite:///{os.path.join(optuna_dir, 'study.db')}"
+
+            def objective(trial):
+                trial.suggest_float("osma_Asian", 1.0, 3.0)
+                trial.suggest_float("ema_Asian", 0.1, 0.5)
+                trial.suggest_float("bulls_Asian_long", 0.5, 1.5)
+                trial.suggest_float("bears_Asian_long", -3.0, -0.5)
+                trial.suggest_float("atr_Asian", 0.5, 2.0)
+                return trial.suggest_float("osma_Asian", 1.0, 3.0)
+
+            study = optuna.create_study(
+                study_name="floors_XAUUSD",
+                storage=storage,
+                sampler=optuna.samplers.TPESampler(seed=42),
+                direction="maximize",
+            )
+            study.optimize(objective, n_trials=5, n_jobs=1)
+
+            mock_po = MagicMock()
+            mock_po._key.return_value = "XAUUSD"
+            mock_po.tuned = {}
+            mock_po.apply_tuned.side_effect = lambda sym, params, score, **kw: mock_po.tuned.__setitem__(mock_po._key(sym), {"params": params, "score": score})
+
+            cv = MagicMock()
+            cv.validate.return_value = {"passed": True, "score": 2.0, "forward_pf": 1.3, "reason": "beats best-ever",
+                                        "session_scores": {"Asian": {"trades": 10, "wins": 6, "losses": 4, "gross_win_r": 8.0, "gross_loss_r": 4.0, "pf": 2.0, "wr": 60.0}}}
+            bridge = OptunaLiveBridge(
+                change_validator=cv,
+                param_optimizer=mock_po,
+            )
+            with patch("scripts.qmmp.optuna_live_bridge.D", tmp), \
+                 patch("scripts.qmmp.optuna_live_bridge._resolve_symbol", return_value="XAUUSD"):
+                result = bridge.propose_and_apply("XAUUSD")
+            assert result["applied"] is True
+            assert "XAUUSD" in mock_po.tuned
+            assert mock_po.tuned["XAUUSD"]["score"] == 2.0
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+    def test_per_session_scores_exposed_in_validation(self):
+        cv = MagicMock()
+        cv.validate.return_value = {
+            "passed": False, "reason": "score too low",
+            "score": 0.8, "forward_pf": 0.9, "n_total": 30,
+            "session_scores": {
+                "Asian": {"trades": 10, "wins": 4, "losses": 6, "gross_win_r": 4.0, "gross_loss_r": 6.0, "pf": 0.67, "wr": 40.0},
+                "London": {"trades": 12, "wins": 7, "losses": 5, "gross_win_r": 9.0, "gross_loss_r": 5.0, "pf": 1.8, "wr": 58.3},
+                "NewYork": {"trades": 8, "wins": 3, "losses": 5, "gross_win_r": 3.0, "gross_loss_r": 5.0, "pf": 0.6, "wr": 37.5},
+            }
+        }
+        mock_log = MagicMock()
+        bridge = self._make_bridge(
+            change_validator=cv,
+            learning_log=mock_log,
+        )
+        with patch("scripts.qmmp.optuna_live_bridge.propose_live_params", return_value={"osma_min_long": 2.0, "session_Asian": {"osma_min_long": 2.0}}):
+            result = bridge.propose_and_apply("XAUUSD")
+        assert result["applied"] is False
+        mock_log.record.assert_called_once()
+        metric = mock_log.record.call_args.kwargs["metric"]
+        assert "Asian=0.67" in metric
+        assert "London=1.80" in metric
+
+    def test_merge_policy_skips_lower_score(self):
+        existing_entry = {"params": {"osma_min_long": 1.5}, "score": 2.5, "source": "param_optimizer"}
+        mock_po = MagicMock()
+        mock_po._key.return_value = "XAUUSD"
+        mock_po.tuned = {"XAUUSD": existing_entry}
+
+        cv = MagicMock()
+        cv.validate.return_value = {"passed": True, "score": 1.8, "forward_pf": 1.1, "reason": "beats best-ever"}
+        bridge = self._make_bridge(
+            change_validator=cv,
+            param_optimizer=mock_po,
+        )
+        with patch("scripts.qmmp.optuna_live_bridge.propose_live_params", return_value={"osma_min_long": 2.0}):
+            result = bridge.propose_and_apply("XAUUSD")
+        assert result["applied"] is False
+        assert "skipped" in result["reason"]
+        assert mock_po.tuned["XAUUSD"]["score"] == 2.5
