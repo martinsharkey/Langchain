@@ -77,18 +77,25 @@ class Backtester:
         from src.learning.edge_weights import focused_rules
         rates = self._get_rates(symbol, timeframe=timeframe, count=bars)
         if not rates or len(rates) < 2000:
-            # DON'T fail silently: a thin cache means the change can't be validated, which
-            # must be visible (else tuning quietly no-ops and nothing is proven).
             logger.warning(f"[BACKTEST] {symbol} {timeframe}: only {len(rates) if rates else 0} bars "
                            f"(<2000) — cannot validate; warm the cache for a rolling window.")
             return None
         series = compute_indicator_series(rates, params)  # params drive indicators
         rules = focused_rules(symbol) or []
         if not rules:
+            logger.warning(f"[BACKTEST] {symbol}: no focused rules — cannot validate")
             return None
         fns = {nm: (self.registry.get(nm).signal_fn, {**self.registry.get(nm).params, **(params or {})})
                for nm, _ in rules if self.registry.get(nm)}
+        if not fns:
+            logger.warning(f"[BACKTEST] {symbol}: focused rules {rules} have no registry entries")
+            return None
         n = len(rates); seg = (n - warmup) // windows
+
+        session_scores = {
+            s: {"trades": 0, "wins": 0, "losses": 0, "gross_win_r": 0.0, "gross_loss_r": 0.0}
+            for s in ("Asian", "London", "NewYork", "Off")
+        }
 
         # TICK DATA (real-life fills): fetch real bid/ask ticks for the bar window and
         # index them by bar so SL/TP are resolved TICK-BY-TICK in correct sequence with
@@ -166,8 +173,21 @@ class Backtester:
                 if ot:
                     r = _resolve_open(ot, i, price, giveback)
                     if r is not None:
-                        if r > 0: w += 1; gw += r
-                        else: l += 1; gl += abs(r)
+                        try:
+                            ts = rates[i]["timestamp"]
+                            hour = datetime.fromtimestamp(int(ts)).hour
+                            sess = session_of(hour)
+                        except Exception:
+                            sess = "Off"
+                        if r > 0:
+                            w += 1; gw += r
+                            session_scores[sess]["wins"] += 1
+                            session_scores[sess]["gross_win_r"] += r
+                        else:
+                            l += 1; gl += abs(r)
+                            session_scores[sess]["losses"] += 1
+                            session_scores[sess]["gross_loss_r"] += abs(r)
+                        session_scores[sess]["trades"] += 1
                         ot = None
                 if ot:
                     continue
@@ -194,42 +214,6 @@ class Backtester:
             return tot, (round(w / tot * 100, 1) if tot else 0), pf, round(gw - gl, 1)
 
         pfs = []; wrs = []; n_total = 0
-        session_scores = {
-            s: {"trades": 0, "wins": 0, "losses": 0, "gross_win_r": 0.0, "gross_loss_r": 0.0}
-            for s in ("Asian", "London", "NewYork", "Off")
-        }
-
-        def _sim(lo, hi):
-            w = l = 0; gw = gl = 0.0; ot = None
-            for i in range(lo, hi):
-                ind = series[i]
-                if not ind or not ind.get("close"):
-                    continue
-                price = ind["close"]; atr = ind.get("atr") or 0
-                if atr <= 0:
-                    continue
-                if ot:
-                    r = _resolve_open(ot, i, price, giveback)
-                    if r is not None:
-                        try:
-                            ts = rates[i]["timestamp"]
-                            hour = datetime.fromtimestamp(int(ts)).hour
-                            sess = session_of(hour)
-                        except Exception:
-                            sess = "Off"
-                        if r > 0:
-                            w += 1; gw += r
-                            session_scores[sess]["wins"] += 1
-                            session_scores[sess]["gross_win_r"] += r
-                        else:
-                            l += 1; gl += abs(r)
-                            session_scores[sess]["losses"] += 1
-                            session_scores[sess]["gross_loss_r"] += abs(r)
-                        session_scores[sess]["trades"] += 1
-                        ot = None
-                if ot:
-                    continue
-
         for k in range(windows):
             lo = warmup + k * seg; hi = warmup + (k + 1) * seg if k < windows - 1 else n
             tot, wr, pf, R = _sim(lo, hi)
