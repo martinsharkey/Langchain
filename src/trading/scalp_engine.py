@@ -43,6 +43,24 @@ logger = get_logger("scalp_engine")
 STATUS_PATH = os.path.join(config.DATA_DIR, "bot_status.json")
 
 
+def _git_sha() -> str:
+    try:
+        import subprocess
+        return subprocess.check_output(["git", "rev-parse", "--short", "HEAD"],
+                                       cwd=os.path.dirname(os.path.dirname(os.path.abspath(__file__)))).decode().strip()
+    except Exception:
+        return "unknown"
+
+
+def _git_tag() -> str:
+    try:
+        import subprocess
+        return subprocess.check_output(["git", "describe", "--tags", "--abbrev=0"],
+                                       cwd=os.path.dirname(os.path.dirname(os.path.abspath(__file__)))).decode().strip()
+    except Exception:
+        return ""
+
+
 @dataclass
 class TrackedPosition:
     ticket: int
@@ -3858,6 +3876,8 @@ class ScalpEngine:
                 })
             status = {
                 "timestamp": datetime.now(timezone.utc).isoformat(),
+                "deployed_sha": _git_sha(),
+                "deployed_tag": _git_tag(),
                 "running": self.running,
                 "mode": config.TRADING_MODE,
                 "cycle": self.cycle,
