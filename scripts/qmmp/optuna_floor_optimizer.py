@@ -121,6 +121,68 @@ def _compute_indicators(df: pd.DataFrame) -> dict[str, pd.Series]:
     return {"close": close, "osma": osma, "bulls": bulls, "bears": bears, "atr": atr, "ema": ema}
 
 
+def _data_bounds(ind: dict, lo_pct: float = 5, hi_pct: float = 95) -> dict:
+    """Derive per-symbol search bounds from the actual indicator distribution.
+
+    For each indicator family, compute percentile ranges from the backtest data
+    so Optuna searches the space where real values actually occur, rather than
+    a one-size-fits-all hardcoded range that silently breaks for symbols with
+    different price scales.
+
+    Returns dict with keys matching the floor structure expected by the objective.
+    """
+    bounds = {}
+
+    # OsMA magnitude: abs(osma) positive range
+    osma_abs = ind["osma"].abs().dropna()
+    if len(osma_abs) > 0:
+        osma_lo = float(osma_abs.quantile(lo_pct / 100))
+        osma_hi = float(osma_abs.quantile(hi_pct / 100))
+        bounds["osma_mag"] = (max(0.0, osma_lo), max(osma_lo + 0.01, osma_hi))
+
+    # EMA alignment: ema - ema.shift(3) can be positive or negative
+    ema_slope = (ind["ema"] - ind["ema"].shift(3)).dropna()
+    if len(ema_slope) > 0:
+        ema_lo = float(ema_slope.quantile(lo_pct / 100))
+        ema_hi = float(ema_slope.quantile(hi_pct / 100))
+        bounds["ema_align"] = (ema_lo, ema_hi)
+
+    # Bulls/Bears: separate positive and negative ranges
+    bulls = ind["bulls"].dropna()
+    bears = ind["bears"].dropna()
+    if len(bulls) > 0:
+        bulls_pos = bulls[bulls > 0]
+        bulls_neg = bulls[bulls < 0]
+        if len(bulls_pos) > 0:
+            b_lo = float(bulls_pos.quantile(lo_pct / 100))
+            b_hi = float(bulls_pos.quantile(hi_pct / 100))
+            bounds["bulls_long"] = (max(0.0, b_lo), max(b_lo + 0.01, b_hi))
+        if len(bulls_neg) > 0:
+            b_lo = float(bulls_neg.quantile(lo_pct / 100))
+            b_hi = float(bulls_neg.quantile(hi_pct / 100))
+            bounds["bulls_short"] = (min(-0.01, b_hi), min(b_lo, 0.0))
+    if len(bears) > 0:
+        bears_pos = bears[bears > 0]
+        bears_neg = bears[bears < 0]
+        if len(bears_pos) > 0:
+            b_lo = float(bears_pos.quantile(lo_pct / 100))
+            b_hi = float(bears_pos.quantile(hi_pct / 100))
+            bounds["bears_short"] = (max(0.0, b_lo), max(b_lo + 0.01, b_hi))
+        if len(bears_neg) > 0:
+            b_lo = float(bears_neg.quantile(lo_pct / 100))
+            b_hi = float(bears_neg.quantile(hi_pct / 100))
+            bounds["bears_long"] = (min(-0.01, b_hi), min(b_lo, 0.0))
+
+    # ATR: positive range
+    atr = ind["atr"].dropna()
+    if len(atr) > 0:
+        atr_lo = float(atr.quantile(lo_pct / 100))
+        atr_hi = float(atr.quantile(hi_pct / 100))
+        bounds["atr"] = (max(0.0, atr_lo), max(atr_lo + 0.001, atr_hi))
+
+    return bounds
+
+
 def _apply_floors(df: pd.DataFrame, ind: dict, floors: dict) -> pd.DataFrame:
     """Apply session-aware floors to produce entry signals.
 
@@ -248,36 +310,48 @@ def objective(trial: optuna.Trial, df: pd.DataFrame, ind: dict, folds: int = 3,
 
     Uses only the first (folds-1) folds for optimization; the last fold is reserved
     as a genuine held-out set that Optuna never sees.
+
+    Search bounds are derived from the actual indicator distribution over the
+    backtest window (data-derived, not hardcoded), so each symbol searches the
+    range where its own values actually occur.
     """
     floors = {}
+    bounds = _data_bounds(ind)
 
-    # OsMA magnitude floors (per session) — live range ~0..3
+    # OsMA magnitude floors (per session)
     osma_floors = {}
+    osma_b = bounds.get("osma_mag", (0.0, 3.0))
     for sn in SESSIONS:
-        osma_floors[sn] = trial.suggest_float(f"osma_{sn}", 0.0, 3.0, step=0.05)
+        osma_floors[sn] = trial.suggest_float(f"osma_{sn}", osma_b[0], osma_b[1], step=max(0.01, (osma_b[1]-osma_b[0])/100))
     floors["osma_mag"] = osma_floors
 
-    # EMA alignment floors — live range ~0..0.5
+    # EMA alignment floors (per session)
     ema_floors = {}
+    ema_b = bounds.get("ema_align", (-0.5, 0.5))
     for sn in SESSIONS:
-        ema_floors[sn] = trial.suggest_float(f"ema_{sn}", 0.0, 0.5, step=0.005)
+        ema_floors[sn] = trial.suggest_float(f"ema_{sn}", ema_b[0], ema_b[1], step=max(0.001, (ema_b[1]-ema_b[0])/200))
     floors["ema_align"] = ema_floors
 
-    # Bulls/Bears floors (per session, per side) — live range ~-2..2
+    # Bulls/Bears floors (per session, per side)
     bulls_floors = {}
     bears_floors = {}
+    bulls_long_b = bounds.get("bulls_long", (0.0, 2.0))
+    bulls_short_b = bounds.get("bulls_short", (-2.0, 0.0))
+    bears_long_b = bounds.get("bears_long", (-2.0, 0.0))
+    bears_short_b = bounds.get("bears_short", (0.0, 2.0))
     for sn in SESSIONS:
-        bulls_floors[f"{sn}_long"] = trial.suggest_float(f"bulls_{sn}_long", 0.0, 2.0, step=0.05)
-        bulls_floors[f"{sn}_short"] = trial.suggest_float(f"bulls_{sn}_short", -2.0, 0.0, step=0.05)
-        bears_floors[f"{sn}_long"] = trial.suggest_float(f"bears_{sn}_long", -2.0, 0.0, step=0.05)
-        bears_floors[f"{sn}_short"] = trial.suggest_float(f"bears_{sn}_short", 0.0, 2.0, step=0.05)
+        bulls_floors[f"{sn}_long"] = trial.suggest_float(f"bulls_{sn}_long", bulls_long_b[0], bulls_long_b[1], step=max(0.01, (bulls_long_b[1]-bulls_long_b[0])/100))
+        bulls_floors[f"{sn}_short"] = trial.suggest_float(f"bulls_{sn}_short", bulls_short_b[0], bulls_short_b[1], step=max(0.01, (bulls_short_b[1]-bulls_short_b[0])/100))
+        bears_floors[f"{sn}_long"] = trial.suggest_float(f"bears_{sn}_long", bears_long_b[0], bears_long_b[1], step=max(0.01, (bears_long_b[1]-bears_long_b[0])/100))
+        bears_floors[f"{sn}_short"] = trial.suggest_float(f"bears_{sn}_short", bears_short_b[0], bears_short_b[1], step=max(0.01, (bears_short_b[1]-bears_short_b[0])/100))
     floors["bulls"] = bulls_floors
     floors["bears"] = bears_floors
 
-    # ATR floors — live range ~0..5
+    # ATR floors (per session)
     atr_floors = {}
+    atr_b = bounds.get("atr", (0.0, 5.0))
     for sn in SESSIONS:
-        atr_floors[sn] = trial.suggest_float(f"atr_{sn}", 0.0, 5.0, step=0.1)
+        atr_floors[sn] = trial.suggest_float(f"atr_{sn}", atr_b[0], atr_b[1], step=max(0.01, (atr_b[1]-atr_b[0])/100))
     floors["atr"] = atr_floors
 
     # Walk-forward evaluation on first (folds-1) folds only; last fold is held out

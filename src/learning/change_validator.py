@@ -39,6 +39,7 @@ class ChangeValidator:
             self._path = os.path.join("data", "best_ever_scores.json")
         self._best = self._load()
         self._memo = {}   # per-run memo: (symbol, params-hash) -> result (avoid re-backtesting the same config)
+        self._best_generalizes_cache = {}
 
     def _memo_key(self, symbol, params):
         import hashlib, json as _j
@@ -81,6 +82,29 @@ class ChangeValidator:
         except Exception:
             pass
         return raw
+
+    def _best_generalizes(self, symbol: str) -> bool:
+        """Check if the stored best-ever params for `symbol` still generalize.
+        
+        Returns True if no best is stored, or if the best params pass the
+        generalizes gate. Cached to avoid repeated backtests.
+        """
+        from src.utils.symbols import symbol_base
+        sym = symbol_base(symbol)
+        if sym in self._best_generalizes_cache:
+            return self._best_generalizes_cache[sym]
+        rec = self._best.get(sym, {})
+        params = rec.get("params")
+        if not params:
+            self._best_generalizes_cache[sym] = True
+            return True
+        try:
+            res = self.backtest_fn(sym, params, params.get("sl_atr", 1.0), params.get("tp_rr", 2.0))
+            generalizes = bool(res.get("generalizes")) if res else False
+        except Exception:
+            generalizes = False
+        self._best_generalizes_cache[sym] = generalizes
+        return generalizes
 
     def validate(self, symbol: str, params: dict, source: str = "?", min_trades: int = 40) -> dict:
         """Backtest+forward test `params`. Return {passed, score, forward_pf, best, reason}.
@@ -165,8 +189,8 @@ class ChangeValidator:
                                                    out.get("forward_pf", 0.0), reason, out.get("n_total", 0))
                     return out
 
-        # ── Cold-start: no valid best-ever → accept first generalizing candidate ──
-        cold_start = best <= 0.0
+        # ── Cold-start: no valid best-ever OR best-ever doesn't generalize → accept first generalizing candidate ──
+        cold_start = best <= 0.0 or not self._best_generalizes(sym)
         if cold_start and generalizes and enough and forward_pf >= 1.0:
             out = {"passed": True, "score": round(score, 3), "forward_pf": round(forward_pf, 2),
                    "generalizes": generalizes, "best_ever": round(best, 3),

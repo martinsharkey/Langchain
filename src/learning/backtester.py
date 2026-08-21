@@ -24,6 +24,7 @@ from typing import Optional, Callable
 
 from src.strategies.indicators import compute_indicator_series
 from src.strategies.sessions import session_of
+from src.learning.exit_model import TradeState, resolve_exit_tick, resolve_exit_bar
 from src.utils.logger import get_logger
 
 logger = get_logger("backtester")
@@ -137,39 +138,10 @@ class Backtester:
             (correct intrabar sequence + spread) when available; else bar high/low."""
             ticks = tick_by_bar[i] if tick_by_bar else None
             if ticks:
-                d = ot["dir"]
-                for bid, ask in ticks:
-                    px = bid if d == "buy" else ask   # price we realise on exit
-                    if d == "buy":
-                        ot["peak"] = max(ot["peak"], px)
-                        if px <= ot["sl"]: return -1.0
-                        if px >= ot["tp"]: return ot["rr"]
-                        fav = ot["peak"] - ot["entry"]
-                        if fav >= ot["arm"] and (ot["peak"] - px) >= giveback * fav:
-                            return (px - ot["entry"]) / ot["risk"]
-                    else:
-                        ot["peak"] = min(ot["peak"], px)
-                        if px >= ot["sl"]: return -1.0
-                        if px <= ot["tp"]: return ot["rr"]
-                        fav = ot["entry"] - ot["peak"]
-                        if fav >= ot["arm"] and (px - ot["peak"]) >= giveback * fav:
-                            return (ot["entry"] - px) / ot["risk"]
-                return None
+                return resolve_exit_tick(ot, ticks)
             # bar fallback
             hib, lob = rates[i]["high"], rates[i]["low"]
-            if ot["dir"] == "buy":
-                ot["peak"] = max(ot["peak"], hib); fav = ot["peak"] - ot["entry"]
-                if lob <= ot["sl"]: return -1.0
-                if hib >= ot["tp"]: return ot["rr"]
-                if fav >= ot["arm"] and (ot["peak"] - price) >= giveback * fav:
-                    return (price - ot["entry"]) / ot["risk"]
-            else:
-                ot["peak"] = min(ot["peak"], lob); fav = ot["entry"] - ot["peak"]
-                if hib >= ot["sl"]: return -1.0
-                if lob <= ot["tp"]: return ot["rr"]
-                if fav >= ot["arm"] and (price - ot["peak"]) >= giveback * fav:
-                    return (ot["entry"] - price) / ot["risk"]
-            return None
+            return resolve_exit_bar(ot, hib, lob, price)
 
         def _sim(lo, hi):
             w = l = 0; gw = gl = 0.0; ot = None
@@ -217,8 +189,8 @@ class Backtester:
                 risk = sl_atr * atr; tpd = tp_rr * risk
                 sl = price - risk if action == "buy" else price + risk
                 tp = price + tpd if action == "buy" else price - tpd
-                ot = {"dir": action, "entry": price, "sl": sl, "tp": tp, "risk": risk,
-                      "rr": tp_rr, "peak": price, "arm": arm * atr}
+                ot = TradeState(dir=action, entry=price, sl=sl, tp=tp, risk=risk,
+                                rr=tp_rr, peak=price, arm=arm * atr)
             tot = w + l
             pf = round(gw / gl, 2) if gl > 0 else (gw if gw else 0.0)
             return tot, (round(w / tot * 100, 1) if tot else 0), pf, round(gw - gl, 1)

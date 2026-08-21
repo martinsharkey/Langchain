@@ -113,5 +113,68 @@ def test_validate_session_scoped_case_insensitive(tmp_path):
     assert out["session_primary"] == "London"
 
 
+def test_validate_cold_start_when_best_ever_does_not_generalize(tmp_path):
+    """If the stored best-ever params fail generalizes, treat as cold-start
+    and accept the first generalizing candidate."""
+    def weak_bt(symbol, params, sl_atr=1.0, tp_rr=2.0):
+        # Best-ever params (osma_fast=12) don't generalize; candidate (osma_fast=15) does
+        if params.get("osma_fast") == 12:
+            return {
+                "pfs": [0.9, 0.95, 0.92],
+                "wrs": [45.0, 47.0, 46.0],
+                "n_total": 100,
+                "generalizes": False,
+                "score": 0.9,
+                "session_scores": {},
+            }
+        return {
+            "pfs": [1.05, 1.08, 1.03],
+            "wrs": [52.0, 54.0, 51.0],
+            "n_total": 160,
+            "generalizes": True,
+            "score": 1.03,
+            "session_scores": {
+                "Asian": {"trades": 30, "wins": 10, "losses": 20, "gross_win_r": 15.0, "gross_loss_r": 20.0, "pf": 0.75, "wr": 33.3},
+                "London": {"trades": 80, "wins": 40, "losses": 40, "gross_win_r": 50.0, "gross_loss_r": 40.0, "pf": 1.25, "wr": 50.0},
+                "NewYork": {"trades": 50, "wins": 28, "losses": 22, "gross_win_r": 32.0, "gross_loss_r": 22.0, "pf": 1.45, "wr": 56.0},
+            },
+        }
+
+    cv = ChangeValidator(backtest_fn=weak_bt)
+    cv._path = str(tmp_path / "best.json")
+    # Seed a best-ever with a non-generalizing config
+    cv._best = {"XAUUSD": {"score": 0.9, "source": "seed",
+                           "at": datetime.now(timezone.utc).isoformat(),
+                           "params": {"osma_fast": 12}}}
+
+    # Now a generalizing candidate should be accepted (cold-start)
+    out = cv.validate("XAUUSD", {"osma_fast": 15}, source="cold_start_fix")
+    assert out["passed"] is True
+    assert "cold-start" in out["reason"]
+
+
+def test_validate_rejects_when_best_ever_valid_and_candidate_weak(tmp_path):
+    """If best-ever generalizes and candidate doesn't, reject normally."""
+    def weak_bt(symbol, params, sl_atr=1.0, tp_rr=2.0):
+        return {
+            "pfs": [0.9, 0.95, 0.92],
+            "wrs": [45.0, 47.0, 46.0],
+            "n_total": 100,
+            "generalizes": False,
+            "score": 0.9,
+            "session_scores": {},
+        }
+
+    cv = ChangeValidator(backtest_fn=weak_bt)
+    cv._path = str(tmp_path / "best.json")
+    cv._best = {"XAUUSD": {"score": 1.05, "source": "seed",
+                           "at": datetime.now(timezone.utc).isoformat(),
+                           "params": {"osma_fast": 12}}}
+
+    out = cv.validate("XAUUSD", {"osma_fast": 15}, source="weak_candidate")
+    assert out["passed"] is False
+    assert "does not generalize" in out["reason"]
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
