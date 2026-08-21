@@ -288,10 +288,10 @@ class ScalpEngine:
             # Dukascopy backtest of CURRENT settings via the REAL Backtester (injectable
             # data source) — lets the researcher measure our live indicator settings
             # against independent Dukascopy tick data, per symbol. Non-fatal.
-            _duka_source = None
+            self._duka_source = None
             try:
                 from src.data_sources.dukascopy import DukascopySource
-                _duka_source = DukascopySource(use_cache=True)
+                self._duka_source = DukascopySource(use_cache=True)
             except Exception as e:
                 logger.debug(f"DukascopySource unavailable: {e}")
             _duka_backtest = None
@@ -299,7 +299,7 @@ class ScalpEngine:
                 from src.learning.backtester import Backtester as _BT
 
                 def _duka_backtest(sym, params, sl_atr=None, tp_rr=None):
-                    if _duka_source is None:
+                    if self._duka_source is None:
                         return None
                     bt = self._make_backtester()
                     return bt.walkforward_focused(sym, params,
@@ -346,23 +346,6 @@ class ScalpEngine:
                 dukascopy_backtest=_duka_backtest, current_params_fn=_cur_params,
                 apply_tuned_fn=_apply_tuned, onnx_predictor=getattr(self, "onnx_predictor", None),
                 change_validator=self.change_validator)
-
-            # Wire the same independent Dukascopy source into the adaptive loop so that
-            # synthesized strategies are validated on a DIFFERENT historical source before
-            # promotion (issue #80).
-            if self.adaptive is not None and _duka_source is not None:
-                try:
-                    rates_fn = self.data_manager.get_rates if self.data_manager else _duka_source.get_rates
-                    ticks_fn = self.data_manager.get_ticks if self.data_manager else _duka_source.get_ticks
-                    self.adaptive = AdaptiveLoop(
-                        self.experience_db, self.registry,
-                        symbol_resolver=lambda b: (self.adapters[b].resolved_symbol
-                                                   if b in self.adapters else b),
-                        rates_fn=rates_fn,
-                        ticks_fn=ticks_fn,
-                    )
-                except Exception as e:
-                    logger.debug(f"Adaptive loop Dukascopy wiring unavailable: {e}")
         except Exception as e:
             logger.warning(f"ContinualResearcher unavailable: {e}")
 
@@ -472,6 +455,22 @@ class ScalpEngine:
             logger.warning(f"AdaptiveLoop unavailable: {e}")
             self.adaptive = None
         self._adaptive_running = False
+
+        # Wire Dukascopy data sources into the adaptive loop so synthesized strategies
+        # are validated on independent historical data before promotion (issue #80).
+        if getattr(self, "adaptive", None) is not None and getattr(self, "_duka_source", None) is not None:
+            try:
+                rates_fn = self.data_manager.get_rates if self.data_manager else self._duka_source.get_rates
+                ticks_fn = self.data_manager.get_ticks if self.data_manager else self._duka_source.get_ticks
+                self.adaptive = AdaptiveLoop(
+                    self.experience_db, self.registry,
+                    symbol_resolver=lambda b: (self.adapters[b].resolved_symbol
+                                               if b in self.adapters else b),
+                    rates_fn=rates_fn,
+                    ticks_fn=ticks_fn,
+                )
+            except Exception as e:
+                logger.debug(f"Adaptive loop Dukascopy wiring unavailable: {e}")
 
         self.cycle = 0
         self.trades_opened = 0
@@ -3896,6 +3895,13 @@ class ScalpEngine:
                     "open": self.sessions.is_open(base),
                     "minutes_to_close": self.sessions.minutes_to_close(base),
                 })
+
+            def _safe(fn, default=None):
+                try:
+                    return fn() if callable(fn) else fn
+                except Exception:
+                    return default
+
             status = {
                 "timestamp": datetime.now(timezone.utc).isoformat(),
                 "deployed_sha": _git_sha(),
@@ -3915,23 +3921,23 @@ class ScalpEngine:
                         "magic": p.magic,
                     } for p in self.open_positions.values()
                 ],
-                "risk": self.risk.status(),
+                "risk": _safe(self.risk.status, {}),
                 "symbol_profitability": getattr(self, "_symbol_profit_cache", {}),
                 "variant_performance": getattr(self, "_variant_perf_cache", {}),
-                "adaptive": (self.adaptive.status() if self.adaptive else {}),
-                "tuned_params": (self.param_optimizer.status() if self.param_optimizer else {}),
-                "symbol_governance": (self.governor.snapshot() if self.governor else {}),
+                "adaptive": _safe(self.adaptive.status if self.adaptive else None, {}),
+                "tuned_params": _safe(self.param_optimizer.status if self.param_optimizer else None, {}),
+                "symbol_governance": _safe(self.governor.snapshot if self.governor else None, {}),
                 "post_mortem": (getattr(self, "_postmortem_cache", {}) or {}),
-                "learning_health": self._learning_health(),
+                "learning_health": _safe(self._learning_health, {}),
                 "entry_frequency": getattr(self, "_freq_report", {}),
                 "growth": getattr(self, "_growth_report", {"enabled": getattr(config, "GROWTH_ENABLED", False)}),
-                "config_checkpoints": (self.checkpointer.snapshot() if self.checkpointer else {}),
-                "graduation": (self.graduation.snapshot() if self.graduation else {}),
-                "dynamic_fixer": (self.fixer.snapshot() if self.fixer else {}),
-                "onnx_model": (self.onnx_predictor.status() if self.onnx_predictor else {}),
-                "exit_calibration": (self.researcher.excursion_snapshot() if self.researcher else {}),
-                "operating_modes": (self.mode_mgr.snapshot() if self.mode_mgr else {}),
-                "performance_research": (self.perf_researcher.status() if self.perf_researcher else {}),
+                "config_checkpoints": _safe(self.checkpointer.snapshot if self.checkpointer else None, {}),
+                "graduation": _safe(self.graduation.snapshot if self.graduation else None, {}),
+                "dynamic_fixer": _safe(self.fixer.snapshot if self.fixer else None, {}),
+                "onnx_model": _safe(self.onnx_predictor.status if self.onnx_predictor else None, {}),
+                "exit_calibration": _safe(lambda: self.researcher.excursion_snapshot() if self.researcher else {}, {}),
+                "operating_modes": _safe(self.mode_mgr.snapshot if self.mode_mgr else None, {}),
+                "performance_research": _safe(self.perf_researcher.status if self.perf_researcher else None, {}),
                 "edge": (self._edge_cache or {}),
                 "algo_trading": {
                     "can_trade": algo.can_trade,

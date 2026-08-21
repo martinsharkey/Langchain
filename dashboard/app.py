@@ -25,6 +25,7 @@ from flask import Flask, jsonify, request
 from src import config
 from src.utils.logger import get_logger
 from src.mt5.connector import get_connector, mt5_lock
+import MetaTrader5 as mt5
 
 logger = get_logger("dashboard")
 app = Flask(__name__)
@@ -92,21 +93,81 @@ def api_status():
             return jsonify({"error": str(e), "engine_running": False})
     status["engine_running"] = status.get("running", False)
 
-    # reconcile open_positions against live MT5 so the dashboard never shows
-    # phantom trades from a stale bot_status.json
+    # reconcile algo_trading + open_positions against live MT5 so the dashboard
+    # never shows stale/disabled state from a bot_status.json written during a
+    # transient connector glitch.
     try:
-        from src.mt5.connector import get_connector
+        from src.mt5.connector import get_connector, mt5_lock
+        import MetaTrader5 as mt5
         connector = get_connector()
+        live_algo = None
+        if connector.is_connected():
+            try:
+                with mt5_lock():
+                    ti = mt5.terminal_info()
+                    ai = mt5.account_info()
+                live_algo = {
+                    "can_trade": bool(ti.trade_allowed) if ti else False,
+                    "terminal_trade_allowed": bool(ti.trade_allowed) if ti else False,
+                    "account_trade_allowed": bool(ai.trade_allowed) if ai else False,
+                    "connected": True,
+                    "reason": "OK" if (ti and ai and ti.trade_allowed and ai.trade_allowed) else "check MT5",
+                }
+            except Exception:
+                pass
+        if live_algo is None:
+            try:
+                mt5.initialize()
+                ti = mt5.terminal_info()
+                ai = mt5.account_info()
+                live_algo = {
+                    "can_trade": bool(ti.trade_allowed) if ti else False,
+                    "terminal_trade_allowed": bool(ti.trade_allowed) if ti else False,
+                    "account_trade_allowed": bool(ai.trade_allowed) if ai else False,
+                    "connected": True,
+                    "reason": "OK" if (ti and ai and ti.trade_allowed and ai.trade_allowed) else "check MT5",
+                }
+            except Exception:
+                pass
+        if live_algo is not None:
+            status["algo_trading"] = live_algo
+        # reconcile open_positions against live MT5 so the dashboard never shows
+        # phantom trades from a stale bot_status.json, and never misses real ones.
+        live = []
         if connector.is_connected():
             with mt5_lock():
                 live = mt5.positions_get() or []
+        else:
+            try:
+                mt5.initialize()
+                live = mt5.positions_get() or []
+            except Exception:
+                pass
+        if live:
             live_tickets = {p.ticket for p in live}
             kept = []
             for p in status.get("open_positions", []):
                 if p.get("ticket") in live_tickets:
                     kept.append(p)
-            if len(kept) != len(status.get("open_positions", [])):
-                status["open_positions"] = kept
+            existing_tickets = {p.get("ticket") for p in kept}
+            for p in live:
+                if p.ticket not in existing_tickets:
+                    action = "buy" if p.type == mt5.ORDER_TYPE_BUY else "sell"
+                    kept.append({
+                        "ticket": p.ticket,
+                        "symbol": p.symbol,
+                        "action": action,
+                        "entry": p.price_open,
+                        "volume": p.volume,
+                        "sl": p.sl,
+                        "tp": p.tp,
+                        "confidence": 0.0,
+                        "strategy": "adopted_live",
+                        "opened_at": datetime.fromtimestamp(int(p.time), tz=timezone.utc).isoformat() if p.time else None,
+                        "mgmt_variant": None,
+                        "magic": getattr(p, "magic", None),
+                    })
+            status["open_positions"] = kept
     except Exception:
         pass
 
