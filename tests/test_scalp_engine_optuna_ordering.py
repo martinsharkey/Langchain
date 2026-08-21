@@ -17,7 +17,7 @@ from __future__ import annotations
 import sys
 import os
 from datetime import datetime, timezone
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -30,6 +30,7 @@ class _FakeAdapter:
     def __init__(self, symbol: str):
         self.base = symbol.upper().replace("-", "").replace(".", "")
         self.resolved_symbol = symbol
+        self.spec = None
 
 
 class _FakeBridge:
@@ -211,3 +212,110 @@ def test_full_cycle_study_then_bridge(monkeypatch):
     assert "XAUUSD-ECN" in study_events
     assert engine.optuna_bridge.calls == [("XAUUSD-ECN", 40)]
     assert "XAUUSD-ECN" in engine._optuna_applied_today
+
+
+def test_multiple_symbols_staggered_completion(monkeypatch):
+    """When multiple symbols run studies, the bridge must only propose for
+    symbols whose study thread has already finished."""
+    from src.trading.scalp_engine import ScalpEngine
+
+    engine = ScalpEngine.__new__(ScalpEngine)
+    engine.adapters = {
+        "XAUUSD": _FakeAdapter("XAUUSD-ECN"),
+        "GER40": _FakeAdapter("GER40"),
+    }
+    engine.optuna_bridge = _FakeBridge()
+    engine._optuna_study_run_day = None
+    engine._optuna_study_threads = {}
+    engine._optuna_applied_today = set()
+    engine._optuna_last_run_day = None
+
+    study_events = []
+
+    def fake_run_daily_studies(symbols, **kwargs):
+        study_events.extend(symbols)
+        for sym in symbols:
+            t = engine._optuna_study_threads.get(sym)
+            if t:
+                t._finished = True
+
+    monkeypatch.setattr(engine, "_refresh_data_if_needed", lambda *a, **k: None)
+    _patch_optuna_modules(monkeypatch, se_mod, run_fn=fake_run_daily_studies)
+
+    engine._optuna_start_daily_studies()
+    # Mark only XAUUSD study as finished; GER40 is still running
+    engine._optuna_study_threads["GER40"]._finished = False
+    engine._optuna_bridge_cycle()
+
+    assert "XAUUSD-ECN" in study_events
+    assert "GER40" in study_events
+    # Bridge should only propose for XAUUSD-ECN (finished), not GER40 (still running)
+    assert ("XAUUSD-ECN", 40) in engine.optuna_bridge.calls
+    assert not any(c[0] == "GER40" for c in engine.optuna_bridge.calls)
+    assert "XAUUSD-ECN" in engine._optuna_applied_today
+    assert "GER40" not in engine._optuna_applied_today
+
+
+def test_bridge_handles_propose_exception(monkeypatch):
+    """If propose_and_apply raises, the bridge must not crash and must not
+    mark the symbol as applied-today."""
+    from src.trading.scalp_engine import ScalpEngine
+
+    class _FailingBridge:
+        def propose_and_apply(self, symbol: str, min_trades: int = 40) -> dict:
+            raise RuntimeError("optuna down")
+
+    engine = ScalpEngine.__new__(ScalpEngine)
+    engine.adapters = {"XAUUSD": _FakeAdapter("XAUUSD-ECN")}
+    engine.optuna_bridge = _FailingBridge()
+    engine._optuna_study_run_day = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    engine._optuna_study_threads = {"XAUUSD-ECN": _FakeThread(None, "optuna-study-XAUUSD")}
+    engine._optuna_study_threads["XAUUSD-ECN"]._started = True
+    engine._optuna_study_threads["XAUUSD-ECN"]._finished = True
+    engine._optuna_applied_today = set()
+    engine._optuna_last_run_day = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+
+    monkeypatch.setattr(engine, "_refresh_data_if_needed", lambda *a, **k: None)
+    # Should not raise
+    engine._optuna_bridge_cycle()
+    assert "XAUUSD-ECN" not in engine._optuna_applied_today
+
+
+def test_run_cycle_calls_optuna_methods(monkeypatch):
+    """_maybe_run_adaptive -> _work must invoke the Optuna study and bridge methods."""
+    from src.trading.scalp_engine import ScalpEngine
+
+    engine = ScalpEngine.__new__(ScalpEngine)
+    engine.adapters = {"XAUUSD": _FakeAdapter("XAUUSD-ECN")}
+    engine.optuna_bridge = _FakeBridge()
+    engine._optuna_study_run_day = None
+    engine._optuna_study_threads = {}
+    engine._optuna_applied_today = set()
+    engine._optuna_last_run_day = None
+    engine.cycle = 5
+    engine._adaptive_running = False
+    engine.post_mortem = None
+    engine.knowledge_store = None
+    engine.param_optimizer = MagicMock()
+    engine.change_validator = MagicMock()
+    engine.adaptive = MagicMock()
+    engine.adaptive.run_once.return_value = {}
+
+    study_calls = []
+    bridge_calls = []
+
+    def fake_study():
+        study_calls.append(True)
+
+    def fake_bridge():
+        bridge_calls.append(True)
+
+    monkeypatch.setattr(engine, "_optuna_start_daily_studies", fake_study)
+    monkeypatch.setattr(engine, "_optuna_bridge_cycle", fake_bridge)
+    monkeypatch.setattr(engine, "_refresh_data_if_needed", lambda *a, **k: None)
+    monkeypatch.setattr(se_mod, "threading", type("t", (), {"Thread": _FakeThread})())
+
+    engine._maybe_run_adaptive()
+
+    assert len(study_calls) == 1
+    assert len(bridge_calls) == 1

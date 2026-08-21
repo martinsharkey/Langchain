@@ -17,6 +17,7 @@ Or via app.py (imports `app` from here).
 import os
 import json
 import sqlite3
+import statistics
 from datetime import datetime, timezone
 
 from flask import Flask, jsonify, request
@@ -666,6 +667,132 @@ def api_pipeline_bridge():
         except Exception:
             pass
     return jsonify({"recent": entries[:20], "count": len(entries)})
+
+
+@app.route("/api/pipeline/baseline")
+def api_pipeline_baseline():
+    """Baseline vs current live performance lift per symbol.
+
+    Reads data/history_baseline.json (if present) and compares its metrics to
+    the current live performance from the experience DB. Symbols without a
+    baseline file are reported as ``no_baseline`` so the dashboard can still
+    show current performance.
+    """
+    baseline_path = os.path.join(DATA_DIR, "history_baseline.json")
+    baseline = {}
+    if os.path.exists(baseline_path):
+        try:
+            with open(baseline_path, encoding="utf-8") as f:
+                baseline = json.load(f)
+        except Exception:
+            baseline = {}
+
+    # Current live performance per symbol from the experience DB
+    current = {}
+    if os.path.exists(EXPERIENCE_DB):
+        try:
+            conn = sqlite3.connect(EXPERIENCE_DB)
+            conn.row_factory = sqlite3.Row
+            rows = conn.execute("""
+                SELECT symbol,
+                    COUNT(*) as trades,
+                    SUM(CASE WHEN outcome='win' THEN 1 ELSE 0 END) as wins,
+                    COALESCE(SUM(profit_loss),0) as net_pnl,
+                    COALESCE(SUM(CASE WHEN profit_loss > 0 THEN profit_loss ELSE 0 END),0) as gross_win,
+                    COALESCE(SUM(CASE WHEN profit_loss < 0 THEN profit_loss ELSE 0 END),0) as gross_loss
+                FROM trades
+                WHERE outcome IN ('win','loss','breakeven')
+                GROUP BY symbol
+            """).fetchall()
+            conn.close()
+            for r in rows:
+                d = dict(r)
+                t = d["trades"] or 0
+                w = d["wins"] or 0
+                gw = d["gross_win"] or 0.0
+                gl = abs(d["gross_loss"] or 0.0)
+                current[d["symbol"]] = {
+                    "trades": t,
+                    "win_rate": round(w / max(t, 1) * 100, 1),
+                    "net_pnl": round(d["net_pnl"], 2),
+                    "profit_factor": round(gw / max(gl, 0.001), 2),
+                    "expectancy": round((gw - gl) / max(t, 1), 2),
+                }
+        except Exception as e:
+            logger.warning(f"baseline query failed: {e}")
+
+    symbols = set(list(baseline.get("per_month", {}).keys()) + list(current.keys()))
+    # Also include symbols from tuned_params so the dashboard shows all traded symbols
+    tuned_path = os.path.join(DATA_DIR, "tuned_params.json")
+    if os.path.exists(tuned_path):
+        try:
+            with open(tuned_path) as f:
+                tuned = json.load(f)
+            symbols.update(tuned.keys())
+        except Exception:
+            pass
+
+    out = {}
+
+    # Normalize symbol names for matching baseline -> current
+    def _norm(s):
+        return (s or "").upper().replace("-", "").replace(".", "").replace("_", "")
+
+    # Baseline is a single-symbol long-history record; surface it under the baseline symbol
+    base_sym = baseline.get("symbol")
+    base_norm = _norm(base_sym)
+    if base_sym:
+        matched_current = None
+        for c_sym, c in current.items():
+            if _norm(c_sym) == base_norm:
+                matched_current = c
+                break
+        b_entry = {
+            "baseline": {
+                "pass_rate": baseline.get("pass_rate"),
+                "median_pf": baseline.get("median_pf"),
+                "span": baseline.get("span"),
+                "tf": baseline.get("tf"),
+                "config": baseline.get("config"),
+                "per_month": baseline.get("per_month", {}),
+            },
+            "current": matched_current,
+            "lift": None,
+            "status": "ok",
+        }
+        if matched_current:
+            b_pf = baseline.get("median_pf") or 0
+            c_pf = matched_current["profit_factor"]
+            b_wr = statistics.median([v["win_rate"] for v in baseline.get("per_month", {}).values() if v.get("win_rate") is not None]) if baseline.get("per_month") else 0
+            c_wr = matched_current["win_rate"]
+            b_entry["lift"] = {
+                "profit_factor": round(c_pf - b_pf, 2),
+                "win_rate": round(c_wr - b_wr, 1),
+                "expectancy": round(matched_current["expectancy"] - statistics.median([v["expectancy"] for v in baseline.get("per_month", {}).values() if v.get("expectancy") is not None]), 2) if baseline.get("per_month") else None,
+                "trades": matched_current["trades"],
+            }
+        out[base_sym] = b_entry
+
+    # Current-only symbols (no baseline)
+    for sym, c in current.items():
+        if sym not in out:
+            out[sym] = {
+                "baseline": None,
+                "current": c,
+                "lift": None,
+                "status": "no_baseline",
+            }
+
+    return jsonify({
+        "baseline_symbol": baseline.get("symbol"),
+        "baseline_tf": baseline.get("tf"),
+        "baseline_span": baseline.get("span"),
+        "baseline_config": baseline.get("config"),
+        "baseline_pass_rate": baseline.get("pass_rate"),
+        "baseline_median_pf": baseline.get("median_pf"),
+        "symbols": out,
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+    })
 
 
 @app.route("/")
