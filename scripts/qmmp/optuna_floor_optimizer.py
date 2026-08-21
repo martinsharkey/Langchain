@@ -251,33 +251,33 @@ def objective(trial: optuna.Trial, df: pd.DataFrame, ind: dict, folds: int = 3,
     """
     floors = {}
 
-    # OsMA magnitude floors (per session)
+    # OsMA magnitude floors (per session) — live range ~0..3
     osma_floors = {}
     for sn in SESSIONS:
-        osma_floors[sn] = trial.suggest_float(f"osma_{sn}", 0.0, 100.0, step=1.0)
+        osma_floors[sn] = trial.suggest_float(f"osma_{sn}", 0.0, 3.0, step=0.05)
     floors["osma_mag"] = osma_floors
 
-    # EMA alignment floors
+    # EMA alignment floors — live range ~0..0.5
     ema_floors = {}
     for sn in SESSIONS:
-        ema_floors[sn] = trial.suggest_float(f"ema_{sn}", 0.0, 200.0, step=1.0)
+        ema_floors[sn] = trial.suggest_float(f"ema_{sn}", 0.0, 0.5, step=0.005)
     floors["ema_align"] = ema_floors
 
-    # Bulls/Bears floors (per session, per side)
+    # Bulls/Bears floors (per session, per side) — live range ~-2..2
     bulls_floors = {}
     bears_floors = {}
     for sn in SESSIONS:
-        bulls_floors[f"{sn}_long"] = trial.suggest_float(f"bulls_{sn}_long", 0.0, 1000.0, step=5.0)
-        bulls_floors[f"{sn}_short"] = trial.suggest_float(f"bulls_{sn}_short", -500.0, 0.0, step=5.0)
-        bears_floors[f"{sn}_long"] = trial.suggest_float(f"bears_{sn}_long", -500.0, 0.0, step=5.0)
-        bears_floors[f"{sn}_short"] = trial.suggest_float(f"bears_{sn}_short", 0.0, 1000.0, step=5.0)
+        bulls_floors[f"{sn}_long"] = trial.suggest_float(f"bulls_{sn}_long", 0.0, 2.0, step=0.05)
+        bulls_floors[f"{sn}_short"] = trial.suggest_float(f"bulls_{sn}_short", -2.0, 0.0, step=0.05)
+        bears_floors[f"{sn}_long"] = trial.suggest_float(f"bears_{sn}_long", -2.0, 0.0, step=0.05)
+        bears_floors[f"{sn}_short"] = trial.suggest_float(f"bears_{sn}_short", 0.0, 2.0, step=0.05)
     floors["bulls"] = bulls_floors
     floors["bears"] = bears_floors
 
-    # ATR floors
+    # ATR floors — live range ~0..5
     atr_floors = {}
     for sn in SESSIONS:
-        atr_floors[sn] = trial.suggest_float(f"atr_{sn}", 0.0, 5000.0, step=25.0)
+        atr_floors[sn] = trial.suggest_float(f"atr_{sn}", 0.0, 5.0, step=0.1)
     floors["atr"] = atr_floors
 
     # Walk-forward evaluation on first (folds-1) folds only; last fold is held out
