@@ -84,6 +84,10 @@ class ChangeValidator:
         A pass REQUIRES: generalizes, forward-window PF>=1, enough trades (min_trades so a
         thin fluke can't set the bar), and score beats the (time-decayed) best-ever+margin.
         
+        Generalizes gate: all walk-forward windows must have PF >= 1.0. If the current
+        best-known config fails this gate its score is treated as -1.0 (invalid) and
+        the cold-start rule accepts the first generalizing candidate instead.
+        
         Cold-start: if no valid best-ever exists for this symbol, the first generalizing
         candidate is accepted (its score becomes the new bar).
         
@@ -201,6 +205,9 @@ class ChangeValidator:
         self._memo[mk] = out
         logger.warning(f"[VALIDATE] {sym} ({source}): {'PASS' if passed else 'REJECT'} "
                        f"score {out.get('score')} fwdPF {out.get('forward_pf')} vs best {out['best_ever']} — {reason}")
+        sess_scores = out.get("session_scores")
+        if sess_scores:
+            logger.info(f"[VALIDATE] {sym} ({source}): session_scores={sess_scores}")
         if self.learning_log:
             self.learning_log.validate(sym, source, passed, out.get("score", -1.0),
                                        out.get("forward_pf", 0.0), reason, out.get("n_total", 0))

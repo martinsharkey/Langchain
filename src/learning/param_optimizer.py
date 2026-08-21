@@ -638,6 +638,10 @@ class ParameterOptimizer:
         Hill-climb: start from current best, try mutations, keep any that
         generalize AND beat the incumbent's score (min-PF across windows).
 
+        Generalizes gate: all walk-forward windows must have PF >= 1.0. If the
+        baseline fails this gate its score is pinned at -1.0 and the cold-start
+        rule accepts the first generalizing candidate instead.
+
         Cold-start rule: if the incumbent (current tuned / manual baseline) does NOT
         generalize, its score is meaningless. The FIRST candidate that generalizes on
         its own merits becomes the new incumbent, regardless of whether it "beats" the
@@ -749,6 +753,9 @@ class ParameterOptimizer:
                         f"(edge lever: {edge['param'] if edge else 'guided'} "
                         f"{edge['from'] if edge else ''}->{edge['to'] if edge else ''}) "
                         f"tried {tried}, from_reflection={directive_worked}")
+            sess_scores = best_res.get("session_scores")
+            if sess_scores:
+                logger.info(f"[OPTIMIZER] {symbol}: session_scores={sess_scores}")
             if self.learning_log:
                 self.learning_log.optimizer(symbol, tried, best_score, "IMPROVED",
                                             f"min-PF {best_score:.2f}, tried {tried}")
