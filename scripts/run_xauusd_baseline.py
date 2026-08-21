@@ -16,8 +16,18 @@ from src.learning.strategy_registry import StrategyRegistry
 from src.learning.backtester import Backtester
 from src.learning.param_optimizer import ParameterOptimizer
 from src import config
+from src.mt5.connector import get_connector
 
 def main():
+    # Initialize MT5 connection first
+    conn = get_connector()
+    ok = conn.initialize()
+    if not ok:
+        print("ERROR: Cannot connect to MT5. Ensure terminal is running and logged in.")
+        sys.exit(1)
+    print(f"MT5 connected: account={conn.get_account_info().get('login')} "
+          f"server={conn.get_account_info().get('server')}")
+
     reg = StrategyRegistry()
     bt = Backtester(registry=reg)
     opt = ParameterOptimizer(

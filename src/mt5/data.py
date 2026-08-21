@@ -141,11 +141,21 @@ def get_rates(
             raise ConnectionError("MT5 package not available")
 
         tf = TIMEFRAMES.get(timeframe, mt5.TIMEFRAME_H1)
-        rates = mt5.copy_rates_from_pos(symbol, tf, 0, count)
+        
+        # Resolve broker-specific symbol (e.g. XAUUSD -> XAUUSD-ECN)
+        resolved = symbol
+        try:
+            from src.mt5.broker_adapter import resolve_symbol
+            spec = resolve_symbol(symbol)
+            if spec is not None:
+                resolved = spec.resolved
+        except Exception:
+            pass
+        rates = mt5.copy_rates_from_pos(resolved, tf, 0, count)
 
         if rates is None or len(rates) == 0:
             raise ConnectionError(
-                f"No data for {symbol} {timeframe}. "
+                f"No data for {resolved} (from {symbol}) {timeframe}. "
                 f"Check MT5 terminal and market data availability."
             )
 

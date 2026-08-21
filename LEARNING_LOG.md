@@ -3,6 +3,15 @@
 > Auto-generated digest of what the self-learning loop changed and why.
 > Most-recent-first. Reporting only — never gates a live decision (#45.1).
 
+- **2026-08-21 08:15** [OPTIMIZER] `GER40.` tried 9 candidates, best score 1.23 -- why: no improvement -- metric: min-PF 1.23, tried 9
+- **2026-08-21 08:14** [OPTIMIZER] `GER40.` tried 0 candidates, best score 1.23 -- why: optimization started -- metric: base generalizes=True, n_total=1521
+- **2026-08-21 08:14** [OPTIMIZER] `XAUUSD-ECN` tried 0 candidates, best score -1.00 -- why: no baseline data -- metric: backtest returned None
+- **2026-08-21 08:14** [OPTIMIZER] `GER40.` tried 31 candidates, best score 1.23 -- why: no improvement -- metric: min-PF 1.23, tried 31
+- **2026-08-21 08:14** [REVERT] `BTCUSD` reverted to best-known config -- why: live expectancy degraded vs best-known -- metric: restored sl_atr 1.62 tp_rr 2.0
+- **2026-08-21 08:13** [OPTIMIZER] `GER40.` tried 0 candidates, best score 1.23 -- why: optimization started -- metric: base generalizes=True, n_total=1521
+- **2026-08-21 08:13** [OPTIMIZER] `BTCUSD` tried 32 candidates, best score -1.00 -- why: no improvement -- metric: min-PF -1.00, tried 32
+- **2026-08-21 08:11** [OPTIMIZER] `BTCUSD` tried 0 candidates, best score -1.00 -- why: optimization started -- metric: base generalizes=False, n_total=2770
+- **2026-08-21 08:11** [OPTIMIZER] `XAUUSD-ECN` tried 0 candidates, best score -1.00 -- why: no baseline data -- metric: backtest returned None
 - **2026-08-21 07:14** [OPTIMIZER] `GER40.` tried 21 candidates, best score 1.23 -- why: no improvement -- metric: min-PF 1.23, tried 21
 - **2026-08-21 07:13** [OPTIMIZER] `GER40.` tried 0 candidates, best score 1.23 -- why: optimization started -- metric: base generalizes=True, n_total=1521
 - **2026-08-21 07:13** [OPTIMIZER] `XAUUSD-ECN` tried 0 candidates, best score -1.00 -- why: no baseline data -- metric: backtest returned None
@@ -394,12 +403,3 @@
 - **2026-08-07 01:03** [REVERT] `XAUUSD` reverted to best-known config -- why: live expectancy degraded vs best-known -- metric: restored sl_atr 0.8 tp_rr 2.0
 - **2026-08-07 00:58** [REVERT] `XAUUSD` reverted to best-known config -- why: live expectancy degraded vs best-known -- metric: restored sl_atr 0.8 tp_rr 2.0
 - **2026-08-07 00:53** [REVERT] `XAUUSD` reverted to best-known config -- why: live expectancy degraded vs best-known -- metric: restored sl_atr 0.8 tp_rr 2.0
-- **2026-08-07 00:48** [REVERT] `XAUUSD` reverted to best-known config -- why: live expectancy degraded vs best-known -- metric: restored sl_atr 0.8 tp_rr 2.0
-- **2026-08-07 00:43** [REVERT] `XAUUSD` reverted to best-known config -- why: live expectancy degraded vs best-known -- metric: restored sl_atr 0.8 tp_rr 2.0
-- **2026-08-07 00:37** [REVERT] `XAUUSD` reverted to best-known config -- why: live expectancy degraded vs best-known -- metric: restored sl_atr 0.8 tp_rr 2.0
-- **2026-08-07 00:33** [EXIT-LOCK] `BTCUSD` exit set sl_atr 1.84 tp_rr 0.71 -- why: robust -- metric: recent expectancy -0.138 (n=30)
-- **2026-08-07 00:31** [REVERT] `XAUUSD` reverted to best-known config -- why: live expectancy degraded vs best-known -- metric: restored sl_atr 0.8 tp_rr 2.0
-- **2026-08-07 00:24** [REVERT] `XAUUSD` reverted to best-known config -- why: live expectancy degraded vs best-known -- metric: restored sl_atr 0.8 tp_rr 2.0
-- **2026-08-07 00:18** [REVERT] `XAUUSD` reverted to best-known config -- why: live expectancy degraded vs best-known -- metric: restored sl_atr 0.8 tp_rr 2.0
-- **2026-08-07 00:15** [EXIT-LOCK] `BTCUSD` exit set sl_atr 1.59 tp_rr 0.86 -- why: excursion -- metric: recent expectancy -0.138 (n=30)
-- **2026-08-07 00:12** [REVERT] `XAUUSD` reverted to best-known config -- why: live expectancy degraded vs best-known -- metric: restored sl_atr 0.8 tp_rr 2.0
