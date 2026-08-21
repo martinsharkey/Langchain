@@ -38,43 +38,43 @@ SCHEDULE_PATH = os.path.join(config.DATA_DIR, "session_schedule.json")
 DEFAULT_SCHEDULES = {
     "XAUUSD": {
         "always_open": False,
-        "daily_break": ["21:00", "22:00"],   # broker daily maintenance (approx)
-        "weekend": {"close": [4, "21:00"], "open": [6, "22:00"]},  # Fri 21:00 → Sun 22:00 UTC
-        "note": "Gold: 24/5 with a ~1h daily break. Researcher should verify broker-specific times.",
-    },
-    "XAGUSD": {   # silver — same CFD session as gold
-        "always_open": False,
-        "daily_break": ["21:00", "22:00"],
         "weekend": {"close": [4, "21:00"], "open": [6, "22:00"]},
-        "note": "Silver: same daily break + weekend as gold.",
+        "note": "Gold: 24/5 with weekend close. Daily break removed — broker trades through 21-22 UTC.",
     },
-    # FX majors + indices on this broker follow the ~21:00-22:00 UTC daily break
-    # and Fri->Sun weekend close. They are NOT 24/7.
-    "EURUSD": {"always_open": False, "daily_break": ["21:00", "22:00"],
-               "weekend": {"close": [4, "21:00"], "open": [6, "22:00"]}},
-    "AUDUSD": {"always_open": False, "daily_break": ["21:00", "22:00"],
-               "weekend": {"close": [4, "21:00"], "open": [6, "22:00"]}},
-    "USDCAD": {"always_open": False, "daily_break": ["21:00", "22:00"],
-               "weekend": {"close": [4, "21:00"], "open": [6, "22:00"]}},
-    "GBPUSD": {"always_open": False, "daily_break": ["21:00", "22:00"],
-               "weekend": {"close": [4, "21:00"], "open": [6, "22:00"]}},
-    "USDJPY": {"always_open": False, "daily_break": ["21:00", "22:00"],
-               "weekend": {"close": [4, "21:00"], "open": [6, "22:00"]}},
-    "GER40": {"always_open": False, "daily_break": ["21:00", "22:00"],
+    "XAGUSD": {
+        "always_open": False,
+        "weekend": {"close": [4, "21:00"], "open": [6, "22:00"]},
+        "note": "Silver: same as gold. Daily break removed.",
+    },
+    "EURUSD": {"always_open": False,
+               "weekend": {"close": [4, "21:00"], "open": [6, "22:00"]},
+               "note": "FX: weekend only on this broker."},
+    "AUDUSD": {"always_open": False,
+               "weekend": {"close": [4, "21:00"], "open": [6, "22:00"]},
+               "note": "FX: weekend only on this broker."},
+    "USDCAD": {"always_open": False,
+               "weekend": {"close": [4, "21:00"], "open": [6, "22:00"]},
+               "note": "FX: weekend only on this broker."},
+    "GBPUSD": {"always_open": False,
+               "weekend": {"close": [4, "21:00"], "open": [6, "22:00"]},
+               "note": "FX: weekend only on this broker."},
+    "USDJPY": {"always_open": False,
+               "weekend": {"close": [4, "21:00"], "open": [6, "22:00"]},
+               "note": "FX: weekend only on this broker."},
+    "GER40": {"always_open": False,
               "weekend": {"close": [4, "21:00"], "open": [6, "22:00"]},
-              "note": "Index CFD: daily break + weekend (verify exact index hours)."},
+              "note": "Index CFD: weekend only on this broker. Daily break removed."},
     "BTCUSD": {"always_open": True, "note": "Crypto trades 24/7."},
     "ETHUSD": {"always_open": True, "note": "Crypto trades 24/7."},
 }
 
-# Default schedule for UNKNOWN symbols. SAFER to assume a daily break + weekend
+# Default schedule for UNKNOWN symbols. SAFER to assume weekend-only closure
 # (so pre-close protection fires) than to assume 24/7 and leave winners exposed
 # over a gap. Crypto-like names (BTC/ETH/XBT/crypto) default to 24/7.
 DEFAULT_NON_CRYPTO = {
     "always_open": False,
-    "daily_break": ["21:00", "22:00"],
     "weekend": {"close": [4, "21:00"], "open": [6, "22:00"]},
-    "note": "Unknown symbol — assumed standard FX/CFD session for safety.",
+    "note": "Unknown symbol — assumed weekend closure for safety.",
 }
 _CRYPTO_HINTS = ("BTC", "ETH", "XBT", "CRYPTO", "LTC", "XRP", "SOL", "DOGE")
 
@@ -135,6 +135,11 @@ class SessionManager:
         days_to_open = (open_dow - close_dow) % 7
         open_dt = close_dt + timedelta(days=days_to_open)
         open_dt = open_dt.replace(hour=oh, minute=om, second=0, microsecond=0)
+        # advance past any intermediate opens so we land in the closure cycle
+        # that actually contains `now` (fixes false weekend detection mid-week)
+        while now >= open_dt:
+            close_dt += timedelta(days=7)
+            open_dt += timedelta(days=7)
         return close_dt <= now < open_dt
 
     def is_open(self, base_symbol: str, now: Optional[datetime] = None) -> bool:

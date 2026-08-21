@@ -638,6 +638,11 @@ class ParameterOptimizer:
         Hill-climb: start from current best, try mutations, keep any that
         generalize AND beat the incumbent's score (min-PF across windows).
 
+        Cold-start rule: if the incumbent (current tuned / manual baseline) does NOT
+        generalize, its score is meaningless. The FIRST candidate that generalizes on
+        its own merits becomes the new incumbent, regardless of whether it "beats" the
+        broken baseline. From that point on, normal competition resumes.
+
         If `directives` are supplied (from the post-mortem self-reflection), the
         FIRST candidate is guided in that direction — so the bot's reflection on
         its own failures actively steers the tuning, then walk-forward validates.
@@ -651,14 +656,16 @@ class ParameterOptimizer:
                 self.learning_log.optimizer(symbol, 0, -1.0, "no baseline data", "backtest returned None")
             return {"symbol": symbol, "status": "no baseline data"}
         best_params = base
-        best_score = base_res["score"] if base_res.get("generalizes") else -1.0
+        incumbent_valid = bool(base_res.get("generalizes"))
+        best_score = base_res["score"] if incumbent_valid else -1.0
         best_res = base_res
         improved = False
         tried = 0
         directive_worked = False
+        cold_start = not incumbent_valid
         if self.learning_log:
             self.learning_log.optimizer(symbol, 0, best_score, "optimization started",
-                                        f"base generalizes={base_res.get('generalizes')}, n_total={base_res.get('n_total')}")
+                                        f"base generalizes={incumbent_valid}, n_total={base_res.get('n_total')}, cold_start={cold_start}")
 
         # candidate list: reflection-guided first, then a #25 mql5-grounded
         # candidate, then a DIRECTED coordinate search over the high-impact levers
@@ -674,7 +681,16 @@ class ParameterOptimizer:
                 continue
             tried += 1
             res = self.backtest_fn(symbol, cand, cand.get("sl_atr", 1.0), cand.get("tp_rr", 2.0))
-            if res and res.get("generalizes") and res["score"] > best_score + 0.01:
+            if not res or not res.get("generalizes"):
+                continue
+            if cold_start:
+                best_score = res["score"]; best_params = cand; best_res = res
+                improved = True; directive_worked = True
+                cold_start = False
+                logger.info(f"[OPTIMIZER] {symbol}: cold-start ACCEPTED min-PF {best_score:.2f} "
+                            f"(first generalizing candidate, incumbent was invalid)")
+                continue
+            if res["score"] > best_score + 0.01:
                 best_score = res["score"]; best_params = cand; best_res = res
                 improved = True; directive_worked = True
 
@@ -693,6 +709,15 @@ class ParameterOptimizer:
             budget -= 1; tried += 1
             res = self.backtest_fn(symbol, cand, cand.get("sl_atr", 1.0), cand.get("tp_rr", 2.0))
             if not res or not res.get("generalizes"):
+                continue
+            if cold_start:
+                best_score = res["score"]; best_params = cand; best_res = res
+                improved = True; cold_start = False
+                attribution.append({"param": _pname, "from": best_params.get(_pname),
+                                    "to": cand.get(_pname),
+                                    "score_gain": round(res["score"] - (-1.0), 3)})
+                logger.info(f"[OPTIMIZER] {symbol}: cold-start ACCEPTED min-PF {best_score:.2f} "
+                            f"via {_pname}")
                 continue
             # robust objective: maximise the WORST-window PF (min across windows),
             # tie-break on total R. Only keep if it clears the incumbent.

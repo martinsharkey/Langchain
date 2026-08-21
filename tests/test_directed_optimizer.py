@@ -127,4 +127,60 @@ def test_gold_proven_edge_baseline_is_the_starting_point():
     btc = o.current_params("BTCUSD")
     assert btc["osma_min_long"] == pytest.approx(17.971, abs=0.01), btc
     assert btc["min_confluence"] == SYMBOL_BASELINES["BTCUSD"]["min_confluence"]
+
+
+def test_optimize_cold_start_accepts_first_generalizing_candidate():
+    """When the incumbent does not generalize, optimize() must accept the first
+    candidate that generalizes on its own merits (cold-start rule)."""
+    call_count = [0]
+
+    def mock_bt(symbol, params, sl_atr=1.0, tp_rr=2.0):
+        call_count[0] += 1
+        # SYMBOL_BASELINES['XAUUSD'] has osma_min_long=2.0; treat that as the
+        # non-generalizing baseline. Any other value generalizes.
+        if params.get("osma_min_long") == 2.0:
+            return {"pfs": [0.85, 0.92, 0.88], "wrs": [45.0, 48.0, 46.0],
+                    "n_total": 150, "generalizes": False, "score": -1.0,
+                    "session_scores": {}}
+        return {"pfs": [1.05, 1.08, 1.03], "wrs": [52.0, 54.0, 51.0],
+                "n_total": 160, "generalizes": True, "score": 1.03,
+                "session_scores": {}}
+
+    opt = ParameterOptimizer(registry=None, backtest_fn=mock_bt)
+    opt.tuned = {}   # isolate from disk state
+    result = opt.optimize("XAUUSD", iterations=2)
+    assert result["improved"] is True, f"expected cold-start accept, got {result}"
+    assert result["score"] == 1.03, result
+    assert result["tried"] >= 1
+    assert call_count[0] >= 2  # baseline + at least one candidate
+
+
+def test_optimize_does_not_regress_after_cold_start():
+    """After the incumbent is set to a generalizing candidate, subsequent candidates
+    must beat its score (normal competition resumes)."""
+    def mock_bt(symbol, params, sl_atr=1.0, tp_rr=2.0):
+        # Check the mutated param FIRST, because candidates preserve other base keys.
+        if params.get("osma_fast") == 16:
+            return {"pfs": [1.15, 1.12, 1.10], "wrs": [55.0, 56.0, 54.0],
+                    "n_total": 170, "generalizes": True, "score": 1.10,
+                    "session_scores": {}}
+        oml = params.get("osma_min_long")
+        if oml == 2.0:
+            return {"pfs": [0.85, 0.92, 0.88], "wrs": [45.0, 48.0, 46.0],
+                    "n_total": 150, "generalizes": False, "score": -1.0,
+                    "session_scores": {}}
+        if oml == 2.1:
+            return {"pfs": [1.05, 1.08, 1.03], "wrs": [52.0, 54.0, 51.0],
+                    "n_total": 160, "generalizes": True, "score": 1.03,
+                    "session_scores": {}}
+        return {"pfs": [0.85, 0.92, 0.88], "wrs": [45.0, 48.0, 46.0],
+                "n_total": 150, "generalizes": False, "score": -1.0,
+                "session_scores": {}}
+
+    opt = ParameterOptimizer(registry=None, backtest_fn=mock_bt)
+    # Simulate a tuned entry that already generalizes (post-cold-start state)
+    opt.tuned = {"XAUUSD": {"params": {"osma_min_long": 2.1}, "score": 1.03}}
+    r = opt.optimize("XAUUSD", iterations=60)
+    assert r["improved"] is True, f"expected improvement over incumbent, got {r}"
+    assert r["score"] == 1.10, r
     assert SYMBOL_BASELINES["BTCUSD"]["osma_min_long"] != SYMBOL_BASELINES["XAUUSD"]["osma_min_long"]

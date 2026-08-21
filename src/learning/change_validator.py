@@ -83,6 +83,13 @@ class ChangeValidator:
         """Backtest+forward test `params`. Return {passed, score, forward_pf, best, reason}.
         A pass REQUIRES: generalizes, forward-window PF>=1, enough trades (min_trades so a
         thin fluke can't set the bar), and score beats the (time-decayed) best-ever+margin.
+        
+        Cold-start: if no valid best-ever exists for this symbol, the first generalizing
+        candidate is accepted (its score becomes the new bar).
+        
+        Session-scoped proposals (params containing `session_*` keys) are judged on the
+        relevant session's sub-score from `session_scores`, not the aggregate across all
+        sessions.
         Records the outcome (pass OR fail) to the RAG. Never applies anything itself."""
         sym = symbol.upper().split("-")[0]
         mk = self._memo_key(symbol, params)
@@ -101,6 +108,78 @@ class ChangeValidator:
         n_total = res.get("n_total") or 0
         best = self.best_score(sym)
         enough = n_total >= min_trades
+        session_scores = res.get("session_scores") or {}
+
+        # ── Session-scored proposal: judge on the affected session's sub-score ──
+        session_overrides = {k: v for k, v in params.items() if k.startswith("session_")}
+        if session_overrides:
+            sess_names = []
+            for k, v in session_overrides.items():
+                sess_name = k[len("session_"):].lower()
+                for s in session_scores:
+                    if s.lower() == sess_name:
+                        sess_names.append(s)
+                        break
+            if sess_names:
+                # Use the FIRST matched session's PF as the session-specific score.
+                # If multiple sessions are overridden, each would need its own validate()
+                # call in a future loop; here we gate on the primary session.
+                primary_sess = sess_names[0]
+                sess_data = session_scores[primary_sess]
+                sess_pf = sess_data.get("pf", 0.0)
+                sess_wr = sess_data.get("wr", 0.0)
+                sess_trades = sess_data.get("trades", 0)
+                # For session-scoped proposals, the session's overall PF replaces
+                # the aggregate forward_pf and score for the gate decision.
+                forward_pf = sess_pf
+                score = sess_pf
+                enough = sess_trades >= min_trades
+                if not generalizes:
+                    reason = f"session {primary_sess} PF {sess_pf:.2f} < 1 (does not generalize)"
+                elif sess_pf < 1.0:
+                    reason = f"session {primary_sess} PF {sess_pf:.2f} < 1"
+                elif sess_trades < min_trades:
+                    reason = f"session {primary_sess} only {sess_trades} trades (<{min_trades})"
+                else:
+                    reason = ""
+                if reason:
+                    out = {"passed": False, "score": round(score, 3), "forward_pf": round(forward_pf, 2),
+                           "generalizes": generalizes, "best_ever": round(best, 3),
+                           "n_total": sess_trades, "reason": reason,
+                           "session_scores": session_scores,
+                           "session_primary": primary_sess}
+                    self._remember(sym, params, out, source)
+                    self._memo[mk] = out
+                    logger.warning(f"[VALIDATE] {sym} ({source}, session={primary_sess}): REJECT "
+                                   f"score {out.get('score')} sessPF {sess_pf:.2f} vs best {best:.2f} — {reason}")
+                    if self.learning_log:
+                        self.learning_log.validate(sym, source, False, out.get("score", -1.0),
+                                                   out.get("forward_pf", 0.0), reason, out.get("n_total", 0))
+                    return out
+
+        # ── Cold-start: no valid best-ever → accept first generalizing candidate ──
+        cold_start = best <= 0.0
+        if cold_start and generalizes and enough and forward_pf >= 1.0:
+            out = {"passed": True, "score": round(score, 3), "forward_pf": round(forward_pf, 2),
+                   "generalizes": generalizes, "best_ever": round(best, 3),
+                   "n_total": n_total, "reason": "cold-start accept (no valid incumbent)",
+                   "session_scores": session_scores}
+            if session_overrides and sess_names:
+                out["session_primary"] = sess_names[0]
+            self._best[sym] = {"score": round(score, 3), "source": source,
+                               "at": datetime.now(timezone.utc).isoformat(),
+                               "params": {k: v for k, v in params.items() if not k.startswith("_")}}
+            self._save()
+            self._remember(sym, params, out, source)
+            self._memo[mk] = out
+            logger.warning(f"[VALIDATE] {sym} ({source}): PASS (cold-start) "
+                           f"score {out.get('score')} fwdPF {out.get('forward_pf')} — {out['reason']}")
+            if self.learning_log:
+                self.learning_log.validate(sym, source, True, out.get("score", -1.0),
+                                           out.get("forward_pf", 0.0), out["reason"], out.get("n_total", 0))
+            return out
+
+        best = self.best_score(sym)
         passed = generalizes and forward_pf >= 1.0 and enough and score > best + self.margin
         reason = ("beats best-ever" if passed else
                   "does not generalize" if not generalizes else
@@ -110,7 +189,9 @@ class ChangeValidator:
         out = {"passed": passed, "score": round(score, 3), "forward_pf": round(forward_pf, 2),
                "generalizes": generalizes, "best_ever": round(best, 3),
                "n_total": res.get("n_total"), "reason": reason,
-               "session_scores": res.get("session_scores")}
+               "session_scores": session_scores}
+        if session_overrides and sess_names:
+            out["session_primary"] = sess_names[0]
         if passed:
             self._best[sym] = {"score": round(score, 3), "source": source,
                                "at": datetime.now(timezone.utc).isoformat(),

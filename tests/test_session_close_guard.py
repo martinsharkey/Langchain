@@ -15,8 +15,11 @@ from types import SimpleNamespace
 from src.trading.session_manager import SessionManager
 
 
-def test_xauusd_in_preclose_window_30_min():
+def test_xauusd_in_preclose_window_30_min(monkeypatch, tmp_path):
     """30 min before the 21:00 UTC daily break should be in the guard window."""
+    sched = tmp_path / "session_schedule.json"
+    sched.write_text('{"symbols": {"XAUUSD": {"always_open": false, "daily_break": ["21:00", "22:00"], "weekend": {"close": [4, "21:00"], "open": [6, "22:00"]}}}}')
+    monkeypatch.setattr("src.trading.session_manager.SCHEDULE_PATH", str(sched))
     sm = SessionManager()
     # 20:30 UTC on a Wednesday -> 30 min before daily break
     now = datetime(2024, 6, 5, 20, 30, tzinfo=timezone.utc)
@@ -25,15 +28,21 @@ def test_xauusd_in_preclose_window_30_min():
     assert sm.minutes_to_close("XAUUSD", now) == 30
 
 
-def test_xauusd_outside_preclose_window():
+def test_xauusd_outside_preclose_window(monkeypatch, tmp_path):
     """Mid-session should not trigger pre-close."""
+    sched = tmp_path / "session_schedule.json"
+    sched.write_text('{"symbols": {"XAUUSD": {"always_open": false, "daily_break": ["21:00", "22:00"], "weekend": {"close": [4, "21:00"], "open": [6, "22:00"]}}}}')
+    monkeypatch.setattr("src.trading.session_manager.SCHEDULE_PATH", str(sched))
     sm = SessionManager()
     now = datetime(2024, 6, 5, 14, 0, tzinfo=timezone.utc)
     assert sm.in_preclose_window("XAUUSD", lo=15, hi=120, now=now) is False
 
 
-def test_weekend_closure_blocks_open():
+def test_weekend_closure_blocks_open(monkeypatch, tmp_path):
     """Saturday 18:00 UTC should be inside the weekend closure."""
+    sched = tmp_path / "session_schedule.json"
+    sched.write_text('{"symbols": {"XAUUSD": {"always_open": false, "daily_break": ["21:00", "22:00"], "weekend": {"close": [4, "21:00"], "open": [6, "22:00"]}}}}')
+    monkeypatch.setattr("src.trading.session_manager.SCHEDULE_PATH", str(sched))
     sm = SessionManager()
     now = datetime(2024, 6, 8, 18, 0, tzinfo=timezone.utc)
     assert sm.is_open("XAUUSD", now) is False
@@ -53,8 +62,11 @@ def test_session_config_knobs_exist():
 
 def test_preclose_branch_reaches_manager_decision(monkeypatch, tmp_path):
     """Engine's pre-close branch calls trade_manager.preclose_decision()."""
+    sched = tmp_path / "session_schedule.json"
+    sched.write_text('{"symbols": {"XAUUSD": {"always_open": false, "daily_break": ["21:00", "22:00"], "weekend": {"close": [4, "21:00"], "open": [6, "22:00"]}}}}')
+    monkeypatch.setattr("src.trading.session_manager.SCHEDULE_PATH", str(sched))
     calls = []
-    monkeypatch.setattr("src.trading.session_manager.SCHEDULE_PATH", str(tmp_path / "no_sched.json"))
+    monkeypatch.setattr("src.trading.session_manager.SCHEDULE_PATH", str(sched))
 
     class FakeManager:
         def preclose_decision(self, st, price, point, spread_pts, atr_short):

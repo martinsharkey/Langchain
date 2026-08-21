@@ -3902,10 +3902,19 @@ class ScalpEngine:
                 "symbols": symbols,
             }
             os.makedirs(config.DATA_DIR, exist_ok=True)
-            tmp = STATUS_PATH + ".tmp"
-            with open(tmp, "w") as f:
-                json.dump(status, f, indent=2, default=str)
-            os.replace(tmp, STATUS_PATH)
+            # Windows-safe write: avoid os.replace() on a file that may be locked
+            # by the dashboard or AV. Write directly; if that fails, try .tmp fallback.
+            try:
+                with open(STATUS_PATH, "w") as f:
+                    json.dump(status, f, indent=2, default=str)
+            except PermissionError:
+                tmp = STATUS_PATH + ".tmp"
+                with open(tmp, "w") as f:
+                    json.dump(status, f, indent=2, default=str)
+                try:
+                    os.replace(tmp, STATUS_PATH)
+                except PermissionError:
+                    pass
         except Exception as e:
             logger.warning(f"write_status failed: {e}")
 
