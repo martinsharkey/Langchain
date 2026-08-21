@@ -399,11 +399,25 @@ async function refresh(){
         document.getElementById('t-optuna').querySelector('tbody').innerHTML=orows;
       }
       if(baseline){
-        const b=baseline.baseline||{};
-        const c=baseline.current||{};
-        const l=baseline.lift||{};
         const sym=baseline.baseline_symbol||'—';
-        const brows=[`<tr><td>${sym}</td><td class="num">${b.median_pf??'—'}</td><td class="num">${c.profit_factor??'—'}</td><td class="num">${l.profit_factor!=null?fmt(l.profit_factor,2):'—'}</td><td class="num">${b.pass_rate??'—'}</td><td class="num">${c.win_rate??'—'}</td><td class="num">${l.win_rate!=null?fmt(l.win_rate,1):'—'}</td><td class="num">${l.trades??'—'}</td></tr>`];
+        const bpf=baseline.baseline_median_pf??'—';
+        const bwr=baseline.baseline_pass_rate??'—';
+        let cp='—', cw='—', lp=null, lw=null, lt='—';
+        const syms=baseline.symbols||{};
+        const key=Object.keys(syms).find(k=>k.toLowerCase()===(sym||'').toLowerCase());
+        if(key){
+          const entry=syms[key];
+          if(entry&&entry.current){
+            cp=entry.current.profit_factor??'—';
+            cw=entry.current.win_rate??'—';
+          }
+          if(entry&&entry.lift){
+            lp=entry.lift.profit_factor;
+            lw=entry.lift.win_rate;
+            lt=entry.lift.trades??'—';
+          }
+        }
+        const brows=[`<tr><td>${sym}</td><td class="num">${bpf}</td><td class="num">${cp}</td><td class="num">${lp!=null?fmt(lp,2):'—'}</td><td class="num">${bwr}</td><td class="num">${cw}</td><td class="num">${lw!=null?fmt(lw,1):'—'}</td><td class="num">${lt}</td></tr>`];
         document.getElementById('t-baseline').querySelector('tbody').innerHTML=brows.join('');
       }
       if(bridge){
