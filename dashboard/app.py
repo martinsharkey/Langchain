@@ -560,7 +560,9 @@ def api_pipeline_status():
         except Exception:
             pass
 
-    # Optuna study status per symbol
+    # Optuna study status per symbol (mtime-cached so polls don't reload every time)
+    optuna_cache = {}
+    optuna_cache_mtime = {}
     optuna_status = {}
     for sym in sym_names:
         from src.utils.symbols import symbol_base
@@ -571,17 +573,25 @@ def api_pipeline_status():
             optuna_status[sym] = {"status": "no_study", "path": db_path}
             continue
         try:
+            db_mtime = os.path.getmtime(db_path)
+            cached = optuna_cache.get(sym)
+            if cached and optuna_cache_mtime.get(sym) == db_mtime:
+                optuna_status[sym] = cached
+                continue
             import optuna
             study = optuna.load_study(study_name=f"floors_{sym}",
                                       storage=f"sqlite:///{db_path}")
             best = study.best_trial
-            optuna_status[sym] = {
+            entry = {
                 "status": "ready",
                 "n_trials": len(study.trials),
                 "best_value": best.value if best else None,
                 "best_params": best.params if best else None,
                 "completed_at": best.datetime_complete.isoformat() if best and best.datetime_complete else None,
             }
+            optuna_cache[sym] = entry
+            optuna_cache_mtime[sym] = db_mtime
+            optuna_status[sym] = entry
         except Exception as e:
             optuna_status[sym] = {"status": "error", "error": str(e)[:120], "path": db_path}
 
