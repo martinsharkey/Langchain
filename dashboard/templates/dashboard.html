@@ -205,6 +205,25 @@
         <div class="scroll"><table id="t-variants"><thead><tr>
           <th>Symbol</th><th>Variant</th><th class="num">Trades</th><th class="num">Win%</th><th class="num">Net P&L</th>
         </tr></thead><tbody><tr><td>Loading…</td></tr></tbody></table></div>
+        <h2 style="margin-bottom:8px;margin-top:14px">Learning Pipeline</h2>
+        <div class="grid" style="margin-bottom:14px">
+          <div class="card c6">
+            <h2>Tuned Params</h2>
+            <div class="scroll" style="max-height:200px"><table id="t-tuned"><thead><tr>
+              <th>Symbol</th><th class="num">Score</th><th>Source</th><th>Updated</th>
+            </tr></thead><tbody><tr><td>Loading…</td></tr></tbody></table></div>
+          </div>
+          <div class="card c6">
+            <h2>Optuna Studies</h2>
+            <div class="scroll" style="max-height:200px"><table id="t-optuna"><thead><tr>
+              <th>Symbol</th><th>Status</th><th class="num">Trials</th><th class="num">Best</th>
+            </tr></thead><tbody><tr><td>Loading…</td></tr></tbody></table></div>
+          </div>
+        </div>
+        <h2 style="margin-bottom:8px">Recent Learning Log</h2>
+        <div class="scroll" style="max-height:250px"><table id="t-learning-log"><thead><tr>
+          <th>Entry</th>
+        </tr></thead><tbody><tr><td>Loading…</td></tr></tbody></table></div>
       </div>
       <div class="tabpane" id="tab-account">
         <div id="account-detail"></div>
@@ -355,6 +374,35 @@ async function refresh(){
     }
     document.getElementById('t-variants').querySelector('tbody').innerHTML=
       vrows||'<tr><td colspan="5" class="muted">No variant data yet (accumulating)</td></tr>';
+
+    // pipeline APIs: tuned params + Optuna studies + recent learning log
+    async function loadPipeline(){
+      const [opt,bridge,status]=await Promise.all([
+        j('/api/pipeline/optimizer'), j('/api/pipeline/bridge'), j('/api/pipeline/status')
+      ]);
+      if(opt){
+        const tuned=opt.tuned||{};
+        const rows=Object.keys(tuned).length?Object.entries(tuned).map(([sym,e])=>
+          `<tr><td>${sym}</td><td class="num">${e.score??'—'}</td><td>${e.source||'—'}</td><td>${e.updated_at||'—'}</td></tr>`
+        ).join(''):'<tr><td colspan="4" class="muted">No tuned params yet</td></tr>';
+        document.getElementById('t-tuned').querySelector('tbody').innerHTML=rows;
+      }
+      if(status){
+        const o=status.optuna||{};
+        const orows=Object.keys(o).length?Object.entries(o).map(([sym,e])=>
+          `<tr><td>${sym}</td><td>${e.status||'—'}</td><td class="num">${e.n_trials??0}</td><td class="num">${e.best_value!=null?fmt(e.best_value,3):'—'}</td></tr>`
+        ).join(''):'<tr><td colspan="4" class="muted">No Optuna studies yet</td></tr>';
+        document.getElementById('t-optuna').querySelector('tbody').innerHTML=orows;
+      }
+      if(bridge){
+        const entries=bridge.recent||[];
+        const lrows=entries.length?entries.map(e=>
+          `<tr><td>${e}</td></tr>`
+        ).join(''):'<tr><td colspan="1" class="muted">No learning log entries yet</td></tr>';
+        document.getElementById('t-learning-log').querySelector('tbody').innerHTML=lrows;
+      }
+    }
+    loadPipeline();
 
     // adaptive AI tab
     const ad=status.adaptive||{};
