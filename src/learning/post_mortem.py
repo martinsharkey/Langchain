@@ -35,6 +35,7 @@ from typing import Optional
 
 from src import config
 from src.utils.logger import get_logger
+from src.strategies.sessions import session_of
 
 logger = get_logger("post_mortem")
 
@@ -46,6 +47,7 @@ class TradeReflection:
     action: str
     outcome: str
     pnl: float
+    session: str = "?"               # trading session at entry (Asian/London/NewYork/Off)
     htf_trend: str = "?"           # M15 trend at entry
     entry_extended: bool = False   # was the pre-entry move already extended?
     mfe_atr: float = 0.0           # max favourable excursion (ATR units) after entry
@@ -178,6 +180,10 @@ class TradePostMortem:
 
         r = TradeReflection(trade_id=trade["id"], symbol=sym, action=action,
                             outcome=trade["outcome"], pnl=trade.get("profit_loss") or 0)
+        try:
+            r.session = session_of(entry_dt.hour)
+        except Exception:
+            pass
 
         # HTF trend at entry (simple EMA slope on M15 closes)
         if len(htf) >= 20:
