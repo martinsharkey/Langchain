@@ -24,6 +24,7 @@ from flask import Flask, jsonify, request
 
 from src import config
 from src.utils.logger import get_logger
+from src.mt5.connector import get_connector, mt5_lock
 
 logger = get_logger("dashboard")
 app = Flask(__name__)
@@ -94,9 +95,11 @@ def api_status():
     # reconcile open_positions against live MT5 so the dashboard never shows
     # phantom trades from a stale bot_status.json
     try:
-        import MetaTrader5 as mt5
-        if mt5.initialize():
-            live = mt5.positions_get() or []
+        from src.mt5.connector import get_connector
+        connector = get_connector()
+        if connector.is_connected():
+            with mt5_lock():
+                live = mt5.positions_get() or []
             live_tickets = {p.ticket for p in live}
             kept = []
             for p in status.get("open_positions", []):
@@ -104,7 +107,6 @@ def api_status():
                     kept.append(p)
             if len(kept) != len(status.get("open_positions", [])):
                 status["open_positions"] = kept
-            mt5.shutdown()
     except Exception:
         pass
 
