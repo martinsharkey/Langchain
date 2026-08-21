@@ -563,7 +563,8 @@ def api_pipeline_status():
     # Optuna study status per symbol
     optuna_status = {}
     for sym in sym_names:
-        sym_dir = os.path.join(DATA_DIR, "qmmp", sym, "optuna")
+        base_sym = sym.upper().split("-")[0]
+        sym_dir = os.path.join(DATA_DIR, "qmmp", base_sym, "optuna")
         db_path = os.path.join(sym_dir, "study.db")
         if not os.path.exists(db_path):
             optuna_status[sym] = {"status": "no_study", "path": db_path}

@@ -399,7 +399,7 @@ class ScalpEngine:
         self.learning_log = None
         try:
             from src.learning.learning_log import LearningLog
-            self.learning_log = LearningLog()
+            self.learning_log = LearningLog(path=os.path.join(config.DATA_DIR, "LEARNING_LOG.md"))
         except Exception as e:
             logger.warning(f"LearningLog unavailable: {e}")
         if getattr(self, "param_optimizer", None) is not None:
