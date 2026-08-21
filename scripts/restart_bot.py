@@ -124,6 +124,7 @@ def _start_bot(mode: str, cwd: Optional[Path] = None) -> subprocess.Popen:
     env = os.environ.copy()
     env["PYTHONDONTWRITEBYTECODE"] = "1"
     env["TRADING_MODE"] = mode
+    env["HOTRELOAD"] = "1"
     return subprocess.Popen(
         [sys.executable, "app.py", mode],
         cwd=str(cwd),
@@ -152,16 +153,14 @@ def _poll_dashboard(url: str = "http://127.0.0.1:5000/api/status", timeout: int 
 
 def _verify_adopted_positions(status: dict) -> List[str]:
     """Verify adopted positions match bot magic. Returns list of mismatch strings."""
-    from src.config import magic_for_symbol
-
     mismatches = []
+    expected_magic = config.BOT_MAGIC
     for pos in status.get("open_positions", []):
         sym = pos.get("symbol", "")
-        expected = magic_for_symbol(sym)
         actual = pos.get("magic")
-        if actual != expected:
+        if actual != expected_magic:
             mismatches.append(
-                f"{pos.get('ticket')} {sym}: magic={actual} expected={expected}"
+                f"{pos.get('ticket')} {sym}: magic={actual} expected={expected_magic}"
             )
     return mismatches
 

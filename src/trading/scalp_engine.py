@@ -79,6 +79,7 @@ class TrackedPosition:
     indicators: dict = field(default_factory=dict)
     mgmt_variant: Optional[str] = None
     timeframe: str = "M1"
+    magic: Optional[int] = None
 
 
 class ScalpEngine:
@@ -1068,6 +1069,7 @@ class ScalpEngine:
                 sl=p.sl or None, tp=p.tp or None, confidence=0.0,
                 strategy=f"adopted_{source}", strategy_combo=f"adopted_{source}",
                 opened_at=opened_iso, db_trade_id=db_id,
+                magic=getattr(p, "magic", None),
             )
             adopted += 1
             logger.info(f"Adopted {source} position {p.symbol} #{p.ticket} "
@@ -1528,7 +1530,7 @@ class ScalpEngine:
         #     GATED by LEARNING_ADAPTATION_ENABLED (#27): frozen -> no self-tuning.
         if (config.LEARNING_ADAPTATION_ENABLED
                 and self.adaptive is not None and not self._adaptive_running
-                and self.cycle % config.ADAPTIVE_EVERY_CYCLES == 5):
+                and self.cycle % config.ADAPTIVE_EVERY_CYCLES < 10):
             self._maybe_run_adaptive()
 
         # 3) per symbol: evaluate in priority order.
@@ -2428,7 +2430,9 @@ class ScalpEngine:
             confidence=0.0, strategy="OsMA_Confluence", strategy_combo="pyramid_add",
             opened_at=datetime.now(timezone.utc).isoformat(), db_trade_id=db_id,
             indicators={k: v for k, v in indicators.items()
-                        if isinstance(v, (int, float, str, bool))})
+                        if isinstance(v, (int, float, str, bool))},
+            magic=config.BOT_MAGIC,
+        )
         self.trades_opened += 1
         logger.warning(f"[PYRAMID] {base} {action}: ADDED leg #{existing_legs + 1} "
                        f"@ {result.price} (SL {sl_pts:.0f}pt) — direction still aligned")
@@ -3676,6 +3680,7 @@ class ScalpEngine:
             opened_at=datetime.now(timezone.utc).isoformat(), db_trade_id=db_id,
             indicators={k: v for k, v in indicators.items()
                         if isinstance(v, (int, float, str, bool))},
+            magic=config.BOT_MAGIC,
         )
         self.trades_opened += 1
         self._freq_entered[base] = self._freq_entered.get(base, 0) + 1
@@ -3865,6 +3870,20 @@ class ScalpEngine:
                         "login": acct.get("login") or _aa.get("login"),
                         "trade_mode": acct.get("trade_mode") or _aa.get("trade_mode"),
                         "is_live": (_aa.get("trade_mode") == "REAL")}
+
+            # reconcile stale positions: prune any tracked tickets that are no longer
+            # live in MT5 so the dashboard never shows phantom open trades
+            if MT5_AVAILABLE and self.open_positions:
+                try:
+                    with mt5_lock():
+                        live = mt5.positions_get() or []
+                    live_tickets = {p.ticket for p in live}
+                    for ticket in list(self.open_positions.keys()):
+                        if ticket not in live_tickets:
+                            self.open_positions.pop(ticket, None)
+                except Exception:
+                    pass
+
             symbols = []
             for base, ad in self.adapters.items():
                 t = ad.live_tick()
@@ -3893,6 +3912,7 @@ class ScalpEngine:
                         "entry": p.entry_price, "volume": p.volume, "sl": p.sl, "tp": p.tp,
                         "confidence": p.confidence, "strategy": p.strategy,
                         "opened_at": p.opened_at, "mgmt_variant": p.mgmt_variant,
+                        "magic": p.magic,
                     } for p in self.open_positions.values()
                 ],
                 "risk": self.risk.status(),

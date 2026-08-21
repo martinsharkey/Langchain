@@ -90,6 +90,24 @@ def api_status():
         except Exception as e:
             return jsonify({"error": str(e), "engine_running": False})
     status["engine_running"] = status.get("running", False)
+
+    # reconcile open_positions against live MT5 so the dashboard never shows
+    # phantom trades from a stale bot_status.json
+    try:
+        import MetaTrader5 as mt5
+        if mt5.initialize():
+            live = mt5.positions_get() or []
+            live_tickets = {p.ticket for p in live}
+            kept = []
+            for p in status.get("open_positions", []):
+                if p.get("ticket") in live_tickets:
+                    kept.append(p)
+            if len(kept) != len(status.get("open_positions", [])):
+                status["open_positions"] = kept
+            mt5.shutdown()
+    except Exception:
+        pass
+
     return jsonify(status)
 
 

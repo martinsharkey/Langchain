@@ -1,6 +1,6 @@
 ; GoldShark_BTCUSD.set -- MT5 Strategy Tester optimiser ranges (auto-generated)
 ; F=1 enables optimisation; 1=start 2=step 3=stop
-Magic=926561
+Magic=778384
 Magic,F=1
 Magic,1=100000
 Magic,2=1

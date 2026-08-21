@@ -382,8 +382,9 @@ def magic_for_symbol(symbol: str, base: int = BOT_MAGIC, seed: str = BOT_MAGIC_S
     The Python bot and the generated MQL5 EAs use the same formula so that live
     orders from both sources share a magic that the bot can identify and reconcile.
     """
+    import hashlib
     payload = f"{symbol.upper().strip()}:{seed}"
-    h = hash(payload)
+    h = int(hashlib.md5(payload.encode()).hexdigest()[:8], 16)
     # keep within signed 32-bit positive range and above MT5 reserved 0-99999
     capped = (h & 0x7FFFFFFF) % 900000 + 100000
     # blend in base so changing BOT_MAGIC reshuffles the whole fleet
