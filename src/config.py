@@ -93,7 +93,8 @@ SYMBOL_ENTRY_TIMEFRAME = {
     "BTCUSD": os.getenv("BTCUSD_ENTRY_TIMEFRAME", "H1"),
 }
 def entry_timeframe_for(symbol: str) -> str:
-    base = (symbol or "").upper().split("-")[0].rstrip(".")
+    from src.utils.symbols import symbol_base
+    base = symbol_base(symbol)
     return SYMBOL_ENTRY_TIMEFRAME.get(base, ENTRY_TIMEFRAME)
 RISK_PERCENT = float(os.getenv("XAUUSD_RISK_PERCENT", "1.0"))
 MAX_POSITION_SIZE = float(os.getenv("XAUUSD_MAX_POSITION_SIZE", "0.1"))

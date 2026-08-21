@@ -42,8 +42,9 @@ class ChangeValidator:
 
     def _memo_key(self, symbol, params):
         import hashlib, json as _j
+        from src.utils.symbols import symbol_base
         h = hashlib.md5(_j.dumps({k: params.get(k) for k in sorted(params)}, default=str).encode()).hexdigest()[:12]
-        return f"{symbol.upper().split('-')[0]}:{h}"
+        return f"{symbol_base(symbol)}:{h}"
 
     def _load(self) -> dict:
         try:
@@ -65,7 +66,9 @@ class ChangeValidator:
         """Best-ever validated score, with TIME DECAY so an unbeaten high-water mark relaxes
         over time (prevents a fluke peak permanently freezing tuning). Decays toward 1.0 at
         ~0.02 PF/day unbeaten, floored at 1.0 (still must be profitable to pass)."""
-        rec = self._best.get(symbol.upper().split("-")[0], {})
+        from src.utils.symbols import symbol_base
+        sym = symbol_base(symbol)
+        rec = self._best.get(sym, {})
         raw = float(rec.get("score", -1.0))
         if raw <= 1.0:
             return raw
@@ -95,7 +98,8 @@ class ChangeValidator:
         relevant session's sub-score from `session_scores`, not the aggregate across all
         sessions.
         Records the outcome (pass OR fail) to the RAG. Never applies anything itself."""
-        sym = symbol.upper().split("-")[0]
+        from src.utils.symbols import symbol_base
+        sym = symbol_base(symbol)
         mk = self._memo_key(symbol, params)
         if mk in self._memo:
             return self._memo[mk]

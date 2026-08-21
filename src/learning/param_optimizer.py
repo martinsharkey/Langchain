@@ -469,7 +469,8 @@ class ParameterOptimizer:
         return merged
 
     def _key(self, symbol: str) -> str:
-        return symbol.upper().split("-")[0].rstrip(".")
+        from src.utils.symbols import symbol_base
+        return symbol_base(symbol)
 
     def _directed_candidates(self, base: dict):
         """DIRECTED, non-random coordinate search over the highest-impact levers, in
