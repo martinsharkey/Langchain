@@ -142,52 +142,53 @@ class ChangeValidator:
         enough = n_total >= min_trades
         session_scores = res.get("session_scores") or {}
 
-        # ── Session-scored proposal: judge on the affected session's sub-score ──
+        # ── Session-scored proposal: judge on ALL affected sessions' sub-scores ──
         session_overrides = {k: v for k, v in params.items() if k.startswith("session_")}
         if session_overrides:
-            sess_names = []
+            matched_sessions = []
             for k, v in session_overrides.items():
                 sess_name = k[len("session_"):].lower()
                 for s in session_scores:
                     if s.lower() == sess_name:
-                        sess_names.append(s)
+                        matched_sessions.append(s)
                         break
-            if sess_names:
-                # Use the FIRST matched session's PF as the session-specific score.
-                # If multiple sessions are overridden, each would need its own validate()
-                # call in a future loop; here we gate on the primary session.
-                primary_sess = sess_names[0]
-                sess_data = session_scores[primary_sess]
-                sess_pf = sess_data.get("pf", 0.0)
-                sess_wr = sess_data.get("wr", 0.0)
-                sess_trades = sess_data.get("trades", 0)
-                # For session-scoped proposals, the session's overall PF replaces
-                # the aggregate forward_pf and score for the gate decision.
-                forward_pf = sess_pf
-                score = sess_pf
-                enough = sess_trades >= min_trades
-                if not generalizes:
-                    reason = f"session {primary_sess} PF {sess_pf:.2f} < 1 (does not generalize)"
-                elif sess_pf < 1.0:
-                    reason = f"session {primary_sess} PF {sess_pf:.2f} < 1"
-                elif sess_trades < min_trades:
-                    reason = f"session {primary_sess} only {sess_trades} trades (<{min_trades})"
-                else:
-                    reason = ""
-                if reason:
+            if matched_sessions:
+                # Score ALL matched sessions; reject if ANY session is weak.
+                weak_sessions = []
+                min_pf = 1.0
+                min_trades = 10
+                for sess in matched_sessions:
+                    sd = session_scores[sess]
+                    pf = sd.get("pf", 0.0)
+                    trades = sd.get("trades", 0)
+                    if pf < min_pf or trades < min_trades:
+                        weak_sessions.append(f"{sess} PF {pf:.2f} n={trades}")
+                if weak_sessions:
+                    reason = f"session gate failed: {', '.join(weak_sessions)}"
                     out = {"passed": False, "score": round(score, 3), "forward_pf": round(forward_pf, 2),
                            "generalizes": generalizes, "best_ever": round(best, 3),
-                           "n_total": sess_trades, "reason": reason,
+                           "n_total": n_total, "reason": reason,
                            "session_scores": session_scores,
-                           "session_primary": primary_sess}
+                           "session_primary": matched_sessions[0],
+                           "session_all": matched_sessions}
                     self._remember(sym, params, out, source)
                     self._memo[mk] = out
-                    logger.warning(f"[VALIDATE] {sym} ({source}, session={primary_sess}): REJECT "
-                                   f"score {out.get('score')} sessPF {sess_pf:.2f} vs best {best:.2f} — {reason}")
+                    logger.warning(f"[VALIDATE] {sym} ({source}, sessions={matched_sessions}): REJECT "
+                                   f"score {out.get('score')} fwdPF {out.get('forward_pf',0):.2f} vs best {best:.2f} — {reason}")
                     if self.learning_log:
                         self.learning_log.validate(sym, source, False, out.get("score", -1.0),
                                                    out.get("forward_pf", 0.0), reason, out.get("n_total", 0))
                     return out
+                # All sessions pass: use the aggregate session score for the gate decision
+                # (preserves original behavior of scoring on session PF, not aggregate PF)
+                primary_sess = matched_sessions[0]
+                sess_data = session_scores[primary_sess]
+                sess_pf = sess_data.get("pf", 0.0)
+                sess_wr = sess_data.get("wr", 0.0)
+                sess_trades = sess_data.get("trades", 0)
+                forward_pf = sess_pf
+                score = sess_pf
+                enough = sess_trades >= min_trades
 
         # ── Cold-start: no valid best-ever OR best-ever doesn't generalize → accept first generalizing candidate ──
         cold_start = best <= 0.0 or not self._best_generalizes(sym)
@@ -196,8 +197,9 @@ class ChangeValidator:
                    "generalizes": generalizes, "best_ever": round(best, 3),
                    "n_total": n_total, "reason": "cold-start accept (no valid incumbent)",
                    "session_scores": session_scores}
-            if session_overrides and sess_names:
-                out["session_primary"] = sess_names[0]
+            if session_overrides and matched_sessions:
+                out["session_primary"] = matched_sessions[0]
+                out["session_all"] = matched_sessions
             self._best[sym] = {"score": round(score, 3), "source": source,
                                "at": datetime.now(timezone.utc).isoformat(),
                                "params": {k: v for k, v in params.items() if not k.startswith("_")}}
@@ -222,8 +224,9 @@ class ChangeValidator:
                "generalizes": generalizes, "best_ever": round(best, 3),
                "n_total": res.get("n_total"), "reason": reason,
                "session_scores": session_scores}
-        if session_overrides and sess_names:
-            out["session_primary"] = sess_names[0]
+        if session_overrides and matched_sessions:
+            out["session_primary"] = matched_sessions[0]
+            out["session_all"] = matched_sessions
         if passed:
             self._best[sym] = {"score": round(score, 3), "source": source,
                                "at": datetime.now(timezone.utc).isoformat(),

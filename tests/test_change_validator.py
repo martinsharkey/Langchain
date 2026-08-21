@@ -70,7 +70,8 @@ def test_validate_session_scoped_rejects_weak_session(tmp_path):
                       source="session_asian")
     assert out["passed"] is False
     assert out["session_primary"] == "Asian"
-    assert "Asian PF 0.75 < 1" in out["reason"]
+    assert "session gate failed" in out["reason"]
+    assert "Asian" in out["reason"]
 
 
 def test_validate_session_scoped_passes_strong_session(tmp_path):
@@ -111,6 +112,51 @@ def test_validate_session_scoped_case_insensitive(tmp_path):
                       source="session_lower")
     assert out["passed"] is True
     assert out["session_primary"] == "London"
+
+
+def test_validate_multi_session_all_must_pass(tmp_path):
+    """When multiple session overrides are present, ALL matched sessions must
+    pass (PF >= 1 and enough trades). Reject if ANY session is weak."""
+    cv = ChangeValidator(backtest_fn=_mock_bt())
+    cv._path = str(tmp_path / "best.json")
+    cv._best = {"XAUUSD": {"score": 1.0, "source": "seed",
+                           "at": datetime.now(timezone.utc).isoformat()}}
+
+    # Asian is weak (PF 0.75), London is strong (PF 1.25)
+    out = cv.validate("XAUUSD", {"session_Asian": {"osma_min_long": 0.5},
+                                     "session_London": {"osma_min_long": 0.5}},
+                      source="multi_session")
+    assert out["passed"] is False
+    assert "session gate failed" in out["reason"]
+    assert "Asian" in out["reason"]
+    assert "session_all" in out
+    assert out["session_all"] == ["Asian", "London"]
+
+
+def test_validate_multi_session_all_strong_passes(tmp_path):
+    """When all matched sessions are strong, the proposal passes."""
+    def strong_all_bt(symbol, params, sl_atr=1.0, tp_rr=2.0):
+        return {
+            "pfs": [1.05, 1.08, 1.03],
+            "wrs": [52.0, 54.0, 51.0],
+            "n_total": 160,
+            "generalizes": True,
+            "score": 1.03,
+            "session_scores": {
+                "Asian": {"trades": 40, "wins": 20, "losses": 20, "gross_win_r": 25.0, "gross_loss_r": 20.0, "pf": 1.25, "wr": 50.0},
+                "London": {"trades": 80, "wins": 40, "losses": 40, "gross_win_r": 50.0, "gross_loss_r": 40.0, "pf": 1.25, "wr": 50.0},
+            },
+        }
+    cv = ChangeValidator(backtest_fn=strong_all_bt)
+    cv._path = str(tmp_path / "best.json")
+    cv._best = {"XAUUSD": {"score": 1.0, "source": "seed",
+                           "at": datetime.now(timezone.utc).isoformat()}}
+
+    out = cv.validate("XAUUSD", {"session_Asian": {"osma_min_long": 0.5},
+                                     "session_London": {"osma_min_long": 0.5}},
+                      source="multi_session")
+    assert out["passed"] is True
+    assert out["session_all"] == ["Asian", "London"]
 
 
 def test_validate_cold_start_when_best_ever_does_not_generalize(tmp_path):

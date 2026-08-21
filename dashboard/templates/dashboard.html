@@ -220,6 +220,10 @@
             </tr></thead><tbody><tr><td>Loading…</td></tr></tbody></table></div>
           </div>
         </div>
+        <h2 style="margin-bottom:8px">Baseline vs Live</h2>
+        <div class="scroll" style="max-height:200px"><table id="t-baseline"><thead><tr>
+          <th>Symbol</th><th class="num">Baseline PF</th><th class="num">Current PF</th><th class="num">PF Lift</th><th class="num">Baseline WR</th><th class="num">Current WR</th><th class="num">WR Lift</th><th>Trades</th>
+        </tr></thead><tbody><tr><td colspan="8" class="muted">Loading…</td></tr></tbody></table></div>
         <h2 style="margin-bottom:8px">Recent Learning Log</h2>
         <div class="scroll" style="max-height:250px"><table id="t-learning-log"><thead><tr>
           <th>Entry</th>
@@ -375,10 +379,10 @@ async function refresh(){
     document.getElementById('t-variants').querySelector('tbody').innerHTML=
       vrows||'<tr><td colspan="5" class="muted">No variant data yet (accumulating)</td></tr>';
 
-    // pipeline APIs: tuned params + Optuna studies + recent learning log
+    // pipeline APIs: tuned params + Optuna studies + baseline + recent learning log
     async function loadPipeline(){
-      const [opt,bridge,status]=await Promise.all([
-        j('/api/pipeline/optimizer'), j('/api/pipeline/bridge'), j('/api/pipeline/status')
+      const [opt,bridge,status,baseline]=await Promise.all([
+        j('/api/pipeline/optimizer'), j('/api/pipeline/bridge'), j('/api/pipeline/status'), j('/api/pipeline/baseline')
       ]);
       if(opt){
         const tuned=opt.tuned||{};
@@ -393,6 +397,14 @@ async function refresh(){
           `<tr><td>${sym}</td><td>${e.status||'—'}</td><td class="num">${e.n_trials??0}</td><td class="num">${e.best_value!=null?fmt(e.best_value,3):'—'}</td></tr>`
         ).join(''):'<tr><td colspan="4" class="muted">No Optuna studies yet</td></tr>';
         document.getElementById('t-optuna').querySelector('tbody').innerHTML=orows;
+      }
+      if(baseline){
+        const b=baseline.baseline||{};
+        const c=baseline.current||{};
+        const l=baseline.lift||{};
+        const sym=baseline.baseline_symbol||'—';
+        const brows=[`<tr><td>${sym}</td><td class="num">${b.median_pf??'—'}</td><td class="num">${c.profit_factor??'—'}</td><td class="num">${l.profit_factor!=null?fmt(l.profit_factor,2):'—'}</td><td class="num">${b.pass_rate??'—'}</td><td class="num">${c.win_rate??'—'}</td><td class="num">${l.win_rate!=null?fmt(l.win_rate,1):'—'}</td><td class="num">${l.trades??'—'}</td></tr>`];
+        document.getElementById('t-baseline').querySelector('tbody').innerHTML=brows.join('');
       }
       if(bridge){
         const entries=bridge.recent||[];
