@@ -3046,6 +3046,10 @@ class ScalpEngine:
                 # the best-ever gate. Aggregate fallback — see optuna_live_bridge.py.
                 # Bridge waits for the study thread to complete to avoid applying stale
                 # or missing studies (same-day ordering race fix).
+                # Same-day policy (B2): mark applied-today on accepted apply OR hard
+                # validation reject (no generalize / best-ever fail / too few trades).
+                # Do NOT mark when there was no proposal (no study yet) so a late
+                # completing study can still propose on the same cycle.
                 if self.optuna_bridge is not None:
                     try:
                         today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
