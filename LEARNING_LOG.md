@@ -3,6 +3,147 @@
 > Auto-generated digest of what the self-learning loop changed and why.
 > Most-recent-first. Reporting only — never gates a live decision (#45.1).
 
+- **2026-08-21 06:11** [OPTIMIZER] `GER40.` tried 9 candidates, best score 1.23 -- why: no improvement -- metric: min-PF 1.23, tried 9
+- **2026-08-21 06:11** [OPTIMIZER] `GER40.` tried 0 candidates, best score 1.23 -- why: optimization started -- metric: base generalizes=True, n_total=1521
+- **2026-08-21 06:11** [REVERT] `BTCUSD` reverted to best-known config -- why: live expectancy degraded vs best-known -- metric: restored sl_atr 1.62 tp_rr 2.0
+- **2026-08-21 06:11** [OPTIMIZER] `GER40.` tried 31 candidates, best score 1.23 -- why: no improvement -- metric: min-PF 1.23, tried 31
+- **2026-08-21 06:09** [OPTIMIZER] `GER40.` tried 0 candidates, best score 1.23 -- why: optimization started -- metric: base generalizes=True, n_total=1521
+- **2026-08-21 06:09** [OPTIMIZER] `BTCUSD` tried 32 candidates, best score -1.00 -- why: no improvement -- metric: min-PF -1.00, tried 32
+- **2026-08-21 06:08** [OPTIMIZER] `BTCUSD` tried 0 candidates, best score -1.00 -- why: optimization started -- metric: base generalizes=False, n_total=2770
+- **2026-08-21 06:08** [OPTIMIZER] `XAUUSD-ECN` tried 0 candidates, best score -1.00 -- why: no baseline data -- metric: backtest returned None
+- **2026-08-21 05:10** [REVERT] `BTCUSD` reverted to best-known config -- why: live expectancy degraded vs best-known -- metric: restored sl_atr 1.62 tp_rr 2.0
+- **2026-08-21 05:10** [OPTIMIZER] `GER40.` tried 21 candidates, best score 1.23 -- why: no improvement -- metric: min-PF 1.23, tried 21
+- **2026-08-21 05:09** [OPTIMIZER] `GER40.` tried 0 candidates, best score 1.23 -- why: optimization started -- metric: base generalizes=True, n_total=1521
+- **2026-08-21 05:09** [OPTIMIZER] `XAUUSD-ECN` tried 0 candidates, best score -1.00 -- why: no baseline data -- metric: backtest returned None
+- **2026-08-21 05:09** [OPTIMIZER] `GER40.` tried 31 candidates, best score 1.23 -- why: no improvement -- metric: min-PF 1.23, tried 31
+- **2026-08-21 05:07** [OPTIMIZER] `GER40.` tried 0 candidates, best score 1.23 -- why: optimization started -- metric: base generalizes=True, n_total=1521
+- **2026-08-21 05:07** [OPTIMIZER] `BTCUSD` tried 32 candidates, best score -1.00 -- why: no improvement -- metric: min-PF -1.00, tried 32
+- **2026-08-21 05:06** [OPTIMIZER] `BTCUSD` tried 0 candidates, best score -1.00 -- why: optimization started -- metric: base generalizes=False, n_total=2770
+- **2026-08-21 05:06** [OPTIMIZER] `XAUUSD-ECN` tried 0 candidates, best score -1.00 -- why: no baseline data -- metric: backtest returned None
+- **2026-08-21 04:08** [REVERT] `BTCUSD` reverted to best-known config -- why: live expectancy degraded vs best-known -- metric: restored sl_atr 1.62 tp_rr 2.0
+- **2026-08-21 04:08** [OPTIMIZER] `GER40.` tried 9 candidates, best score 1.23 -- why: no improvement -- metric: min-PF 1.23, tried 9
+- **2026-08-21 04:07** [OPTIMIZER] `GER40.` tried 0 candidates, best score 1.23 -- why: optimization started -- metric: base generalizes=True, n_total=1521
+- **2026-08-21 04:07** [OPTIMIZER] `GER40.` tried 31 candidates, best score 1.23 -- why: no improvement -- metric: min-PF 1.23, tried 31
+- **2026-08-21 04:06** [OPTIMIZER] `GER40.` tried 0 candidates, best score 1.23 -- why: optimization started -- metric: base generalizes=True, n_total=1521
+- **2026-08-21 04:06** [OPTIMIZER] `BTCUSD` tried 32 candidates, best score -1.00 -- why: no improvement -- metric: min-PF -1.00, tried 32
+- **2026-08-21 04:04** [OPTIMIZER] `BTCUSD` tried 0 candidates, best score -1.00 -- why: optimization started -- metric: base generalizes=False, n_total=2770
+- **2026-08-21 04:04** [OPTIMIZER] `XAUUSD-ECN` tried 0 candidates, best score -1.00 -- why: no baseline data -- metric: backtest returned None
+- **2026-08-21 03:07** [REVERT] `BTCUSD` reverted to best-known config -- why: live expectancy degraded vs best-known -- metric: restored sl_atr 1.62 tp_rr 2.0
+- **2026-08-21 03:07** [OPTIMIZER] `GER40.` tried 21 candidates, best score 1.23 -- why: no improvement -- metric: min-PF 1.23, tried 21
+- **2026-08-21 03:06** [OPTIMIZER] `GER40.` tried 0 candidates, best score 1.23 -- why: optimization started -- metric: base generalizes=True, n_total=1521
+- **2026-08-21 03:06** [OPTIMIZER] `XAUUSD-ECN` tried 0 candidates, best score -1.00 -- why: no baseline data -- metric: backtest returned None
+- **2026-08-21 03:06** [OPTIMIZER] `GER40.` tried 31 candidates, best score 1.23 -- why: no improvement -- metric: min-PF 1.23, tried 31
+- **2026-08-21 03:05** [OPTIMIZER] `GER40.` tried 0 candidates, best score 1.23 -- why: optimization started -- metric: base generalizes=True, n_total=1521
+- **2026-08-21 03:05** [OPTIMIZER] `BTCUSD` tried 32 candidates, best score -1.00 -- why: no improvement -- metric: min-PF -1.00, tried 32
+- **2026-08-21 03:04** [OPTIMIZER] `BTCUSD` tried 0 candidates, best score -1.00 -- why: optimization started -- metric: base generalizes=False, n_total=2770
+- **2026-08-21 03:03** [OPTIMIZER] `XAUUSD-ECN` tried 0 candidates, best score -1.00 -- why: no baseline data -- metric: backtest returned None
+- **2026-08-21 02:06** [REVERT] `BTCUSD` reverted to best-known config -- why: live expectancy degraded vs best-known -- metric: restored sl_atr 1.62 tp_rr 2.0
+- **2026-08-21 02:06** [OPTIMIZER] `GER40.` tried 9 candidates, best score 1.23 -- why: no improvement -- metric: min-PF 1.23, tried 9
+- **2026-08-21 02:06** [OPTIMIZER] `GER40.` tried 0 candidates, best score 1.23 -- why: optimization started -- metric: base generalizes=True, n_total=1521
+- **2026-08-21 02:06** [OPTIMIZER] `GER40.` tried 31 candidates, best score 1.23 -- why: no improvement -- metric: min-PF 1.23, tried 31
+- **2026-08-21 02:04** [OPTIMIZER] `GER40.` tried 0 candidates, best score 1.23 -- why: optimization started -- metric: base generalizes=True, n_total=1521
+- **2026-08-21 02:04** [OPTIMIZER] `BTCUSD` tried 32 candidates, best score -1.00 -- why: no improvement -- metric: min-PF -1.00, tried 32
+- **2026-08-21 02:03** [OPTIMIZER] `BTCUSD` tried 0 candidates, best score -1.00 -- why: optimization started -- metric: base generalizes=False, n_total=2770
+- **2026-08-21 02:03** [OPTIMIZER] `XAUUSD-ECN` tried 0 candidates, best score -1.00 -- why: no baseline data -- metric: backtest returned None
+- **2026-08-21 01:22** [OPTIMIZER] `GER40.` tried 21 candidates, best score 1.23 -- why: no improvement -- metric: min-PF 1.23, tried 21
+- **2026-08-21 01:21** [OPTIMIZER] `GER40.` tried 0 candidates, best score 1.23 -- why: optimization started -- metric: base generalizes=True, n_total=1521
+- **2026-08-21 01:21** [OPTIMIZER] `XAUUSD-ECN` tried 0 candidates, best score -1.00 -- why: no baseline data -- metric: backtest returned None
+- **2026-08-21 01:07** [VALIDATE] `BTCUSD` REJECT score 1.69 fwdPF 1.84 -- why: score 1.69 <= best-ever 2.22+0.05 -- metric: trades=244
+- **2026-08-21 01:06** [EXIT-LOCK] `BTCUSD` exit set sl_atr 1.83 tp_rr 0.91 -- why: robust -- metric: recent expectancy 0.146 (n=30)
+- **2026-08-21 00:59** [EXIT-LOCK] `BTCUSD` exit set sl_atr 1.83 tp_rr 0.91 -- why: excursion -- metric: recent expectancy 0.146 (n=30)
+- **2026-08-21 00:59** [REVERT] `BTCUSD` reverted to best-known config -- why: live expectancy degraded vs best-known -- metric: restored sl_atr 1.62 tp_rr 2.0
+- **2026-08-21 00:57** [OPTIMIZER] `GER40.` tried 31 candidates, best score 1.23 -- why: no improvement -- metric: min-PF 1.23, tried 31
+- **2026-08-21 00:55** [OPTIMIZER] `GER40.` tried 0 candidates, best score 1.23 -- why: optimization started -- metric: base generalizes=True, n_total=1521
+- **2026-08-21 00:55** [OPTIMIZER] `BTCUSD` tried 32 candidates, best score -1.00 -- why: no improvement -- metric: min-PF -1.00, tried 32
+- **2026-08-21 00:54** [OPTIMIZER] `BTCUSD` tried 0 candidates, best score -1.00 -- why: optimization started -- metric: base generalizes=False, n_total=2770
+- **2026-08-21 00:54** [OPTIMIZER] `XAUUSD-ECN` tried 0 candidates, best score -1.00 -- why: no baseline data -- metric: backtest returned None
+- **2026-08-20 23:57** [REVERT] `BTCUSD` reverted to best-known config -- why: live expectancy degraded vs best-known -- metric: restored sl_atr 1.62 tp_rr 2.0
+- **2026-08-20 23:56** [OPTIMIZER] `GER40.` tried 9 candidates, best score 1.23 -- why: no improvement -- metric: min-PF 1.23, tried 9
+- **2026-08-20 23:56** [OPTIMIZER] `GER40.` tried 0 candidates, best score 1.23 -- why: optimization started -- metric: base generalizes=True, n_total=1521
+- **2026-08-20 23:56** [VALIDATE] `GER40.` REJECT score 0.31 fwdPF 0.31 -- why: does not generalize -- metric: trades=569
+- **2026-08-20 23:56** [OPTIMIZER] `GER40.` tried 31 candidates, best score 1.23 -- why: IMPROVED -- metric: min-PF 1.23, tried 31
+- **2026-08-20 23:54** [OPTIMIZER] `GER40.` tried 0 candidates, best score 1.18 -- why: optimization started -- metric: base generalizes=True, n_total=1666
+- **2026-08-20 23:54** [OPTIMIZER] `BTCUSD` tried 32 candidates, best score -1.00 -- why: no improvement -- metric: min-PF -1.00, tried 32
+- **2026-08-20 23:53** [OPTIMIZER] `BTCUSD` tried 0 candidates, best score -1.00 -- why: optimization started -- metric: base generalizes=False, n_total=2770
+- **2026-08-20 23:53** [OPTIMIZER] `XAUUSD-ECN` tried 0 candidates, best score -1.00 -- why: no baseline data -- metric: backtest returned None
+- **2026-08-20 22:55** [REVERT] `BTCUSD` reverted to best-known config -- why: live expectancy degraded vs best-known -- metric: restored sl_atr 1.62 tp_rr 2.0
+- **2026-08-20 22:55** [OPTIMIZER] `GER40.` tried 21 candidates, best score 1.18 -- why: IMPROVED -- metric: min-PF 1.18, tried 21
+- **2026-08-20 22:54** [OPTIMIZER] `GER40.` tried 0 candidates, best score 1.16 -- why: optimization started -- metric: base generalizes=True, n_total=1885
+- **2026-08-20 22:54** [OPTIMIZER] `XAUUSD-ECN` tried 0 candidates, best score -1.00 -- why: no baseline data -- metric: backtest returned None
+- **2026-08-20 22:54** [VALIDATE] `GER40.` REJECT score -1.00 fwdPF 0.00 -- why: does not generalize
+- **2026-08-20 22:54** [VALIDATE] `BTCUSD` REJECT score -1.00 fwdPF 0.00 -- why: does not generalize
+- **2026-08-20 22:54** [VALIDATE] `GER40.` REJECT score 0.52 fwdPF 0.52 -- why: does not generalize -- metric: trades=755
+- **2026-08-20 22:54** [OPTIMIZER] `GER40.` tried 31 candidates, best score 1.16 -- why: IMPROVED -- metric: min-PF 1.16, tried 31
+- **2026-08-20 22:53** [OPTIMIZER] `GER40.` tried 0 candidates, best score 1.10 -- why: optimization started -- metric: base generalizes=True, n_total=2003
+- **2026-08-20 22:53** [OPTIMIZER] `BTCUSD` tried 32 candidates, best score -1.00 -- why: no improvement -- metric: min-PF -1.00, tried 32
+- **2026-08-20 22:51** [OPTIMIZER] `BTCUSD` tried 0 candidates, best score -1.00 -- why: optimization started -- metric: base generalizes=False, n_total=2770
+- **2026-08-20 22:51** [OPTIMIZER] `XAUUSD-ECN` tried 0 candidates, best score -1.00 -- why: no baseline data -- metric: backtest returned None
+- **2026-08-20 22:04** [OPTIMIZER] `GER40.` tried 9 candidates, best score 1.10 -- why: IMPROVED -- metric: min-PF 1.10, tried 9
+- **2026-08-20 22:03** [OPTIMIZER] `GER40.` tried 0 candidates, best score 1.06 -- why: optimization started -- metric: base generalizes=True, n_total=2900
+- **2026-08-20 21:53** [EXIT-LOCK] `BTCUSD` exit set sl_atr 1.9 tp_rr 0.92 -- why: robust -- metric: recent expectancy 0.1753 (n=30)
+- **2026-08-20 21:47** [REVERT] `BTCUSD` reverted to best-known config -- why: live expectancy degraded vs best-known -- metric: restored sl_atr 1.62 tp_rr 2.0
+- **2026-08-20 21:45** [EXIT-LOCK] `BTCUSD` exit set sl_atr 1.79 tp_rr 0.83 -- why: excursion -- metric: recent expectancy 0.1753 (n=30)
+- **2026-08-20 21:44** [VALIDATE] `GER40.` PASS score 1.82 fwdPF 1.82 -- why: beats best-ever -- metric: trades=1291
+- **2026-08-20 21:44** [OPTIMIZER] `GER40.` tried 31 candidates, best score 1.06 -- why: IMPROVED -- metric: min-PF 1.06, tried 31
+- **2026-08-20 21:43** [OPTIMIZER] `GER40.` tried 0 candidates, best score 1.04 -- why: optimization started -- metric: base generalizes=True, n_total=4752
+- **2026-08-20 21:43** [OPTIMIZER] `BTCUSD` tried 32 candidates, best score -1.00 -- why: no improvement -- metric: min-PF -1.00, tried 32
+- **2026-08-20 21:41** [OPTIMIZER] `BTCUSD` tried 0 candidates, best score -1.00 -- why: optimization started -- metric: base generalizes=False, n_total=2770
+- **2026-08-20 21:41** [OPTIMIZER] `XAUUSD-ECN` tried 0 candidates, best score -1.00 -- why: no baseline data -- metric: backtest returned None
+- **2026-08-20 21:28** [EXIT-LOCK] `BTCUSD` exit set sl_atr 1.78 tp_rr 0.84 -- why: excursion -- metric: recent expectancy 0.1753 (n=30)
+- **2026-08-20 21:27** [VALIDATE] `GER40.` REJECT score 0.91 fwdPF 0.91 -- why: does not generalize -- metric: trades=2106
+- **2026-08-20 21:27** [OPTIMIZER] `GER40.` tried 31 candidates, best score 1.04 -- why: IMPROVED -- metric: min-PF 1.04, tried 31
+- **2026-08-20 21:27** [REVERT] `BTCUSD` reverted to best-known config -- why: live expectancy degraded vs best-known -- metric: restored sl_atr 1.62 tp_rr 2.0
+- **2026-08-20 21:26** [OPTIMIZER] `GER40.` tried 0 candidates, best score -1.00 -- why: optimization started -- metric: base generalizes=False, n_total=5900
+- **2026-08-20 21:26** [OPTIMIZER] `BTCUSD` tried 32 candidates, best score -1.00 -- why: no improvement -- metric: min-PF -1.00, tried 32
+- **2026-08-20 21:24** [OPTIMIZER] `BTCUSD` tried 0 candidates, best score -1.00 -- why: optimization started -- metric: base generalizes=False, n_total=2770
+- **2026-08-20 21:24** [OPTIMIZER] `XAUUSD-ECN` tried 0 candidates, best score -1.00 -- why: no baseline data -- metric: backtest returned None
+- **2026-08-20 21:21** [OPTIMIZER] `BTCUSD` tried 0 candidates, best score -1.00 -- why: optimization started -- metric: base generalizes=False, n_total=2770
+- **2026-08-20 21:21** [OPTIMIZER] `XAUUSD-ECN` tried 0 candidates, best score -1.00 -- why: no baseline data -- metric: backtest returned None
+- **2026-08-20 21:18** [OPTIMIZER] `GER40.` tried 0 candidates, best score 1.11 -- why: optimization started -- metric: base generalizes=True, n_total=2192
+- **2026-08-20 21:18** [OPTIMIZER] `BTCUSD` tried 32 candidates, best score -1.00 -- why: no improvement -- metric: min-PF -1.00, tried 32
+- **2026-08-20 21:16** [OPTIMIZER] `BTCUSD` tried 0 candidates, best score -1.00 -- why: optimization started -- metric: base generalizes=False, n_total=2770
+- **2026-08-20 21:16** [OPTIMIZER] `XAUUSD-ECN` tried 0 candidates, best score -1.00 -- why: no baseline data -- metric: backtest returned None
+- **2026-08-20 21:13** [OPTIMIZER] `GER40.` tried 31 candidates, best score 1.11 -- why: no improvement -- metric: min-PF 1.11, tried 31
+- **2026-08-20 21:11** [OPTIMIZER] `GER40.` tried 0 candidates, best score 1.11 -- why: optimization started -- metric: base generalizes=True, n_total=2192
+- **2026-08-20 21:11** [OPTIMIZER] `BTCUSD` tried 32 candidates, best score -1.00 -- why: no improvement -- metric: min-PF -1.00, tried 32
+- **2026-08-20 21:10** [OPTIMIZER] `BTCUSD` tried 0 candidates, best score -1.00 -- why: optimization started -- metric: base generalizes=False, n_total=2770
+- **2026-08-20 21:10** [OPTIMIZER] `XAUUSD-ECN` tried 0 candidates, best score -1.00 -- why: no baseline data -- metric: backtest returned None
+- **2026-08-20 21:08** [OPTIMIZER] `GER40.` tried 0 candidates, best score 1.11 -- why: optimization started -- metric: base generalizes=True, n_total=2192
+- **2026-08-20 21:08** [OPTIMIZER] `BTCUSD` tried 32 candidates, best score -1.00 -- why: no improvement -- metric: min-PF -1.00, tried 32
+- **2026-08-20 21:07** [OPTIMIZER] `BTCUSD` tried 0 candidates, best score -1.00 -- why: optimization started -- metric: base generalizes=False, n_total=2770
+- **2026-08-20 21:07** [OPTIMIZER] `XAUUSD-ECN` tried 0 candidates, best score -1.00 -- why: no baseline data -- metric: backtest returned None
+- **2026-08-20 21:04** [OPTIMIZER] `BTCUSD` tried 0 candidates, best score -1.00 -- why: optimization started -- metric: base generalizes=False, n_total=2770
+- **2026-08-20 21:04** [OPTIMIZER] `XAUUSD-ECN` tried 0 candidates, best score -1.00 -- why: no baseline data -- metric: backtest returned None
+- **2026-08-20 21:02** [OPTIMIZER] `BTCUSD` tried 0 candidates, best score -1.00 -- why: optimization started -- metric: base generalizes=False, n_total=2770
+- **2026-08-20 21:02** [OPTIMIZER] `XAUUSD-ECN` tried 0 candidates, best score -1.00 -- why: no baseline data -- metric: backtest returned None
+- **2026-08-20 20:52** [OPTIMIZER] `GER40.` tried 9 candidates, best score -1.00 -- why: no improvement -- metric: min-PF -1.00, tried 9
+- **2026-08-20 20:52** [OPTIMIZER] `GER40.` tried 0 candidates, best score -1.00 -- why: optimization started -- metric: base generalizes=False, n_total=0
+- **2026-08-20 20:43** [VALIDATE] `BTCUSD` REJECT score 1.80 fwdPF 2.05 -- why: score 1.80 <= best-ever 2.23+0.05 -- metric: trades=220
+- **2026-08-20 20:42** [EXIT-LOCK] `BTCUSD` exit set sl_atr 1.91 tp_rr 0.91 -- why: robust -- metric: recent expectancy 0.1903 (n=30)
+- **2026-08-20 20:35** [EXIT-LOCK] `BTCUSD` exit set sl_atr 1.81 tp_rr 0.82 -- why: excursion -- metric: recent expectancy 0.1903 (n=30)
+- **2026-08-20 20:35** [VALIDATE] `GER40.` REJECT score -1.00 fwdPF 0.00 -- why: does not generalize
+- **2026-08-20 20:35** [VALIDATE] `BTCUSD` REJECT score -1.00 fwdPF 0.00 -- why: does not generalize
+- **2026-08-20 20:35** [OPTIMIZER] `GER40.` tried 31 candidates, best score -1.00 -- why: no improvement -- metric: min-PF -1.00, tried 31
+- **2026-08-20 20:34** [OPTIMIZER] `GER40.` tried 0 candidates, best score -1.00 -- why: optimization started -- metric: base generalizes=False, n_total=0
+- **2026-08-20 20:34** [OPTIMIZER] `BTCUSD` tried 32 candidates, best score -1.00 -- why: no improvement -- metric: min-PF -1.00, tried 32
+- **2026-08-20 20:32** [OPTIMIZER] `BTCUSD` tried 0 candidates, best score -1.00 -- why: optimization started -- metric: base generalizes=False, n_total=2770
+- **2026-08-20 20:32** [OPTIMIZER] `XAUUSD-ECN` tried 0 candidates, best score -1.00 -- why: no baseline data -- metric: backtest returned None
+- **2026-08-20 20:30** [OPTIMIZER] `GER40.` tried 21 candidates, best score -1.00 -- why: no improvement -- metric: min-PF -1.00, tried 21
+- **2026-08-20 20:29** [OPTIMIZER] `GER40.` tried 0 candidates, best score -1.00 -- why: optimization started -- metric: base generalizes=False, n_total=0
+- **2026-08-20 20:29** [OPTIMIZER] `XAUUSD-ECN` tried 0 candidates, best score -1.00 -- why: no baseline data -- metric: backtest returned None
+- **2026-08-20 20:29** [OPTIMIZER] `GER40.` tried 31 candidates, best score -1.00 -- why: no improvement -- metric: min-PF -1.00, tried 31
+- **2026-08-20 20:28** [OPTIMIZER] `GER40.` tried 0 candidates, best score -1.00 -- why: optimization started -- metric: base generalizes=False, n_total=0
+- **2026-08-20 20:28** [OPTIMIZER] `BTCUSD` tried 32 candidates, best score -1.00 -- why: no improvement -- metric: min-PF -1.00, tried 32
+- **2026-08-20 20:26** [OPTIMIZER] `BTCUSD` tried 0 candidates, best score -1.00 -- why: optimization started -- metric: base generalizes=False, n_total=2770
+- **2026-08-20 20:26** [OPTIMIZER] `XAUUSD-ECN` tried 0 candidates, best score -1.00 -- why: no baseline data -- metric: backtest returned None
+- **2026-08-20 20:18** [OPTIMIZER] `GER40.` tried 21 candidates, best score -1.00 -- why: no improvement -- metric: min-PF -1.00, tried 21
+- **2026-08-20 20:17** [OPTIMIZER] `GER40.` tried 0 candidates, best score -1.00 -- why: optimization started -- metric: base generalizes=False, n_total=0
+- **2026-08-20 20:17** [OPTIMIZER] `XAUUSD-ECN` tried 0 candidates, best score -1.00 -- why: no baseline data -- metric: backtest returned None
+- **2026-08-20 20:17** [OPTIMIZER] `GER40.` tried 31 candidates, best score -1.00 -- why: no improvement -- metric: min-PF -1.00, tried 31
+- **2026-08-20 20:16** [OPTIMIZER] `GER40.` tried 0 candidates, best score -1.00 -- why: optimization started -- metric: base generalizes=False, n_total=0
+- **2026-08-20 20:16** [OPTIMIZER] `BTCUSD` tried 32 candidates, best score -1.00 -- why: no improvement -- metric: min-PF -1.00, tried 32
+- **2026-08-20 20:15** [OPTIMIZER] `BTCUSD` tried 0 candidates, best score -1.00 -- why: optimization started -- metric: base generalizes=False, n_total=2770
+- **2026-08-20 20:15** [OPTIMIZER] `XAUUSD-ECN` tried 0 candidates, best score -1.00 -- why: no baseline data -- metric: backtest returned None
 - **2026-08-20 19:31** [OPTIMIZER] `GER40.` tried 9 candidates, best score -1.00 -- why: no improvement -- metric: min-PF -1.00, tried 9
 - **2026-08-20 19:30** [OPTIMIZER] `GER40.` tried 0 candidates, best score -1.00 -- why: optimization started -- metric: base generalizes=False, n_total=0
 - **2026-08-20 19:29** [VALIDATE] `BTCUSD` REJECT score 0.62 fwdPF 1.15 -- why: does not generalize -- metric: trades=604
@@ -262,142 +403,3 @@
 - **2026-08-06 23:35** [REVERT] `XAUUSD` reverted to best-known config -- why: live expectancy degraded vs best-known -- metric: restored sl_atr 0.8 tp_rr 2.0
 - **2026-08-06 23:30** [REVERT] `XAUUSD` reverted to best-known config -- why: live expectancy degraded vs best-known -- metric: restored sl_atr 0.8 tp_rr 2.0
 - **2026-08-06 23:25** [REVERT] `XAUUSD` reverted to best-known config -- why: live expectancy degraded vs best-known -- metric: restored sl_atr 0.8 tp_rr 2.0
-- **2026-08-06 23:20** [REVERT] `XAUUSD` reverted to best-known config -- why: live expectancy degraded vs best-known -- metric: restored sl_atr 0.8 tp_rr 2.0
-- **2026-08-06 23:15** [REVERT] `XAUUSD` reverted to best-known config -- why: live expectancy degraded vs best-known -- metric: restored sl_atr 0.8 tp_rr 2.0
-- **2026-08-06 23:10** [REVERT] `XAUUSD` reverted to best-known config -- why: live expectancy degraded vs best-known -- metric: restored sl_atr 0.8 tp_rr 2.0
-- **2026-08-06 23:04** [REVERT] `XAUUSD` reverted to best-known config -- why: live expectancy degraded vs best-known -- metric: restored sl_atr 0.8 tp_rr 2.0
-- **2026-08-06 22:59** [REVERT] `XAUUSD` reverted to best-known config -- why: live expectancy degraded vs best-known -- metric: restored sl_atr 0.8 tp_rr 2.0
-- **2026-08-06 22:54** [REVERT] `XAUUSD` reverted to best-known config -- why: live expectancy degraded vs best-known -- metric: restored sl_atr 0.8 tp_rr 2.0
-- **2026-08-06 22:48** [REVERT] `XAUUSD` reverted to best-known config -- why: live expectancy degraded vs best-known -- metric: restored sl_atr 0.8 tp_rr 2.0
-- **2026-08-06 22:43** [REVERT] `XAUUSD` reverted to best-known config -- why: live expectancy degraded vs best-known -- metric: restored sl_atr 0.8 tp_rr 2.0
-- **2026-08-06 22:38** [REVERT] `XAUUSD` reverted to best-known config -- why: live expectancy degraded vs best-known -- metric: restored sl_atr 0.8 tp_rr 2.0
-- **2026-08-06 22:33** [REVERT] `XAUUSD` reverted to best-known config -- why: live expectancy degraded vs best-known -- metric: restored sl_atr 0.8 tp_rr 2.0
-- **2026-08-06 22:28** [REVERT] `XAUUSD` reverted to best-known config -- why: live expectancy degraded vs best-known -- metric: restored sl_atr 0.8 tp_rr 2.0
-- **2026-08-06 22:23** [REVERT] `XAUUSD` reverted to best-known config -- why: live expectancy degraded vs best-known -- metric: restored sl_atr 0.8 tp_rr 2.0
-- **2026-08-06 22:18** [REVERT] `XAUUSD` reverted to best-known config -- why: live expectancy degraded vs best-known -- metric: restored sl_atr 0.8 tp_rr 2.0
-- **2026-08-06 22:13** [EXIT-LOCK] `BTCUSD` exit set sl_atr 1.58 tp_rr 0.86 -- why: robust -- metric: recent expectancy -0.138 (n=30)
-- **2026-08-06 22:12** [REVERT] `XAUUSD` reverted to best-known config -- why: live expectancy degraded vs best-known -- metric: restored sl_atr 0.8 tp_rr 2.0
-- **2026-08-06 22:06** [EXIT-LOCK] `BTCUSD` exit set sl_atr 1.67 tp_rr 0.72 -- why: excursion -- metric: recent expectancy -0.138 (n=30)
-- **2026-08-06 22:06** [REVERT] `XAUUSD` reverted to best-known config -- why: live expectancy degraded vs best-known -- metric: restored sl_atr 0.8 tp_rr 2.0
-- **2026-08-06 22:00** [REVERT] `XAUUSD` reverted to best-known config -- why: live expectancy degraded vs best-known -- metric: restored sl_atr 0.8 tp_rr 2.0
-- **2026-08-06 21:55** [REVERT] `XAUUSD` reverted to best-known config -- why: live expectancy degraded vs best-known -- metric: restored sl_atr 0.8 tp_rr 2.0
-- **2026-08-06 21:03** [REVERT] `BTCUSD` reverted to best-known config -- why: live expectancy degraded vs best-known -- metric: restored sl_atr 0.8 tp_rr 2.0
-- **2026-08-06 19:45** [REVERT] `BTCUSD` reverted to best-known config -- why: live expectancy degraded vs best-known -- metric: restored sl_atr 0.8 tp_rr 2.0
-- **2026-08-06 18:29** [REVERT] `BTCUSD` reverted to best-known config -- why: live expectancy degraded vs best-known -- metric: restored sl_atr 0.8 tp_rr 2.0
-- **2026-08-06 17:12** [REVERT] `BTCUSD` reverted to best-known config -- why: live expectancy degraded vs best-known -- metric: restored sl_atr 0.8 tp_rr 2.0
-- **2026-08-06 16:56** [REVERT] `XAUUSD` reverted to best-known config -- why: live expectancy degraded vs best-known -- metric: restored sl_atr 0.8 tp_rr 2.0
-- **2026-08-06 15:51** [REVERT] `BTCUSD` reverted to best-known config -- why: live expectancy degraded vs best-known -- metric: restored sl_atr 0.8 tp_rr 2.0
-- **2026-08-06 14:33** [REVERT] `BTCUSD` reverted to best-known config -- why: live expectancy degraded vs best-known -- metric: restored sl_atr 0.8 tp_rr 2.0
-- **2026-08-06 13:14** [REVERT] `BTCUSD` reverted to best-known config -- why: live expectancy degraded vs best-known -- metric: restored sl_atr 0.8 tp_rr 2.0
-- **2026-08-06 11:57** [REVERT] `BTCUSD` reverted to best-known config -- why: live expectancy degraded vs best-known -- metric: restored sl_atr 0.8 tp_rr 2.0
-- **2026-08-06 10:49** [REVERT] `XAUUSD` reverted to best-known config -- why: live expectancy degraded vs best-known -- metric: restored sl_atr 0.8 tp_rr 2.0
-- **2026-08-06 10:37** [REVERT] `BTCUSD` reverted to best-known config -- why: live expectancy degraded vs best-known -- metric: restored sl_atr 0.8 tp_rr 2.0
-- **2026-08-06 09:19** [REVERT] `BTCUSD` reverted to best-known config -- why: live expectancy degraded vs best-known -- metric: restored sl_atr 0.8 tp_rr 2.0
-- **2026-08-06 06:43** [EXIT-LOCK] `BTCUSD` exit set sl_atr 1.58 tp_rr 0.88 -- why: robust -- metric: recent expectancy -0.1487 (n=30)
-- **2026-08-06 06:32** [EXIT-LOCK] `BTCUSD` exit set sl_atr 1.66 tp_rr 0.75 -- why: excursion -- metric: recent expectancy -0.1487 (n=30)
-- **2026-08-05 21:20** [EXIT-LOCK] `BTCUSD` exit set sl_atr 1.83 tp_rr 0.88 -- why: robust -- metric: recent expectancy -0.1487 (n=30)
-- **2026-08-05 21:11** [EXIT-LOCK] `BTCUSD` exit set sl_atr 1.66 tp_rr 0.75 -- why: excursion -- metric: recent expectancy -0.1487 (n=30)
-- **2026-08-05 20:56** [EXIT-LOCK] `BTCUSD` exit set sl_atr 1.82 tp_rr 0.88 -- why: robust -- metric: recent expectancy -0.1487 (n=30)
-- **2026-08-05 20:50** [EXIT-LOCK] `BTCUSD` exit set sl_atr 1.65 tp_rr 0.76 -- why: excursion -- metric: recent expectancy -0.1487 (n=30)
-- **2026-08-05 19:38** [EXIT-LOCK] `BTCUSD` exit set sl_atr 1.82 tp_rr 0.88 -- why: robust -- metric: recent expectancy -0.144 (n=30)
-- **2026-08-05 19:30** [EXIT-LOCK] `BTCUSD` exit set sl_atr 1.65 tp_rr 0.76 -- why: excursion -- metric: recent expectancy -0.144 (n=30)
-- **2026-08-05 14:52** [EXIT-LOCK] `BTCUSD` exit set sl_atr 1.84 tp_rr 0.71 -- why: robust -- metric: recent expectancy -0.144 (n=30)
-- **2026-08-05 14:39** [EXIT-LOCK] `BTCUSD` exit set sl_atr 1.69 tp_rr 0.73 -- why: excursion -- metric: recent expectancy -0.144 (n=30)
-- **2026-08-05 14:16** [EXIT-LOCK] `BTCUSD` exit set sl_atr 1.69 tp_rr 0.73 -- why: excursion -- metric: recent expectancy -0.144 (n=30)
-- **2026-08-05 11:55** [EXIT-LOCK] `BTCUSD` exit set sl_atr 1.59 tp_rr 0.72 -- why: robust -- metric: recent expectancy -0.1273 (n=30)
-- **2026-08-05 11:42** [EXIT-LOCK] `BTCUSD` exit set sl_atr 1.68 tp_rr 0.74 -- why: excursion -- metric: recent expectancy -0.1273 (n=30)
-- **2026-08-05 10:30** [EXIT-LOCK] `BTCUSD` exit set sl_atr 1.85 tp_rr 0.88 -- why: robust -- metric: recent expectancy -0.1493 (n=30)
-- **2026-08-05 10:18** [EXIT-LOCK] `BTCUSD` exit set sl_atr 1.7 tp_rr 0.75 -- why: excursion -- metric: recent expectancy -0.1493 (n=30)
-- **2026-08-05 06:37** [EXIT-LOCK] `BTCUSD` exit set sl_atr 1.85 tp_rr 0.89 -- why: robust -- metric: recent expectancy -0.1493 (n=30)
-- **2026-08-05 06:26** [EXIT-LOCK] `BTCUSD` exit set sl_atr 1.7 tp_rr 0.78 -- why: excursion -- metric: recent expectancy -0.1493 (n=30)
-- **2026-08-05 00:31** [EXIT-LOCK] `BTCUSD` exit set sl_atr 1.58 tp_rr 0.91 -- why: robust -- metric: recent expectancy -0.1493 (n=30)
-- **2026-08-05 00:15** [EXIT-LOCK] `BTCUSD` exit set sl_atr 1.58 tp_rr 0.91 -- why: excursion -- metric: recent expectancy -0.1493 (n=30)
-- **2026-08-04 22:24** [EXIT-LOCK] `BTCUSD` exit set sl_atr 1.57 tp_rr 0.91 -- why: robust -- metric: recent expectancy -0.1493 (n=30)
-- **2026-08-04 22:11** [EXIT-LOCK] `BTCUSD` exit set sl_atr 1.65 tp_rr 0.81 -- why: excursion -- metric: recent expectancy -0.1493 (n=30)
-- **2026-08-04 20:39** [EXIT-LOCK] `BTCUSD` exit set sl_atr 1.57 tp_rr 0.91 -- why: robust -- metric: recent expectancy -0.1493 (n=30)
-- **2026-08-04 20:29** [EXIT-LOCK] `BTCUSD` exit set sl_atr 1.65 tp_rr 0.81 -- why: excursion -- metric: recent expectancy -0.1493 (n=30)
-- **2026-08-04 20:00** [EXIT-LOCK] `BTCUSD` exit set sl_atr 1.83 tp_rr 0.91 -- why: robust -- metric: recent expectancy -0.1493 (n=30)
-- **2026-08-04 19:53** [EXIT-LOCK] `BTCUSD` exit set sl_atr 1.66 tp_rr 0.81 -- why: excursion -- metric: recent expectancy -0.1493 (n=30)
-- **2026-08-04 17:26** [EXIT-LOCK] `BTCUSD` exit set sl_atr 1.82 tp_rr 0.9 -- why: robust -- metric: recent expectancy -0.0773 (n=30)
-- **2026-08-04 17:19** [EXIT-LOCK] `BTCUSD` exit set sl_atr 1.65 tp_rr 0.79 -- why: excursion -- metric: recent expectancy -0.0773 (n=30)
-- **2026-08-04 16:58** [EXIT-LOCK] `BTCUSD` exit set sl_atr 1.82 tp_rr 0.91 -- why: robust -- metric: recent expectancy -0.0773 (n=30)
-- **2026-08-04 16:52** [EXIT-LOCK] `BTCUSD` exit set sl_atr 1.65 tp_rr 0.81 -- why: excursion -- metric: recent expectancy -0.0773 (n=30)
-- **2026-08-04 14:38** [EXIT-LOCK] `BTCUSD` exit set sl_atr 1.66 tp_rr 0.8 -- why: excursion -- metric: recent expectancy -0.1573 (n=30)
-- **2026-08-04 13:13** [EXIT-LOCK] `BTCUSD` exit set sl_atr 1.57 tp_rr 0.9 -- why: robust -- metric: recent expectancy 0.0123 (n=13)
-- **2026-08-04 13:01** [EXIT-LOCK] `BTCUSD` exit set sl_atr 1.64 tp_rr 0.8 -- why: excursion -- metric: recent expectancy -0.0022 (n=9)
-- **2026-08-04 12:58** [REVERT] `XAUUSD` reverted to best-known config -- why: live expectancy degraded vs best-known -- metric: restored sl_atr 0.8 tp_rr 2.0
-- **2026-08-04 11:28** [ONNX] `GER40` model retrained (kept=True) -- why: per-symbol chronological holdout -- metric: AUC 0.693 over n=103
-- **2026-08-04 11:21** [EXIT-LOCK] `BTCUSD` exit set sl_atr 1.82 tp_rr 0.9 -- why: robust -- metric: recent expectancy -0.1213 (n=30)
-- **2026-08-04 11:17** [EXIT-LOCK] `BTCUSD` exit set sl_atr 1.65 tp_rr 0.8 -- why: excursion -- metric: recent expectancy -0.1213 (n=30)
-- **2026-08-04 11:09** [EXIT-LOCK] `BTCUSD` exit set sl_atr 1.82 tp_rr 0.9 -- why: robust -- metric: recent expectancy -0.1213 (n=30)
-- **2026-08-04 11:05** [EXIT-LOCK] `BTCUSD` exit set sl_atr 1.65 tp_rr 0.79 -- why: excursion -- metric: recent expectancy -0.1213 (n=30)
-- **2026-08-04 10:22** [EXIT-LOCK] `BTCUSD` exit set sl_atr 1.82 tp_rr 0.9 -- why: robust -- metric: recent expectancy -0.1213 (n=30)
-- **2026-08-04 10:17** [EXIT-LOCK] `BTCUSD` exit set sl_atr 1.65 tp_rr 0.79 -- why: excursion -- metric: recent expectancy -0.1213 (n=30)
-- **2026-08-04 10:12** [EXIT-LOCK] `BTCUSD` exit set sl_atr 1.64 tp_rr 0.78 -- why: excursion -- metric: recent expectancy -0.1213 (n=30)
-- **2026-08-04 09:55** [EXIT-LOCK] `BTCUSD` exit set sl_atr 1.82 tp_rr 0.9 -- why: robust -- metric: recent expectancy -0.1213 (n=30)
-- **2026-08-04 09:48** [EXIT-LOCK] `BTCUSD` exit set sl_atr 1.65 tp_rr 0.79 -- why: excursion -- metric: recent expectancy -0.1213 (n=30)
-- **2026-08-04 09:33** [EXIT-LOCK] `BTCUSD` exit set sl_atr 1.64 tp_rr 0.79 -- why: excursion -- metric: recent expectancy -0.1213 (n=30)
-- **2026-08-04 09:26** [EXIT-LOCK] `BTCUSD` exit set sl_atr 1.82 tp_rr 0.9 -- why: robust -- metric: recent expectancy -0.1213 (n=30)
-- **2026-08-04 09:20** [EXIT-LOCK] `BTCUSD` exit set sl_atr 1.64 tp_rr 0.79 -- why: excursion -- metric: recent expectancy -0.1213 (n=30)
-- **2026-08-04 08:53** [ONNX] `GER40` model retrained (kept=True) -- why: per-symbol chronological holdout -- metric: AUC 0.649 over n=100
-- **2026-08-04 08:49** [EXIT-LOCK] `BTCUSD` exit set sl_atr 1.82 tp_rr 0.9 -- why: robust -- metric: recent expectancy -0.1213 (n=30)
-- **2026-08-04 08:42** [EXIT-LOCK] `BTCUSD` exit set sl_atr 1.64 tp_rr 0.79 -- why: excursion -- metric: recent expectancy -0.1213 (n=30)
-- **2026-08-04 08:33** [EXIT-LOCK] `BTCUSD` exit set sl_atr 1.81 tp_rr 0.91 -- why: robust -- metric: recent expectancy -0.1213 (n=30)
-- **2026-08-04 08:26** [EXIT-LOCK] `BTCUSD` exit set sl_atr 1.62 tp_rr 0.81 -- why: excursion -- metric: recent expectancy -0.1213 (n=30)
-- **2026-08-04 08:16** [EXIT-LOCK] `BTCUSD` exit set sl_atr 1.62 tp_rr 0.8 -- why: excursion -- metric: recent expectancy -0.1213 (n=30)
-- **2026-08-04 07:54** [EXIT-LOCK] `BTCUSD` exit set sl_atr 1.81 tp_rr 0.74 -- why: robust -- metric: recent expectancy -0.1213 (n=30)
-- **2026-08-04 07:40** [EXIT-LOCK] `BTCUSD` exit set sl_atr 1.63 tp_rr 0.79 -- why: excursion -- metric: recent expectancy -0.1213 (n=30)
-- **2026-08-04 07:11** [ONNX] `GER40` model retrained (kept=True) -- why: per-symbol chronological holdout -- metric: AUC 0.643 over n=100
-- **2026-08-04 07:08** [EXIT-LOCK] `BTCUSD` exit set sl_atr 1.81 tp_rr 0.89 -- why: robust -- metric: recent expectancy -0.1213 (n=30)
-- **2026-08-04 06:54** [EXIT-LOCK] `BTCUSD` exit set sl_atr 1.63 tp_rr 0.78 -- why: excursion -- metric: recent expectancy -0.1213 (n=30)
-- **2026-08-04 06:02** [ONNX] `GER40` model retrained (kept=True) -- why: per-symbol chronological holdout -- metric: AUC 0.647 over n=100
-- **2026-08-04 05:09** [ONNX] `GER40` model retrained (kept=True) -- why: per-symbol chronological holdout -- metric: AUC 0.643 over n=100
-- **2026-08-04 01:08** [EXIT-LOCK] `BTCUSD` exit set sl_atr 1.81 tp_rr 0.89 -- why: robust -- metric: recent expectancy -0.0873 (n=30)
-- **2026-08-04 00:51** [EXIT-LOCK] `BTCUSD` exit set sl_atr 1.81 tp_rr 0.89 -- why: excursion -- metric: recent expectancy -0.0873 (n=30)
-- **2026-08-03 21:52** [EXIT-LOCK] `BTCUSD` exit set sl_atr 1.81 tp_rr 0.9 -- why: robust -- metric: recent expectancy -0.0837 (n=30)
-- **2026-08-03 21:35** [EXIT-LOCK] `BTCUSD` exit set sl_atr 1.63 tp_rr 0.79 -- why: excursion -- metric: recent expectancy -0.0837 (n=30)
-- **2026-08-03 21:28** [EXIT-LOCK] `BTCUSD` exit set sl_atr 1.63 tp_rr 0.78 -- why: excursion -- metric: recent expectancy -0.0837 (n=30)
-- **2026-08-03 20:39** [EXIT-LOCK] `BTCUSD` exit set sl_atr 2.31 tp_rr 0.89 -- why: robust -- metric: recent expectancy -0.0843 (n=30)
-- **2026-08-03 20:27** [EXIT-LOCK] `BTCUSD` exit set sl_atr 1.62 tp_rr 0.78 -- why: excursion -- metric: recent expectancy -0.0843 (n=30)
-- **2026-08-03 20:13** [EXIT-LOCK] `BTCUSD` exit set sl_atr 1.63 tp_rr 0.78 -- why: excursion -- metric: recent expectancy -0.0843 (n=30)
-- **2026-08-03 20:05** [EXIT-LOCK] `BTCUSD` exit set sl_atr 1.62 tp_rr 0.79 -- why: excursion -- metric: recent expectancy -0.0843 (n=30)
-- **2026-08-03 19:51** [EXIT-LOCK] `BTCUSD` exit set sl_atr 1.62 tp_rr 0.79 -- why: excursion -- metric: recent expectancy -0.0843 (n=30)
-- **2026-08-03 19:23** [EXIT-LOCK] `BTCUSD` exit set sl_atr 1.81 tp_rr 0.9 -- why: robust -- metric: recent expectancy -0.094 (n=30)
-- **2026-08-03 19:10** [EXIT-LOCK] `BTCUSD` exit set sl_atr 1.61 tp_rr 0.79 -- why: excursion -- metric: recent expectancy -0.068 (n=30)
-- **2026-08-03 19:01** [EXIT-LOCK] `BTCUSD` exit set sl_atr 1.81 tp_rr 0.89 -- why: robust -- metric: recent expectancy -0.0123 (n=30)
-- **2026-08-03 18:51** [EXIT-LOCK] `BTCUSD` exit set sl_atr 1.62 tp_rr 0.78 -- why: excursion -- metric: recent expectancy -0.049 (n=30)
-- **2026-08-03 18:07** [EXIT-LOCK] `BTCUSD` exit set sl_atr 1.81 tp_rr 0.89 -- why: robust -- metric: recent expectancy 0.0197 (n=30)
-- **2026-08-03 17:55** [EXIT-LOCK] `BTCUSD` exit set sl_atr 1.62 tp_rr 0.78 -- why: excursion -- metric: recent expectancy 0.0043 (n=30)
-- **2026-08-03 16:46** [EXIT-LOCK] `BTCUSD` exit set sl_atr 1.8 tp_rr 0.9 -- why: robust -- metric: recent expectancy -0.0747 (n=30)
-- **2026-08-03 16:35** [EXIT-LOCK] `BTCUSD` exit set sl_atr 1.6 tp_rr 0.79 -- why: excursion -- metric: recent expectancy -0.008 (n=30)
-- **2026-08-03 16:14** [EXIT-LOCK] `BTCUSD` exit set sl_atr 1.61 tp_rr 0.79 -- why: excursion -- metric: recent expectancy -0.0003 (n=30)
-- **2026-08-03 13:50** [EXIT-LOCK] `BTCUSD` exit set sl_atr 1.79 tp_rr 0.9 -- why: robust -- metric: recent expectancy 0.049 (n=30)
-- **2026-08-03 13:35** [EXIT-LOCK] `BTCUSD` exit set sl_atr 1.58 tp_rr 0.8 -- why: excursion -- metric: recent expectancy 0.0813 (n=30)
-- **2026-08-03 12:34** [ONNX] `XAUUSD` model retrained (kept=True) -- why: per-symbol chronological holdout -- metric: AUC 0.783 over n=93
-- **2026-08-03 09:40** [EXIT-LOCK] `BTCUSD` exit set sl_atr 1.79 tp_rr 0.59 -- why: robust -- metric: recent expectancy -0.0053 (n=30)
-- **2026-08-03 09:23** [EXIT-LOCK] `BTCUSD` exit set sl_atr 1.57 tp_rr 0.78 -- why: excursion -- metric: recent expectancy -0.0053 (n=30)
-- **2026-08-03 02:14** [REVERT] `BTCUSD` reverted to best-known config -- why: live expectancy degraded vs best-known -- metric: restored sl_atr 1.0 tp_rr 2.0
-- **2026-08-03 01:26** [REVERT] `BTCUSD` reverted to best-known config -- why: live expectancy degraded vs best-known -- metric: restored sl_atr 1.0 tp_rr 2.0
-- **2026-08-03 01:15** [EXIT-LOCK] `BTCUSD` exit set sl_atr 2.01 tp_rr 0.87 -- why: robust -- metric: recent expectancy -0.092 (n=30)
-- **2026-08-03 01:05** [REVERT] `BTCUSD` reverted to best-known config -- why: live expectancy degraded vs best-known -- metric: restored sl_atr 1.0 tp_rr 2.0
-- **2026-08-03 01:03** [EXIT-LOCK] `BTCUSD` exit set sl_atr 2.01 tp_rr 0.87 -- why: excursion -- metric: recent expectancy -0.069 (n=30)
-- **2026-08-03 01:03** [EXIT-LOCK] `BTCUSD` exit set sl_atr 2.01 tp_rr 0.88 -- why: pattern -- metric: recent expectancy -0.069 (n=30)
-- **2026-08-02 21:59** [EXIT-LOCK] `BTCUSD` exit set sl_atr 2.01 tp_rr 0.88 -- why: robust -- metric: recent expectancy 0.0427 (n=30)
-- **2026-08-02 21:51** [EXIT-LOCK] `BTCUSD` exit set sl_atr 2.02 tp_rr 0.82 -- why: excursion -- metric: recent expectancy 0.0557 (n=30)
-- **2026-08-02 21:51** [EXIT-LOCK] `BTCUSD` exit set sl_atr 2.5 tp_rr 0.8 -- why: pattern -- metric: recent expectancy 0.0557 (n=30)
-- **2026-08-02 16:21** [EXIT-LOCK] `BTCUSD` exit set sl_atr 2.02 tp_rr 0.87 -- why: robust -- metric: recent expectancy -0.1287 (n=30)
-- **2026-08-02 16:01** [EXIT-LOCK] `BTCUSD` exit set sl_atr 2.03 tp_rr 0.81 -- why: excursion -- metric: recent expectancy -0.1287 (n=30)
-- **2026-08-02 16:01** [EXIT-LOCK] `BTCUSD` exit set sl_atr 2.5 tp_rr 0.8 -- why: pattern -- metric: recent expectancy -0.1287 (n=30)
-- **2026-08-02 15:59** [REVERT] `BTCUSD` reverted to best-known config -- why: live expectancy degraded vs best-known -- metric: restored sl_atr 1.0 tp_rr 2.0
-- **2026-08-02 15:23** [EXIT-LOCK] `BTCUSD` exit set sl_atr 2.02 tp_rr 0.88 -- why: robust -- metric: recent expectancy -0.11 (n=30)
-- **2026-08-02 15:15** [EXIT-LOCK] `BTCUSD` exit set sl_atr 2.03 tp_rr 0.82 -- why: excursion -- metric: recent expectancy -0.11 (n=30)
-- **2026-08-02 15:15** [EXIT-LOCK] `BTCUSD` exit set sl_atr 2.5 tp_rr 0.8 -- why: pattern -- metric: recent expectancy -0.11 (n=30)
-- **2026-08-02 15:14** [REVERT] `BTCUSD` reverted to best-known config -- why: live expectancy degraded vs best-known -- metric: restored sl_atr 1.0 tp_rr 2.0
-- **2026-08-02 13:44** [EXIT-LOCK] `BTCUSD` exit set sl_atr 2.02 tp_rr 0.87 -- why: robust -- metric: recent expectancy -0.0803 (n=30)
-- **2026-08-02 13:32** [EXIT-LOCK] `BTCUSD` exit set sl_atr 2.02 tp_rr 0.81 -- why: excursion -- metric: recent expectancy -0.1077 (n=30)
-- **2026-08-02 13:32** [EXIT-LOCK] `BTCUSD` exit set sl_atr 2.5 tp_rr 0.8 -- why: pattern -- metric: recent expectancy -0.1077 (n=30)
-- **2026-08-02 13:31** [REVERT] `BTCUSD` reverted to best-known config -- why: live expectancy degraded vs best-known -- metric: restored sl_atr 1.0 tp_rr 2.0
-- **2026-08-02 11:38** [ONNX] `BTCUSD` model retrained (kept=True) — _why:_ per-symbol chronological holdout — _metric:_ AUC 0.726 over n=112
-- **2026-08-02 11:34** [EXIT-LOCK] `BTCUSD` exit set sl_atr 1.78 tp_rr 0.9 — _why:_ robust — _metric:_ recent expectancy -0.035 (n=30)
-- **2026-08-02 11:28** [INIT] - learning-adjustments log initialized (#45.1) -- why: GitHub-visible record of loop changes
-- **2026-08-02 11:27** [EXIT-LOCK] `BTCUSD` exit set sl_atr 1.56 tp_rr 0.8 — _why:_ excursion — _metric:_ recent expectancy -0.035 (n=30)

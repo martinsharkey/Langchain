@@ -370,6 +370,7 @@ class ScalpEngine:
                 learning_log=getattr(self, "learning_log", None),
             )
             self._optuna_last_run_day = None
+            self._optuna_applied_today = set()
         except Exception as e:
             logger.debug(f"OptunaLiveBridge unavailable: {e}")
 
@@ -3014,34 +3015,28 @@ class ScalpEngine:
                             self._optuna_study_run_day = today
                             if not hasattr(self, "_optuna_study_threads"):
                                 self._optuna_study_threads = {}
-                            if not hasattr(self, "_optuna_study_completed"):
-                                self._optuna_study_completed = set()
-                            for base, adapter in self.adapters.items():
-                                sym = adapter.resolved_symbol
-                                self._refresh_data_if_needed(base, "M15")
-                                t = self._optuna_study_threads.get(sym)
-                                if t and t.is_alive():
-                                    continue
-                                try:
-                                    from scripts.qmmp.optuna_floor_optimizer import run_daily_studies
-                                    tf = config.entry_timeframe_for(base)
-                                    th = threading.Thread(
-                                        target=run_daily_studies,
-                                        args=([sym],),
-                                        kwargs={"n_trials": 50, "allow_mt5": False,
-                                                "broker": "vt_markets", "timeframes": [tf]},
-                                        name=f"optuna-study-{base}",
-                                        daemon=True,
-                                    )
-                                    self._optuna_study_threads[sym] = th
-                                    th.start()
-                                    logger.info(f"[OPTUNA] daily study thread STARTED for {sym}")
-                                except Exception as e:
-                                    logger.debug(f"optuna study thread {sym} skip: {e}")
-                        # Mark any finished study threads as completed
-                        for sym, t in list(getattr(self, "_optuna_study_threads", {}).items()):
-                            if t is not None and not t.is_alive():
-                                self._optuna_study_completed.add(sym)
+                        for base, adapter in self.adapters.items():
+                            sym = adapter.resolved_symbol
+                            self._refresh_data_if_needed(base, "M15")
+                            t = self._optuna_study_threads.get(sym)
+                            if t and t.is_alive():
+                                continue
+                            try:
+                                from scripts.qmmp.optuna_floor_optimizer import run_daily_studies
+                                tf = config.entry_timeframe_for(base)
+                                th = threading.Thread(
+                                    target=run_daily_studies,
+                                    args=([sym],),
+                                    kwargs={"n_trials": 50, "allow_mt5": False,
+                                            "broker": "vt_markets", "timeframes": [tf]},
+                                    name=f"optuna-study-{base}",
+                                    daemon=True,
+                                )
+                                self._optuna_study_threads[sym] = th
+                                th.start()
+                                logger.info(f"[OPTUNA] daily study thread STARTED for {sym}")
+                            except Exception as e:
+                                logger.debug(f"optuna study thread {sym} skip: {e}")
                     except Exception as e:
                         logger.debug(f"optuna study runner skip: {e}")
 
@@ -3056,6 +3051,7 @@ class ScalpEngine:
                         today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
                         if getattr(self, "_optuna_last_run_day", None) != today:
                             self._optuna_last_run_day = today
+                            self._optuna_applied_today = set()
                         for base, adapter in self.adapters.items():
                             sym = adapter.resolved_symbol
                             # Skip if study is still running for this symbol today
@@ -3064,8 +3060,7 @@ class ScalpEngine:
                                 logger.debug(f"[OPTUNA] bridge {sym}: study still running, will retry next cycle")
                                 continue
                             # Skip if already applied today
-                            applied_today = getattr(self, "_optuna_applied_today", set())
-                            if sym in applied_today:
+                            if sym in self._optuna_applied_today:
                                 continue
                             try:
                                 self._refresh_data_if_needed(base, "M15")
@@ -3073,11 +3068,11 @@ class ScalpEngine:
                                 if res.get("applied"):
                                     logger.info(f"[OPTUNA] {sym}: applied best Optuna floors "
                                                 f"score={res['validation'].get('score')}")
-                                    applied_today.add(sym)
+                                    self._optuna_applied_today.add(sym)
                                 elif res.get("proposed"):
                                     logger.debug(f"[OPTUNA] {sym}: proposed but not applied — "
                                                  f"{res.get('reason')}")
-                                    applied_today.add(sym)
+                                    self._optuna_applied_today.add(sym)
                             except Exception as e:
                                 logger.debug(f"optuna bridge {sym} skip: {e}")
                     except Exception as e:
