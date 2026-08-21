@@ -47,6 +47,11 @@ jobs:
       - name: Run isolated test suite
         run: pytest tests/ -q
 
+      - name: Scan for secrets
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
   live-test:
     # Live restart tests require a Windows runner with MT5 terminal installed.
     # Enable manually from the Actions tab when a Windows runner is available.
