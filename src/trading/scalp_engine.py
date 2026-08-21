@@ -1186,6 +1186,82 @@ class ScalpEngine:
             pass
         logger.info("ScalpEngine shutdown requested")
 
+    def _optuna_start_daily_studies(self):
+        """Once per UTC day, kick off a background thread that runs Optuna floor
+        optimization for each symbol. Uses allow_mt5=False to avoid disrupting
+        the live MT5 terminal."""
+        if not (hasattr(self, "optuna_bridge") and self.optuna_bridge is not None):
+            return
+        try:
+            today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+            if getattr(self, "_optuna_study_run_day", None) != today:
+                self._optuna_study_run_day = today
+                if not hasattr(self, "_optuna_study_threads"):
+                    self._optuna_study_threads = {}
+            for base, adapter in self.adapters.items():
+                sym = adapter.resolved_symbol
+                self._refresh_data_if_needed(base, "M15")
+                t = self._optuna_study_threads.get(sym)
+                if t and t.is_alive():
+                    continue
+                try:
+                    from scripts.qmmp.optuna_floor_optimizer import run_daily_studies
+                    tf = config.entry_timeframe_for(base)
+                    th = threading.Thread(
+                        target=run_daily_studies,
+                        args=([sym],),
+                        kwargs={"n_trials": 50, "allow_mt5": False,
+                                "broker": "vt_markets", "timeframes": [tf]},
+                        name=f"optuna-study-{base}",
+                        daemon=True,
+                    )
+                    self._optuna_study_threads[sym] = th
+                    th.start()
+                    logger.info(f"[OPTUNA] daily study thread STARTED for {sym}")
+                except Exception as e:
+                    logger.debug(f"optuna study thread {sym} skip: {e}")
+        except Exception as e:
+            logger.debug(f"optuna study runner skip: {e}")
+
+    def _optuna_bridge_cycle(self):
+        """Once per UTC day per symbol, read the best completed Optuna study,
+        translate floors to the live schema, validate through ChangeValidator,
+        and apply if it beats the best-ever gate.
+
+        Same-day policy (B2): mark applied-today on accepted apply OR hard
+        validation reject. Do NOT mark when there was no proposal so a late
+        completing study can still propose on the same cycle."""
+        if self.optuna_bridge is None:
+            return
+        try:
+            today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+            if getattr(self, "_optuna_last_run_day", None) != today:
+                self._optuna_last_run_day = today
+                self._optuna_applied_today = set()
+            for base, adapter in self.adapters.items():
+                sym = adapter.resolved_symbol
+                t = getattr(self, "_optuna_study_threads", {}).get(sym)
+                if t is not None and t.is_alive():
+                    logger.debug(f"[OPTUNA] bridge {sym}: study still running, will retry next cycle")
+                    continue
+                if sym in self._optuna_applied_today:
+                    continue
+                try:
+                    self._refresh_data_if_needed(base, "M15")
+                    res = self.optuna_bridge.propose_and_apply(sym)
+                    if res.get("applied"):
+                        logger.info(f"[OPTUNA] {sym}: applied best Optuna floors "
+                                    f"score={res['validation'].get('score')}")
+                        self._optuna_applied_today.add(sym)
+                    elif res.get("proposed"):
+                        logger.debug(f"[OPTUNA] {sym}: proposed but not applied — "
+                                     f"{res.get('reason')}")
+                        self._optuna_applied_today.add(sym)
+                except Exception as e:
+                    logger.debug(f"optuna bridge {sym} skip: {e}")
+        except Exception as e:
+            logger.debug(f"optuna bridge skip: {e}")
+
     def run(self, max_cycles: Optional[int] = None):
         if not self.initialize():
             return
@@ -3023,82 +3099,9 @@ class ScalpEngine:
                         except Exception as e:
                             logger.debug(f"optimizer {sym} skip: {e}")
 
-                # OPTUNA DAILY STUDY RUN (#76 follow-up): once per UTC day, kick off a
-                # background thread that runs Optuna floor optimization for each symbol.
-                # Uses allow_mt5=False to avoid disrupting the live MT5 terminal.
-                if hasattr(self, "optuna_bridge") and self.optuna_bridge is not None:
-                    try:
-                        today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-                        if getattr(self, "_optuna_study_run_day", None) != today:
-                            self._optuna_study_run_day = today
-                            if not hasattr(self, "_optuna_study_threads"):
-                                self._optuna_study_threads = {}
-                        for base, adapter in self.adapters.items():
-                            sym = adapter.resolved_symbol
-                            self._refresh_data_if_needed(base, "M15")
-                            t = self._optuna_study_threads.get(sym)
-                            if t and t.is_alive():
-                                continue
-                            try:
-                                from scripts.qmmp.optuna_floor_optimizer import run_daily_studies
-                                tf = config.entry_timeframe_for(base)
-                                th = threading.Thread(
-                                    target=run_daily_studies,
-                                    args=([sym],),
-                                    kwargs={"n_trials": 50, "allow_mt5": False,
-                                            "broker": "vt_markets", "timeframes": [tf]},
-                                    name=f"optuna-study-{base}",
-                                    daemon=True,
-                                )
-                                self._optuna_study_threads[sym] = th
-                                th.start()
-                                logger.info(f"[OPTUNA] daily study thread STARTED for {sym}")
-                            except Exception as e:
-                                logger.debug(f"optuna study thread {sym} skip: {e}")
-                    except Exception as e:
-                        logger.debug(f"optuna study runner skip: {e}")
+                self._optuna_start_daily_studies()
 
-                # OPTUNA → LIVE BRIDGE (#76 follow-up): once per UTC day per symbol, read the
-                # best completed Optuna study for each symbol, translate floors to the
-                # live schema, validate through ChangeValidator, and apply if it beats
-                # the best-ever gate. Aggregate fallback — see optuna_live_bridge.py.
-                # Bridge waits for the study thread to complete to avoid applying stale
-                # or missing studies (same-day ordering race fix).
-                # Same-day policy (B2): mark applied-today on accepted apply OR hard
-                # validation reject (no generalize / best-ever fail / too few trades).
-                # Do NOT mark when there was no proposal (no study yet) so a late
-                # completing study can still propose on the same cycle.
-                if self.optuna_bridge is not None:
-                    try:
-                        today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-                        if getattr(self, "_optuna_last_run_day", None) != today:
-                            self._optuna_last_run_day = today
-                            self._optuna_applied_today = set()
-                        for base, adapter in self.adapters.items():
-                            sym = adapter.resolved_symbol
-                            # Skip if study is still running for this symbol today
-                            t = getattr(self, "_optuna_study_threads", {}).get(sym)
-                            if t is not None and t.is_alive():
-                                logger.debug(f"[OPTUNA] bridge {sym}: study still running, will retry next cycle")
-                                continue
-                            # Skip if already applied today
-                            if sym in self._optuna_applied_today:
-                                continue
-                            try:
-                                self._refresh_data_if_needed(base, "M15")
-                                res = self.optuna_bridge.propose_and_apply(sym)
-                                if res.get("applied"):
-                                    logger.info(f"[OPTUNA] {sym}: applied best Optuna floors "
-                                                f"score={res['validation'].get('score')}")
-                                    self._optuna_applied_today.add(sym)
-                                elif res.get("proposed"):
-                                    logger.debug(f"[OPTUNA] {sym}: proposed but not applied — "
-                                                 f"{res.get('reason')}")
-                                    self._optuna_applied_today.add(sym)
-                            except Exception as e:
-                                logger.debug(f"optuna bridge {sym} skip: {e}")
-                    except Exception as e:
-                        logger.debug(f"optuna bridge skip: {e}")
+                self._optuna_bridge_cycle()
 
                 # CONTINUAL RESEARCHER (#32): once-per-day ReAct pass that reviews
                 # per-symbol results, queries the mql5 RAG for better techniques,
