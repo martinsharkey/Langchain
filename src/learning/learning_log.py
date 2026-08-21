@@ -35,6 +35,21 @@ def _repo_root() -> str:
     return os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 
 
+def resolve_learning_log_path(data_dir: str) -> str:
+    """Return the canonical LEARNING_LOG.md path, checking both the repo root
+    (where the writer stores it) and data_dir (where the dashboard may look).
+    Prefers the repo-root file if it exists; otherwise falls back to data_dir.
+    """
+    candidates = [
+        os.path.join(_repo_root(), "LEARNING_LOG.md"),
+        os.path.join(data_dir, "LEARNING_LOG.md"),
+    ]
+    for p in candidates:
+        if os.path.exists(p):
+            return p
+    return candidates[0]
+
+
 class LearningLog:
     def __init__(self, path: str = None, max_entries: int = 400):
         self.path = path or os.path.join(_repo_root(), "LEARNING_LOG.md")

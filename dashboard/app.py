@@ -617,7 +617,8 @@ def api_pipeline_status():
             optuna_status[sym] = {"status": "error", "error": str(e)[:120], "path": db_path}
 
     # learning log recent entries
-    learning_log_path = os.path.join(DATA_DIR, "LEARNING_LOG.md")
+    from src.learning.learning_log import resolve_learning_log_path
+    learning_log_path = resolve_learning_log_path(DATA_DIR)
     recent_learning = []
     if os.path.exists(learning_log_path):
         try:
@@ -675,7 +676,8 @@ def api_pipeline_optimizer():
 @app.route("/api/pipeline/bridge")
 def api_pipeline_bridge():
     """Optuna bridge apply history from LEARNING_LOG.md."""
-    learning_log_path = os.path.join(DATA_DIR, "LEARNING_LOG.md")
+    from src.learning.learning_log import resolve_learning_log_path
+    learning_log_path = resolve_learning_log_path(DATA_DIR)
     entries = []
     if os.path.exists(learning_log_path):
         try:

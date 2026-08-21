@@ -2,7 +2,7 @@
 import sys, os, tempfile, shutil
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from src.learning.learning_log import LearningLog
+from src.learning.learning_log import LearningLog, resolve_learning_log_path
 
 
 def test_records_most_recent_first_with_header():
@@ -49,8 +49,35 @@ def test_cap_and_nonfatal():
         shutil.rmtree(d, ignore_errors=True)
 
 
+def test_resolve_learning_log_path_prefers_repo_root():
+    d = tempfile.mkdtemp()
+    try:
+        from src.learning.learning_log import _repo_root
+        repo_root = _repo_root()
+        repo_path = os.path.join(repo_root, "LEARNING_LOG.md")
+        data_path = os.path.join(d, "LEARNING_LOG.md")
+
+        # when repo-root file exists, return it
+        with open(repo_path, "w", encoding="utf-8") as f:
+            f.write("# Learning & Adjustments Log\n")
+        assert resolve_learning_log_path(d) == repo_path
+        os.remove(repo_path)
+
+        # when repo-root missing but data_dir exists, return data_dir
+        with open(data_path, "w", encoding="utf-8") as f:
+            f.write("# Learning & Adjustments Log\n")
+        assert resolve_learning_log_path(d) == data_path
+        os.remove(data_path)
+
+        # when neither exists, default to repo-root path
+        assert resolve_learning_log_path(d) == repo_path
+    finally:
+        shutil.rmtree(d, ignore_errors=True)
+
+
 if __name__ == "__main__":
     test_records_most_recent_first_with_header()
     test_config_change_and_discovery()
     test_cap_and_nonfatal()
+    test_resolve_learning_log_path_prefers_repo_root()
     print("learning log tests passed")
