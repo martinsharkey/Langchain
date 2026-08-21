@@ -13,6 +13,7 @@ from datetime import datetime, timezone
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import pytest
+from unittest.mock import patch, MagicMock
 
 from dashboard.app import app
 
@@ -22,6 +23,39 @@ def client():
     app.config["TESTING"] = True
     with app.test_client() as c:
         yield c
+
+
+@pytest.fixture(autouse=True)
+def mock_mt5_algo_status(monkeypatch):
+    """Ensure MT5 algo status is always tradeable in tests."""
+    fake_algo = MagicMock()
+    fake_algo.terminal_trade_allowed = True
+    fake_algo.account_trade_allowed = True
+    fake_algo.connected = True
+    fake_algo.can_trade = True
+    fake_algo.reason = "OK"
+
+    fake_acct = MagicMock()
+    fake_acct.login = 123456
+    fake_acct.server = "TestServer"
+    fake_acct.balance = 10000.0
+    fake_acct.equity = 10000.0
+
+    monkeypatch.setattr("src.mt5.broker_adapter.get_algo_status", lambda: fake_algo)
+    monkeypatch.setattr("src.mt5.account.get_account_info", lambda: fake_acct)
+    monkeypatch.setattr("dashboard.app._read_status", lambda: {
+        "running": True,
+        "mode": "LIVE_MICRO",
+        "algo_trading": {
+            "can_trade": True,
+            "terminal_trade_allowed": True,
+            "account_trade_allowed": True,
+            "connected": True,
+            "reason": "OK",
+        },
+        "open_positions": [],
+        "symbols": ["XAUUSD", "BTCUSD", "GER40"],
+    })
 
 
 def test_status_endpoint(client):

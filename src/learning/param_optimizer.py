@@ -500,7 +500,7 @@ class ParameterOptimizer:
                     cand = dict(base); cand[k] = v
                     if cand.get("osma_fast", 12) >= cand.get("osma_slow", 26):
                         _lo, _hi, _st, _k = PARAM_SPACE["osma_slow"]
-                        cand["osma_slow"] = _clamp(cand["osma_fast"] + 8, _lo, _hi, _k)
+                        cand["osma_slow"] = _clamp(cand.get("osma_fast", 12) + 8, _lo, _hi, _k)
                     yield k, cand
 
     def _mutate_session_floors(self, params: dict) -> dict:
@@ -562,9 +562,9 @@ class ParameterOptimizer:
             direction = random.choice([-1, 1])
             cand[k] = _clamp(cur + direction * step, lo, hi, kind)
         # keep ema_fast < ema_slow, osma_fast < osma_slow (sane ordering)
-        if cand["osma_fast"] >= cand["osma_slow"]:
+        if cand.get("osma_fast", DEFAULTS["osma_fast"]) >= cand.get("osma_slow", DEFAULTS["osma_slow"]):
             _lo, _hi, _st, _k = PARAM_SPACE["osma_slow"]
-            cand["osma_slow"] = _clamp(cand["osma_fast"] + 8, _lo, _hi, _k)  # M1: re-clamp to space
+            cand["osma_slow"] = _clamp(cand.get("osma_fast", DEFAULTS["osma_fast"]) + 8, _lo, _hi, _k)  # M1: re-clamp to space
         return cand
 
     def _apply_directives(self, params: dict, directives: dict) -> dict:
@@ -580,9 +580,9 @@ class ParameterOptimizer:
             lo, hi, step, kind = PARAM_SPACE[k]
             cur = cand.get(k, DEFAULTS[k])
             cand[k] = _clamp(cur + delta, lo, hi, kind)
-        if cand["osma_fast"] >= cand["osma_slow"]:
+        if cand.get("osma_fast", DEFAULTS["osma_fast"]) >= cand.get("osma_slow", DEFAULTS["osma_slow"]):
             _lo, _hi, _st, _k = PARAM_SPACE["osma_slow"]
-            cand["osma_slow"] = _clamp(cand["osma_fast"] + 8, _lo, _hi, _k)  # M1: re-clamp to space
+            cand["osma_slow"] = _clamp(cand.get("osma_fast", DEFAULTS["osma_fast"]) + 8, _lo, _hi, _k)  # M1: re-clamp to space
         return cand
 
     def _mql5_guided_candidate(self, symbol: str, params: dict) -> Optional[dict]:
@@ -619,9 +619,9 @@ class ParameterOptimizer:
             moved = True
         if not moved:
             return None
-        if cand["osma_fast"] >= cand["osma_slow"]:
+        if cand.get("osma_fast", DEFAULTS["osma_fast"]) >= cand.get("osma_slow", DEFAULTS["osma_slow"]):
             _lo, _hi, _st, _k = PARAM_SPACE["osma_slow"]
-            cand["osma_slow"] = _clamp(cand["osma_fast"] + 8, _lo, _hi, _k)  # M1: re-clamp to space
+            cand["osma_slow"] = _clamp(cand.get("osma_fast", DEFAULTS["osma_fast"]) + 8, _lo, _hi, _k)  # M1: re-clamp to space
         return cand
 
     def _is_failed(self, symbol: str, cand: dict) -> bool:

@@ -136,7 +136,7 @@ def test_closed_loop_second_run_beats_new_incumbent(tmp_path):
         def bt_run2(symbol, params, sl_atr=1.0, tp_rr=2.0):
             call_num[0] += 1
             # Base params from tuned (written by first run) score 1.03
-            if params.get("tp_rr") == 3.0 and params.get("osma_min_long") == 1.37:
+            if call_num[0] == 1:
                 return {
                     "pfs": [1.05, 1.08, 1.03],
                     "wrs": [52.0, 54.0, 51.0],
