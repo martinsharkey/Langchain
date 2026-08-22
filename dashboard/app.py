@@ -23,6 +23,7 @@ from datetime import datetime, timezone
 from flask import Flask, jsonify, request
 
 from src import config
+from src.utils.db import connect as db_connect
 from src.utils.logger import get_logger
 from src.mt5.connector import get_connector, mt5_lock
 import MetaTrader5 as mt5
@@ -41,7 +42,7 @@ def _query(db_path, sql, params=(), default=None):
     if not os.path.exists(db_path):
         return default if default is not None else []
     try:
-        conn = sqlite3.connect(db_path)
+        conn = db_connect(db_path)
         conn.row_factory = sqlite3.Row
         rows = [dict(r) for r in conn.execute(sql, params).fetchall()]
         conn.close()
@@ -777,7 +778,7 @@ def api_pipeline_baseline():
     current = {}
     if os.path.exists(EXPERIENCE_DB):
         try:
-            conn = sqlite3.connect(EXPERIENCE_DB)
+            conn = db_connect(EXPERIENCE_DB)
             conn.row_factory = sqlite3.Row
             rows = conn.execute("""
                 SELECT symbol,

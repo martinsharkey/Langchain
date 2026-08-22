@@ -18,6 +18,8 @@ import json
 import sqlite3
 import logging
 from typing import Optional
+
+from src.utils.db import connect as _db_connect
 from datetime import datetime, timedelta
 
 logger = logging.getLogger("learning.experience_db")
@@ -62,14 +64,11 @@ class ExperienceDatabase:
 
     def _connect(self, timeout: int = 30):
         """Open a WAL-mode SQLite connection with a generous timeout."""
-        conn = sqlite3.connect(self.db_path, timeout=timeout)
-        conn.execute("PRAGMA journal_mode=WAL")
-        return conn
+        return _db_connect(self.db_path, timeout=timeout)
     
     def _init_db(self):
         """Initialize the database schema."""
-        conn = sqlite3.connect(self.db_path, timeout=30)
-        conn.execute("PRAGMA journal_mode=WAL")
+        conn = _db_connect(self.db_path)
         cursor = conn.cursor()
         
         cursor.execute("""
