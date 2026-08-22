@@ -664,20 +664,38 @@ def api_pipeline_status():
             if cached and optuna_cache_mtime.get(sym) == db_mtime:
                 optuna_status[sym] = cached
                 continue
-            import optuna
-            study = optuna.load_study(study_name=f"floors_{sym}",
-                                      storage=f"sqlite:///{db_path}")
-            best = study.best_trial
+            import sqlite3 as _sqlite3
+            conn = _sqlite3.connect(db_path, timeout=5)
+            conn.row_factory = _sqlite3.Row
+            study = conn.execute("SELECT study_id FROM studies LIMIT 1").fetchone()
+            if not study:
+                optuna_status[sym] = {"status": "no_study", "path": db_path}
+                conn.close()
+                continue
+            study_id = study["study_id"]
+            best = conn.execute("""
+                SELECT t.trial_id, t.number, t.datetime_complete, tv.value
+                FROM trials t
+                JOIN trial_values tv ON t.trial_id = tv.trial_id
+                WHERE t.study_id = ? AND tv.objective = 0 AND t.state = 'COMPLETE'
+                ORDER BY tv.value ASC
+                LIMIT 1
+            """, (study_id,)).fetchone()
+            n_total = conn.execute("SELECT COUNT(*) FROM trials WHERE study_id = ?", (study_id,)).fetchone()[0]
+            params = conn.execute("SELECT param_name, param_value FROM trial_params WHERE trial_id = ?",
+                                  (best["trial_id"],)).fetchall() if best else []
+            param_dict = {r["param_name"]: r["param_value"] for r in params}
             entry = {
                 "status": "ready",
-                "n_trials": len(study.trials),
-                "best_value": best.value if best else None,
-                "best_params": best.params if best else None,
-                "completed_at": best.datetime_complete.isoformat() if best and best.datetime_complete else None,
+                "n_trials": n_total,
+                "best_value": best["value"] if best else None,
+                "best_params": param_dict if best else None,
+                "completed_at": best["datetime_complete"] if best else None,
             }
             optuna_cache[sym] = entry
             optuna_cache_mtime[sym] = db_mtime
             optuna_status[sym] = entry
+            conn.close()
         except Exception as e:
             optuna_status[sym] = {"status": "error", "error": str(e)[:120], "path": db_path}
 
