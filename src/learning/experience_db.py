@@ -59,10 +59,17 @@ class ExperienceDatabase:
         self.db_path = db_path or self.DB_PATH
         os.makedirs(os.path.dirname(self.db_path), exist_ok=True)
         self._init_db()
+
+    def _connect(self, timeout: int = 30):
+        """Open a WAL-mode SQLite connection with a generous timeout."""
+        conn = sqlite3.connect(self.db_path, timeout=timeout)
+        conn.execute("PRAGMA journal_mode=WAL")
+        return conn
     
     def _init_db(self):
         """Initialize the database schema."""
-        conn = sqlite3.connect(self.db_path)
+        conn = sqlite3.connect(self.db_path, timeout=30)
+        conn.execute("PRAGMA journal_mode=WAL")
         cursor = conn.cursor()
         
         cursor.execute("""
@@ -212,7 +219,7 @@ class ExperienceDatabase:
                         if osma_flag:
                             src_frag += (f" AND ({alias}strategy_used='OsMA_Confluence' "
                                          f"OR {alias}strategy_used IS NULL)")
-                        conn = sqlite3.connect(self.db_path)
+                        conn = self._connect()
                         n = conn.execute(
                             "SELECT COUNT(*) FROM trades WHERE outcome IN ('win','loss','breakeven')"
                             + probe_frag + src_frag, probe_params).fetchone()[0]
@@ -239,7 +246,7 @@ class ExperienceDatabase:
 
     def backfill_account(self, login: int, server: str, trade_mode: str = "DEMO") -> int:
         """One-shot: stamp existing NULL-account rows with a known account (#21)."""
-        conn = sqlite3.connect(self.db_path)
+        conn = self._connect()
         cur = conn.cursor()
         cur.execute("UPDATE trades SET account_login=?, account_server=?, account_trade_mode=? "
                     "WHERE account_login IS NULL", (login, server, trade_mode))
@@ -250,7 +257,7 @@ class ExperienceDatabase:
 
     def _migrate(self):
         """Add newer columns to existing DBs without dropping data."""
-        conn = sqlite3.connect(self.db_path)
+        conn = self._connect()
         cur = conn.cursor()
         cur.execute("PRAGMA table_info(trades)")
         cols = {r[1] for r in cur.fetchall()}
@@ -324,7 +331,7 @@ class ExperienceDatabase:
         'fastest return' proxy the trader asked for.
         """
         try:
-            conn = sqlite3.connect(self.db_path)
+            conn = self._connect()
             conn.row_factory = sqlite3.Row
             ac, ap = self._account_clause()
             rows = conn.execute(f"""
@@ -361,7 +368,7 @@ class ExperienceDatabase:
         the TradeManager uses to bias variant selection toward what works.
         """
         try:
-            conn = sqlite3.connect(self.db_path)
+            conn = self._connect()
             conn.row_factory = sqlite3.Row
             q = """
                 SELECT symbol, mgmt_variant,
@@ -424,7 +431,7 @@ class ExperienceDatabase:
             exit_reason: Why the trade was closed (sl, tp, manual).
             strategy_combination: Comma-separated strategy names if ensemble.
         """
-        conn = sqlite3.connect(self.db_path)
+        conn = self._connect()
         cursor = conn.cursor()
         
         timestamp = datetime.now().isoformat()
@@ -536,7 +543,7 @@ class ExperienceDatabase:
             mae_points: Max adverse excursion (points).
             exit_points: Realised points at exit (for the capture ratio = exit/mfe).
         """
-        conn = sqlite3.connect(self.db_path)
+        conn = self._connect()
         cursor = conn.cursor()
         
         cursor.execute("""
@@ -588,7 +595,7 @@ class ExperienceDatabase:
         if not peak_indicators and not exit_indicators:
             return
         try:
-            conn = sqlite3.connect(self.db_path)
+            conn = self._connect()
             conn.execute(
                 "UPDATE trades SET peak_indicators = COALESCE(?, peak_indicators), "
                 "exit_indicators = COALESCE(?, exit_indicators) WHERE id = ?",
@@ -600,7 +607,7 @@ class ExperienceDatabase:
 
     def get_pending_trades(self) -> list[dict]:
         """All trades still marked pending (for DB-driven reconciliation)."""
-        conn = sqlite3.connect(self.db_path)
+        conn = self._connect()
         conn.row_factory = sqlite3.Row
         rows = [dict(r) for r in conn.execute(
             "SELECT id, symbol, action, entry_price, position_size, mt5_ticket, "
@@ -617,7 +624,7 @@ class ExperienceDatabase:
         better exit from our OWN trades. Empty until trades close with excursion.
         """
         import statistics as _st
-        conn = sqlite3.connect(self.db_path); conn.row_factory = sqlite3.Row
+        conn = self._connect(); conn.row_factory = sqlite3.Row
         where = "WHERE mfe_points IS NOT NULL AND outcome IN ('win','loss','breakeven')"
         params = []
         if symbol:
@@ -648,7 +655,7 @@ class ExperienceDatabase:
         any. Prevents duplicate rows when a bot-opened position is later adopted
         (e.g. after a restart) — one real trade must map to exactly one DB row.
         """
-        conn = sqlite3.connect(self.db_path)
+        conn = self._connect()
         row = conn.execute(
             "SELECT id FROM trades WHERE mt5_ticket=? AND outcome='pending' "
             "ORDER BY id ASC LIMIT 1", (ticket,)
@@ -658,7 +665,7 @@ class ExperienceDatabase:
 
     def set_ticket(self, trade_id: int, ticket: int):
         """Attach an MT5 ticket to a trade row (so it can be reconciled later)."""
-        conn = sqlite3.connect(self.db_path)
+        conn = self._connect()
         conn.execute("UPDATE trades SET mt5_ticket=? WHERE id=?", (ticket, trade_id))
         conn.commit(); conn.close()
 
@@ -667,7 +674,7 @@ class ExperienceDatabase:
         Mark an old pending trade whose outcome can't be found as 'unknown' so it
         stops skewing win/loss stats (which filter on win/loss/breakeven).
         """
-        conn = sqlite3.connect(self.db_path)
+        conn = self._connect()
         conn.execute("UPDATE trades SET outcome='unknown', exit_reason=? WHERE id=?",
                      (reason, trade_id))
         conn.commit(); conn.close()
@@ -677,7 +684,7 @@ class ExperienceDatabase:
     
     def get_recent_trades(self, limit: int = 20) -> list[dict]:
         """Get the most recent trades."""
-        conn = sqlite3.connect(self.db_path)
+        conn = self._connect()
         conn.row_factory = sqlite3.Row
         cursor = conn.cursor()
         
@@ -691,7 +698,7 @@ class ExperienceDatabase:
     
     def get_trades_by_strategy(self, strategy_name: str, limit: int = 50) -> list[dict]:
         """Get trades for a specific strategy."""
-        conn = sqlite3.connect(self.db_path)
+        conn = self._connect()
         conn.row_factory = sqlite3.Row
         cursor = conn.cursor()
         
@@ -705,7 +712,7 @@ class ExperienceDatabase:
     
     def get_trades_by_date(self, days: int = 7) -> list[dict]:
         """Get trades from the last N days."""
-        conn = sqlite3.connect(self.db_path)
+        conn = self._connect()
         conn.row_factory = sqlite3.Row
         cursor = conn.cursor()
         
@@ -722,7 +729,7 @@ class ExperienceDatabase:
     
     def get_performance_stats(self) -> dict:
         """Get overall performance statistics."""
-        conn = sqlite3.connect(self.db_path)
+        conn = self._connect()
         cursor = conn.cursor()
         
         cursor.execute("""
@@ -782,7 +789,7 @@ class ExperienceDatabase:
         Used by get_learning_insights. NOTE: the live weight-adaptation path uses
         get_strategy_performance() (dict form, reads the trades table) instead.
         """
-        conn = sqlite3.connect(self.db_path)
+        conn = self._connect()
         conn.row_factory = sqlite3.Row
         cursor = conn.cursor()
         
@@ -854,7 +861,7 @@ class ExperienceDatabase:
     
     def get_trade_count(self) -> int:
         """Get total number of recorded trades."""
-        conn = sqlite3.connect(self.db_path)
+        conn = self._connect()
         cursor = conn.cursor()
         cursor.execute("SELECT COUNT(*) FROM trades")
         count = cursor.fetchone()[0]
@@ -898,7 +905,7 @@ class ExperienceDatabase:
             query += ac
             query += " GROUP BY strategy_used ORDER BY win_rate DESC"
             
-            conn = sqlite3.connect(self.db_path)
+            conn = self._connect()
             cursor = conn.cursor()
             cursor.execute(query, tuple(params + ap))
             rows = cursor.fetchall()
@@ -930,7 +937,7 @@ class ExperienceDatabase:
     
     def clear(self):
         """Clear all data (for testing)."""
-        conn = sqlite3.connect(self.db_path)
+        conn = self._connect()
         cursor = conn.cursor()
         cursor.execute("DELETE FROM trades")
         cursor.execute("DELETE FROM strategy_performance")

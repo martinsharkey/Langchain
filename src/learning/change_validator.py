@@ -156,12 +156,12 @@ class ChangeValidator:
                 # Score ALL matched sessions; reject if ANY session is weak.
                 weak_sessions = []
                 min_pf = 1.0
-                min_trades = 10
+                session_min_trades = 10
                 for sess in matched_sessions:
                     sd = session_scores[sess]
                     pf = sd.get("pf", 0.0)
                     trades = sd.get("trades", 0)
-                    if pf < min_pf or trades < min_trades:
+                    if pf < min_pf or trades < session_min_trades:
                         weak_sessions.append(f"{sess} PF {pf:.2f} n={trades}")
                 if weak_sessions:
                     reason = f"session gate failed: {', '.join(weak_sessions)}"
@@ -188,7 +188,7 @@ class ChangeValidator:
                 sess_trades = sess_data.get("trades", 0)
                 forward_pf = sess_pf
                 score = sess_pf
-                enough = sess_trades >= min_trades
+                enough = sess_trades >= session_min_trades
 
         # ── Cold-start: no valid best-ever OR best-ever doesn't generalize → accept first generalizing candidate ──
         cold_start = best <= 0.0 or not self._best_generalizes(sym)
@@ -203,6 +203,7 @@ class ChangeValidator:
             self._best[sym] = {"score": round(score, 3), "source": source,
                                "at": datetime.now(timezone.utc).isoformat(),
                                "params": {k: v for k, v in params.items() if not k.startswith("_")}}
+            self._best_generalizes_cache.pop(sym, None)
             self._save()
             self._remember(sym, params, out, source)
             self._memo[mk] = out
@@ -231,6 +232,7 @@ class ChangeValidator:
             self._best[sym] = {"score": round(score, 3), "source": source,
                                "at": datetime.now(timezone.utc).isoformat(),
                                "params": {k: v for k, v in params.items() if not k.startswith("_")}}
+            self._best_generalizes_cache.pop(sym, None)
             self._save()
         self._remember(sym, params, out, source)
         self._memo[mk] = out

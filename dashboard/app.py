@@ -275,7 +275,8 @@ def api_trades_history():
         c = get_connector()
         if not c.is_connected():
             c.initialize()
-        deals = get_history(deals=100)
+        days = request.args.get("days", 7, type=int)
+        deals = get_history(deals=100, days=days)
         if isinstance(deals, dict):
             return jsonify({"error": deals.get("error", "unavailable"), "deals": []})
         rows = []
@@ -304,12 +305,14 @@ def api_trades_history():
 @app.route("/api/trades/bot")
 def api_trades_bot():
     """Trades the BOT placed and recorded (experience DB), with real outcomes."""
+    limit = request.args.get("limit", 100, type=int)
+    offset = request.args.get("offset", 0, type=int)
     rows = _query(EXPERIENCE_DB, """
         SELECT id, timestamp, symbol, action, entry_price, stop_loss, take_profit,
                position_size, confidence, strategy_used, strategy_combination,
                outcome, profit_loss, exit_price, exit_reason
-        FROM trades ORDER BY id DESC LIMIT 100
-    """)
+        FROM trades ORDER BY id DESC LIMIT ? OFFSET ?
+    """, (limit, offset))
     return jsonify(rows)
 
 

@@ -180,12 +180,6 @@ class ScalpEngine:
             logger.warning(f"DataManager unavailable: {e}")
 
         # Self-learning parameter optimizer (autonomous indicator tuning)
-        _duka_source = None
-        try:
-            from src.data_sources.dukascopy import DukascopySource
-            _duka_source = DukascopySource(use_cache=True)
-        except Exception as e:
-            logger.debug(f"DukascopySource unavailable for optimizer: {e}")
         try:
             from src.learning.backtester import Backtester
             from src.learning.param_optimizer import ParameterOptimizer
@@ -285,30 +279,6 @@ class ScalpEngine:
                 _robust = RobustTester(days=40, n_random=8, iters=6)
             except Exception as e:
                 logger.debug(f"RobustTester unavailable: {e}")
-            # Dukascopy backtest of CURRENT settings via the REAL Backtester (injectable
-            # data source) — lets the researcher measure our live indicator settings
-            # against independent Dukascopy tick data, per symbol. Non-fatal.
-            self._duka_source = None
-            try:
-                from src.data_sources.dukascopy import DukascopySource
-                self._duka_source = DukascopySource(use_cache=True)
-            except Exception as e:
-                logger.debug(f"DukascopySource unavailable: {e}")
-            _duka_backtest = None
-            try:
-                from src.learning.backtester import Backtester as _BT
-
-                def _duka_backtest(sym, params, sl_atr=None, tp_rr=None):
-                    if self._duka_source is None:
-                        return None
-                    bt = self._make_backtester()
-                    return bt.walkforward_focused(sym, params,
-                                                  sl_atr=(sl_atr if sl_atr is not None else params.get("sl_atr", 1.0)),
-                                                  tp_rr=(tp_rr if tp_rr is not None else params.get("tp_rr", 2.0)),
-                                                  timeframe="M5", bars=3000, windows=3)
-            except Exception as e:
-                logger.debug(f"Dukascopy backtest wiring unavailable: {e}")
-                _duka_backtest = None
             # current live indicator settings per symbol (what we actually trade)
             _cur_params = None
             if self.param_optimizer is not None:
@@ -329,21 +299,20 @@ class ScalpEngine:
 
             # SINGLE VALIDATION GATE: every parameter change must prove (backtest+forward)
             # it beats the symbol's best-ever result, else it's rejected and the outcome is
-            # recorded to the RAG. Reuses the Dukascopy walk-forward backtest.
+            # recorded to the RAG.
             self.change_validator = None
-            if _duka_backtest is not None:
-                try:
-                    from src.learning.change_validator import ChangeValidator
-                    self.change_validator = ChangeValidator(_duka_backtest, self.knowledge_store)
-                except Exception as e:
-                    logger.debug(f"ChangeValidator unavailable: {e}")
+            try:
+                from src.learning.change_validator import ChangeValidator
+                self.change_validator = ChangeValidator(self._make_backtester(), self.knowledge_store)
+            except Exception as e:
+                logger.debug(f"ChangeValidator unavailable: {e}")
 
             self.researcher = ContinualResearcher(
                 self.experience_db, mql5_knowledge=self.mql5_knowledge,
                 knowledge_store=self.knowledge_store, edge_discovery=self.edge_discovery,
                 pattern_optimizer=_patopt, apply_exit_config=self._apply_exit_config,
                 excursion_analyzer=_exc, robust_tester=_robust,
-                dukascopy_backtest=_duka_backtest, current_params_fn=_cur_params,
+                current_params_fn=_cur_params,
                 apply_tuned_fn=_apply_tuned, onnx_predictor=getattr(self, "onnx_predictor", None),
                 change_validator=self.change_validator)
         except Exception as e:
@@ -455,22 +424,6 @@ class ScalpEngine:
             logger.warning(f"AdaptiveLoop unavailable: {e}")
             self.adaptive = None
         self._adaptive_running = False
-
-        # Wire Dukascopy data sources into the adaptive loop so synthesized strategies
-        # are validated on independent historical data before promotion (issue #80).
-        if getattr(self, "adaptive", None) is not None and getattr(self, "_duka_source", None) is not None:
-            try:
-                rates_fn = self.data_manager.get_rates if self.data_manager else self._duka_source.get_rates
-                ticks_fn = self.data_manager.get_ticks if self.data_manager else self._duka_source.get_ticks
-                self.adaptive = AdaptiveLoop(
-                    self.experience_db, self.registry,
-                    symbol_resolver=lambda b: (self.adapters[b].resolved_symbol
-                                               if b in self.adapters else b),
-                    rates_fn=rates_fn,
-                    ticks_fn=ticks_fn,
-                )
-            except Exception as e:
-                logger.debug(f"Adaptive loop Dukascopy wiring unavailable: {e}")
 
         self.cycle = 0
         self.trades_opened = 0
@@ -587,14 +540,6 @@ class ScalpEngine:
             return False
         # Adopt any open positions (incl. manual trades) so the bot manages them.
         self._adopt_existing_positions()
-        # ROLLING CACHE: keep the last ~10 days of Dukascopy ticks warm per active symbol so
-        # every backtest/validation has >=2000 bars (no silent no-op on a thin cache).
-        try:
-            from src.learning.cache_maintainer import RollingCacheMaintainer
-            self._cache_maintainer = RollingCacheMaintainer(list(self.adapters.keys()), days=10)
-            self._cache_maintainer.start()
-        except Exception as e:
-            logger.debug(f"cache maintainer skip: {e}")
         # Close the loop for any trades left 'pending' from prior runs / manual closes.
         self._reconcile_pending_from_db()
         # Arm the reversal-signature exit from ANY data already in the DB (incl. the
@@ -620,10 +565,9 @@ class ScalpEngine:
     def _make_backtester(self):
         """Create a Backtester wired to the best available data source.
 
-        Priority:
-          1. DataManager (offline parquet, auto-refresh)
-          2. DukascopySource (if available)
-          3. Live MT5 (fallback)
+         Priority:
+           1. DataManager (offline parquet, auto-refresh)
+           2. Live MT5 (fallback)
         """
         from src.learning.backtester import Backtester
 
@@ -633,15 +577,6 @@ class ScalpEngine:
         if self.data_manager is not None:
             rates_fn = self.data_manager.get_rates
             ticks_fn = self.data_manager.get_ticks
-
-        if rates_fn is None:
-            try:
-                from src.data_sources.dukascopy import DukascopySource
-                _duka = DukascopySource(use_cache=True)
-                rates_fn = _duka.get_rates
-                ticks_fn = _duka.get_ticks
-            except Exception:
-                pass
 
         return Backtester(
             self.registry,
@@ -707,7 +642,7 @@ class ScalpEngine:
 
     def _ensure_onboarded(self, base, adapter) -> bool:
         """Kick off PATIENT background onboarding for ONE symbol if it has no baseline yet.
-        Onboarding acquires the BEST data (Dukascopy PRIMARY, MT5 SECONDARY/fallback), runs
+        Onboarding acquires the BEST data (parquet PRIMARY, MT5 SECONDARY/fallback), runs
         backtest + forward-test + OsMA-cycle SL + parameter search, and persists the
         baseline. It runs in a BACKGROUND THREAD (may take many minutes / >30 min) so it
         NEVER blocks trading, and its progress is tracked in data/onboarding_status.json.
@@ -751,7 +686,7 @@ class ScalpEngine:
             if self._onboard_tracker.is_done(key):
                 self._promote_session_overrides(base)
                 return True
-            # BACKOFF: if a prior attempt FAILED, don't re-spawn a heavy Dukascopy pull every
+            # BACKOFF: if a prior attempt FAILED, don't re-spawn a heavy onboarding pull every
             # cycle — wait a cooldown before retrying (prevents per-cycle network hammering).
             st = self._onboard_tracker.status(key) or {}
             if st.get("stage") == "failed":
@@ -767,7 +702,7 @@ class ScalpEngine:
         th.start()
         logger.warning(f"[ONBOARD] {base}: PATIENT background onboarding STARTED "
                        f"({'SL-only (pre-seeded)' if needs_cycle_sl else 'full'}; "
-                       f"Dukascopy primary, MT5 fallback) — will not block trading.")
+                       f"parquet primary, MT5 fallback) — will not block trading.")
         return True
 
     def _promote_session_overrides(self, base: str):
@@ -878,23 +813,9 @@ class ScalpEngine:
             except Exception as e:
                 tracker.update(key, "parquet_error", error=str(e)[:200])
 
-        # ── SECONDARY: Dukascopy (if parquet couldn't produce a baseline) ──
+        # ── SECONDARY: MT5 live (fallback if parquet unavailable) ──
         if not recipe:
-            tracker.update(key, "acquiring_dukascopy", source="dukascopy", note="fallback baseline")
-            try:
-                from src.data_sources.dukascopy import DukascopySource
-                dk = DukascopySource(use_cache=True)
-                def _rates(sym, timeframe="M1", count=60000):
-                    return dk.get_rates(sym, timeframe=timeframe, count=count)
-                recipe, best_tf = _try_timeframes(_rates, dk.get_ticks, "dukascopy")
-                if recipe:
-                    src_used = f"dukascopy[{best_tf}]"
-            except Exception as e:
-                tracker.update(key, "dukascopy_error", error=str(e)[:200])
-
-        # ── TERTIARY: MT5 live (last resort) ──
-        if not recipe:
-            tracker.update(key, "fallback_mt5", source="mt5", note="last resort baseline")
+            tracker.update(key, "fallback_mt5", source="mt5", note="fallback baseline")
             try:
                 from src.mt5.data import get_rates as _gr, get_ticks as _gt
                 recipe, best_tf = _try_timeframes(_gr, _gt, "mt5")

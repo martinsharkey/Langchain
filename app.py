@@ -131,7 +131,7 @@ def start_hot_reload():
             parts = src.replace("\\", "/").split("/")
             if len(parts) < 2:
                 return
-            if parts[-2] not in ("src", "scripts"):
+            if not any(p in ("src", "scripts") for p in parts):
                 return
             if any(part in (".git", "__pycache__", "data", "chromadb_store") for part in parts):
                 return

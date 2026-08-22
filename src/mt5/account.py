@@ -130,7 +130,7 @@ def get_total_profit() -> float:
 
 
 @mt5_error_handler
-def get_history(deals: int = 100) -> list[dict]:
+def get_history(deals: int = 100, days: int = 7) -> list[dict]:
     """
     Get recent trade history.
     
@@ -139,6 +139,7 @@ def get_history(deals: int = 100) -> list[dict]:
     
     Args:
         deals: Number of recent deals to fetch.
+        days: Lookback window in days.
     
     Returns:
         List of deal dictionaries
@@ -159,7 +160,7 @@ def get_history(deals: int = 100) -> list[dict]:
             from pytz import timezone
             
             to_time = datetime.datetime.now(timezone("UTC"))
-            from_time = to_time - datetime.timedelta(days=7)
+            from_time = to_time - datetime.timedelta(days=days)
             
             history = silicon_mt5.history_deals_get(from_time, to_time)
             if history is None:
@@ -191,7 +192,7 @@ def get_history(deals: int = 100) -> list[dict]:
     from pytz import timezone
     
     to_time = datetime.datetime.now(timezone("UTC"))
-    from_time = to_time - datetime.timedelta(days=7)
+    from_time = to_time - datetime.timedelta(days=days)
     
     with mt5_lock():
         history = mt5.history_deals_get(from_time, to_time)

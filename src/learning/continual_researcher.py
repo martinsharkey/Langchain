@@ -44,7 +44,7 @@ class ContinualResearcher:
     def __init__(self, experience_db, mql5_knowledge=None, knowledge_store=None,
                  edge_discovery=None, repo: str = "martinsharkey/Langchain",
                  pattern_optimizer=None, apply_exit_config=None, excursion_analyzer=None,
-                 robust_tester=None, optimizer_reports_dir=None, dukascopy_backtest=None,
+                 robust_tester=None, optimizer_reports_dir=None,
                  current_params_fn=None, apply_tuned_fn=None, onnx_predictor=None,
                  change_validator=None):
         self.db = experience_db
@@ -66,23 +66,19 @@ class ContinualResearcher:
         # winning config only if it passes a MAJORITY of random windows.
         self.robust_tester = robust_tester
         self._robust = {}
-        # RICH EVIDENCE (GoldShark optimiser BT/FT reports + Dukascopy backtest of the
-        # CURRENT live settings) so the researcher can measure our indicator settings
+        # RICH EVIDENCE (GoldShark optimiser BT/FT reports) so the researcher can measure our indicator settings
         # against the historic proven data, not just live trades. All optional/non-fatal:
         #   optimizer_reports_dir: dir of MT5 optimiser SpreadsheetML XMLs (BT/FT).
-        #   dukascopy_backtest: callable(symbol, params) -> dict|None (walk-forward on
-        #                       Dukascopy tick/bar data via the real Backtester).
         #   current_params_fn: callable(symbol) -> live indicator params dict.
         self.optimizer_reports_dir = optimizer_reports_dir or os.path.join(
             "data", "reprodata", "goldshark13", "optimiser_reports")
-        self.dukascopy_backtest = dukascopy_backtest
         self.current_params_fn = current_params_fn
         self.apply_tuned_fn = apply_tuned_fn
         self.onnx_predictor = onnx_predictor
         self.change_validator = change_validator
         self._evidence_cache = {}
         # Single per-symbol EVIDENCE STORE: every BT/FT result (live review, optimiser
-        # cluster, Dukascopy backtest) is persisted here so ALL testing data lives in one
+        # cluster) is persisted here so ALL testing data lives in one
         # place the researcher reads across sessions. data/symbol_evidence.json.
         try:
             from src import config
@@ -391,7 +387,7 @@ class ContinualResearcher:
         day = datetime.now(timezone.utc).strftime("%Y-%m-%d")
         if self._evidence_cache.get(sym, {}).get("day") == day:
             return self._evidence_cache[sym]
-        ev = {"symbol": sym, "day": day, "optimiser": None, "dukascopy": None, "finding": None}
+        ev = {"symbol": sym, "day": day, "optimiser": None, "finding": None}
 
         # current live params (indicator settings we actually trade)
         cur = None
@@ -409,23 +405,13 @@ class ContinualResearcher:
         except Exception as e:
             logger.debug(f"gold_evidence optimiser skip {sym}: {e}")
 
-        # (b) Dukascopy backtest of the CURRENT settings (real Backtester on tick data)
-        try:
-            if self.dukascopy_backtest and cur:
-                res = self.dukascopy_backtest(sym, cur)
-                if res:
-                    ev["dukascopy"] = {"score": res.get("score"), "pfs": res.get("pfs"),
-                                       "wrs": res.get("wrs"), "n_total": res.get("n_total")}
-        except Exception as e:
-            logger.debug(f"gold_evidence dukascopy skip {sym}: {e}")
-
         # compare + write a finding + an ACTIONABLE verdict, and persist to the store
         try:
             live_review = self.review_symbol(base_symbol)
             ev["live"] = {"expectancy": live_review.get("expectancy"),
                           "win_rate": live_review.get("win_rate"), "n": live_review.get("n")}
-            ev["verdict"] = self._evidence_verdict(sym, cur, ev["optimiser"], ev["dukascopy"], ev["live"])
-            ev["finding"] = self._evidence_finding(sym, cur, ev["optimiser"], ev["dukascopy"])
+            ev["verdict"] = self._evidence_verdict(sym, cur, ev["optimiser"], ev["live"])
+            ev["finding"] = self._evidence_finding(sym, cur, ev["optimiser"])
             if ev["finding"] and self.ks is not None:
                 self.ks.remember(key=f"gold_evidence_{sym}", kind="finding",
                                  topic=f"evidence {sym}", source="continual_researcher",
@@ -438,18 +424,12 @@ class ContinualResearcher:
         self._save_evidence(sym, ev)
         return ev
 
-    def _evidence_verdict(self, sym, cur, opt, duka, live) -> Optional[str]:
+    def _evidence_verdict(self, sym, cur, opt, live) -> Optional[str]:
         """Turn the comparison into something USEFUL: a concrete verdict the bot/optimizer
         can act on. Flags when live under-performs the evidence and points at the lever."""
-        if not (opt or duka):
+        if not opt:
             return None
         flags = []
-        # Dukascopy backtest of current settings weak -> settings don't generalise OOS
-        if duka and duka.get("score") is not None:
-            if duka["score"] < 1.0:
-                flags.append(f"current settings FAIL Dukascopy OOS (minPF {duka['score']}) — entry/exit needs tuning")
-            elif duka["score"] >= 1.3:
-                flags.append(f"current settings ROBUST on Dukascopy (minPF {duka['score']})")
         # live expectancy negative while optimiser cluster is strongly positive
         if live and live.get("expectancy") is not None and live.get("n", 0) >= 10:
             if live["expectancy"] < 0 and opt and opt.get("median_bt_pf", 0) >= 1.3:
@@ -550,9 +530,9 @@ class ContinualResearcher:
             "evidence_params": {p for p in GOLDSHARK_COLMAP if col_for(p, hdr)},
         }
 
-    def _evidence_finding(self, sym, cur, opt, duka) -> Optional[str]:
+    def _evidence_finding(self, sym, cur, opt) -> Optional[str]:
         """Compose a short, durable finding comparing live settings to the evidence."""
-        if not opt and not duka:
+        if not opt:
             return None
         parts = [f"{sym} indicator-setting evidence check:"]
         if cur:
@@ -564,10 +544,6 @@ class ContinualResearcher:
                 f"GoldShark optimiser ({opt['report']}): {opt['robust_passes']} robust passes, "
                 f"median BT PF {opt['median_bt_pf']}, osma_min_long range {opt.get('osma_min_long_range')}, "
                 f"bulls_min_long range {opt.get('bulls_min_long_range')}, atr_min range {opt.get('atr_min_range')}.")
-        if duka:
-            parts.append(
-                f"Dukascopy backtest of CURRENT settings: score(minPF) {duka.get('score')}, "
-                f"PFs {duka.get('pfs')}, WRs {duka.get('wrs')}, n={duka.get('n_total')}.")
         return " ".join(parts)
 
     # ── 2+3. QUERY mql5 + REASON ──
@@ -681,57 +657,10 @@ class ContinualResearcher:
     # ── daily orchestration ──
     def joint_optimise(self, base_symbol: str, resolved: str = None) -> dict:
         """JOINT evolutionary parameter search over the full space, seeded from the
-        GoldShark passes, scored by the walk-forward Dukascopy backtest. Slow cadence.
+        GoldShark passes. Slow cadence.
         Applies the winner only if it BEATS the incumbent (walk-forward validated) via
         the injected apply_tuned_fn. Non-fatal; returns {improved, ...}."""
-        if self.dukascopy_backtest is None or self.current_params_fn is None:
-            return {"improved": False, "reason": "no backtest/params fn"}
-        # cadence: run every 3rd research day per symbol (it runs many backtests)
-        import datetime as _dt
-        day_ord = _dt.datetime.now(timezone.utc).toordinal()
-        if (day_ord % 3) != (abs(hash(base_symbol.upper())) % 3):
-            return {"improved": False, "reason": "not scheduled today"}
-        try:
-            from src.learning.evolutionary_optimizer import EvolutionaryOptimizer
-            from src.learning.param_optimizer import PARAM_SPACE
-        except Exception as e:
-            return {"improved": False, "reason": f"import: {e}"}
-        base = self.current_params_fn(base_symbol)
-        if not base:
-            return {"improved": False, "reason": "no base params"}
-        evo = EvolutionaryOptimizer(PARAM_SPACE, self.dukascopy_backtest,
-                                    experience_db=self.db, onnx_predictor=self.onnx_predictor)
-        try:
-            out = evo.optimise(base_symbol, base, generations=5, pop_size=14)
-        except Exception as e:
-            logger.debug(f"joint optimise skip {base_symbol}: {e}")
-            return {"improved": False, "reason": str(e)[:80]}
-        if out and out.get("improved") and self.apply_tuned_fn:
-            # UNIFIED GATE: even though evo has its own walk-forward check, it must also beat
-            # the symbol's BEST-EVER result (ChangeValidator) before going live, so ALL
-            # tuners share one bar and the outcome is recorded to the RAG (no open loop).
-            if self.change_validator is not None:
-                v = self.change_validator.validate(base_symbol, out["params"], source="joint_evo")
-                if not v.get("passed"):
-                    logger.warning(f"[EVO] {base_symbol}: joint config REJECTED by best-ever gate "
-                                   f"({v.get('reason')}) — not applied")
-                    return {"improved": False, "reason": f"best-ever gate: {v.get('reason')}"}
-            try:
-                self.apply_tuned_fn(resolved or base_symbol, out["params"],
-                                    source=f"joint_evo score {out['score']:.2f} (was {out['base_score']:.2f})")
-                logger.warning(f"[EVO] {base_symbol}: applied joint-optimised config "
-                               f"(score {out['base_score']:.2f} -> {out['score']:.2f})")
-                # FEEDBACK to ONNX: retrain the per-symbol win-prob model so it learns from
-                # the new regime (closes the evo<->ONNX loop).
-                if self.onnx_predictor is not None:
-                    try:
-                        self.onnx_predictor.train_symbol(base_symbol)
-                    except Exception:
-                        pass
-            except Exception as e:
-                logger.debug(f"apply joint config skip: {e}")
-        return {"improved": bool(out and out.get("improved")),
-                "score": out.get("score") if out else None}
+        return {"improved": False, "reason": "dukascopy removed"}
 
     def daily_cycle(self, symbols: list[str], force: bool = False) -> dict:
         """
