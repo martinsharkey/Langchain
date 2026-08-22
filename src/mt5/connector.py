@@ -112,6 +112,7 @@ class MT5Connector:
         self._mt5_api_available = False  # True if remote mt5.initialize() succeeded
         self._reconnect_lock = threading.Lock()
         self._last_reconnect_attempt = 0.0
+        self._reconnect_backoff = 2.0  # seconds; doubles up to 60s on repeated failure
         
         if SILICON_MT5_AVAILABLE:
             logger.info(
@@ -470,22 +471,27 @@ _result = _init_result
         return self._connected
     
     def ensure_connected(self) -> bool:
-        """Ensure MT5 is connected; reconnect if the connection dropped."""
+        """Ensure MT5 is connected; reconnect if the connection dropped with
+        exponential backoff (issue #147)."""
         if self.is_connected():
             return True
-        
+
         with self._reconnect_lock:
             now = time.time()
             if self.is_connected():
                 return True
-            if now - self._last_reconnect_attempt < 2.0:
+            # exponential backoff: wait at least the current backoff seconds
+            elapsed = now - self._last_reconnect_attempt
+            if elapsed < self._reconnect_backoff:
                 return False
             self._last_reconnect_attempt = now
-            logger.warning("MT5 connection lost — attempting reconnect...")
+            self._reconnect_backoff = min(self._reconnect_backoff * 2.0, 60.0)
+            logger.warning(f"MT5 connection lost — reconnecting in {self._reconnect_backoff}s (backoff)...")
             self._connected = False
             try:
                 if self._connect_native(retries=3, delay=2):
                     logger.info("MT5 reconnect successful")
+                    self._reconnect_backoff = 2.0  # reset on success
                     return True
             except Exception as e:
                 logger.warning(f"MT5 reconnect failed: {e}")

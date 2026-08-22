@@ -1,6 +1,6 @@
 """
 Onboarding progress tracker — visible, persistent status for the PATIENT per-symbol
-onboarding workflow (Dukascopy PRIMARY baseline, MT5 SECONDARY validation/fallback).
+onboarding workflow (DataManager primary, MT5 fallback).
 
 Onboarding is not about speed; it is about acquiring the BEST data and running a full
 backtest + forward-test + OsMA-cycle SL + parameter-strength search. That can take many
@@ -8,7 +8,7 @@ minutes to >30 min per symbol, so it runs in the BACKGROUND (never blocks tradin
 progress is tracked here so we can always see where each symbol is.
 
 Status is written to data/onboarding_status.json and logged. Stages:
-  pending -> acquiring_dukascopy -> backtesting -> forward_testing -> sampling_cycles
+  pending -> loading_data -> backtesting -> forward_testing -> sampling_cycles
   -> baseline_set  (or) fallback_mt5 -> ... -> baseline_set  (or) failed
 """
 from __future__ import annotations

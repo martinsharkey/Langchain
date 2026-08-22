@@ -41,7 +41,9 @@ DEFAULT_CFG = {
     # ON by default (age<=5) — the move must still pass every quality gate (strength
     # floors, MACD, EMA side, ATR, confluence), and the frequency-starvation guard +
     # optimizer keep the entry/quality balance. `allow_anticipated` stays OFF (that one
-    # enters BEFORE the cross = probability, whipsaw-prone).
+    # enters BEFORE the cross = probability, whipsaw-prone). This is the deliberate
+    # design; do NOT treat it as a contradiction with the "no anticipated" docstring
+    # in evaluate_confluence_bar (which disables the separate anticipated-cross branch).
     "allow_fresh_momentum": True, "max_momentum_age": 5, "allow_anticipated": False,
 }
 
@@ -136,11 +138,13 @@ def evaluate_confluence_bar(ind: dict, cfg=None) -> dict:
         return {"action": "hold", "trigger_kind": None, "confluence": 0, "reason": "no atr/price"}
     osma_now = float(ind.get("osma") or 0); osma_prev = float(ind.get("osma_prev") or 0)
     macd = float(ind.get("macd_line") or 0); atr_prev = float(ind.get("atr_prev") or atr)
-    # PURE EVENT-DRIVEN TRIGGER (GoldShark Master directive): the entry MUST be the
-    # exact closed-bar OsMA zero-cross — a strict 1-candle polarity shift across 0.0.
-    # NO 'anticipated' (probability, not event -> whipsaw) and NO 'fresh momentum /
-    # sign-age' (state, not event -> entering late / chasing). These are OFF by default
-    # and only re-enabled via explicit config flags for research.
+    # PURE EVENT-DRIVEN TRIGGER: the primary entry MUST be the exact closed-bar OsMA
+    # zero-cross — a strict 1-candle polarity shift across 0.0. `allow_anticipated`
+    # (enter BEFORE the cross = probability, whipsaw-prone) is OFF by default.
+    # `allow_fresh_momentum` (enter AFTER a recent cross while momentum is still
+    # young) is ON by default and is the separate "fresh" branch below; this is NOT a
+    # contradiction — fresh momentum is a post-cross continuation filter, not an
+    # anticipated pre-cross gamble. Both require every quality gate.
     cu = osma_prev <= 0 < osma_now      # confirmed cross UP through zero
     cd = osma_prev >= 0 > osma_now      # confirmed cross DOWN through zero
     au = ad = fresh_up = fresh_dn = False

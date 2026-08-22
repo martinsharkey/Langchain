@@ -2,9 +2,10 @@
 CORE RULES — the single, standardised set of trading-system rules.
 
 This is the SOURCE OF TRUTH for how the bot is allowed to behave. Every rule here was
-established from evidence (live trades + GoldShark telemetry + optimiser + Dukascopy) and
-must hold for the system to be considered standardised and scalable. `assert_core_rules()`
-is called at engine startup so a drift/regression fails loudly instead of silently.
+established from evidence (live trades + GoldShark telemetry + optimiser + broker tick
+replay) and must hold for the system to be considered standardised and scalable.
+`assert_core_rules()` is called at engine startup so a drift/regression fails loudly
+instead of silently.
 
 Keep this file SMALL and DURABLE. If a rule changes, change it here first, then the code.
 """
@@ -24,7 +25,7 @@ CORE_RULES = [
     "a zero-cross until it reverses, sampled over ~20 cycles), then live-tuned. Never "
     "borrow one symbol's magnitudes onto another (BTC != gold != GER40).",
     "R4  LEARN ONLY FROM CLEAN LIVE DATA: learning/adaptation reads exclude ALL simulated "
-    "sources (SIMULATED*, DUKASCOPY*). Config is never changed from simulated/weak data.",
+    "sources (SIMULATED*). Config is never changed from simulated/weak data.",
     "R5  STRUCTURE IS SYMBOL-AGNOSTIC, MAGNITUDES ARE SYMBOL-SPECIFIC: the indicator "
     "combination and rule shape are identical for all symbols; only the strength floors "
     "and SL/exit magnitudes differ per symbol.",
@@ -37,7 +38,7 @@ CORE_RULES = [
     "its best realised-expectancy config, so a bad change is always recoverable.",
     "R9  AUTOMATIC ONBOARDING: adding a new symbol has NO manual step. On first sight the "
     "engine auto-runs the onboarding workflow (backtest + forward-test + OsMA-cycle SL "
-    "sampling, Dukascopy-first with MT5 fallback) and persists the per-symbol baseline "
+    "sampling, DataManager primary with MT5 fallback) and persists the per-symbol baseline "
     "before it trades. Never hand-tune a new symbol's magnitudes.",
     "R10 EVIDENCE FIRST — NEVER GUESS: every tunable magnitude (pyramid leg count, SL, "
     "strength floors, exit params, thresholds) MUST be derived from HARD EVIDENCE — the "

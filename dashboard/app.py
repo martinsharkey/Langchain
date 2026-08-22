@@ -98,52 +98,32 @@ def api_status():
     # never shows stale/disabled state from a bot_status.json written during a
     # transient connector glitch.
     try:
+        from src.mt5.broker_adapter import get_algo_status
+        algo = get_algo_status()
+        status["algo_trading"] = {
+            "can_trade": algo.can_trade,
+            "terminal_trade_allowed": algo.terminal_trade_allowed,
+            "account_trade_allowed": algo.account_trade_allowed,
+            "connected": algo.connected,
+            "reason": algo.reason,
+        }
+    except Exception:
+        pass
+    # reconcile open_positions against live MT5 so the dashboard never shows
+    # phantom trades from a stale bot_status.json, and never misses real ones.
+    live = []
+    try:
         from src.mt5.connector import get_connector, mt5_lock
         import MetaTrader5 as mt5
         connector = get_connector()
-        live_algo = None
-        if connector.is_connected():
-            try:
-                with mt5_lock():
-                    ti = mt5.terminal_info()
-                    ai = mt5.account_info()
-                live_algo = {
-                    "can_trade": bool(ti.trade_allowed) if ti else False,
-                    "terminal_trade_allowed": bool(ti.trade_allowed) if ti else False,
-                    "account_trade_allowed": bool(ai.trade_allowed) if ai else False,
-                    "connected": True,
-                    "reason": "OK" if (ti and ai and ti.trade_allowed and ai.trade_allowed) else "check MT5",
-                }
-            except Exception:
-                pass
-        if live_algo is None:
-            try:
-                mt5.initialize()
-                ti = mt5.terminal_info()
-                ai = mt5.account_info()
-                live_algo = {
-                    "can_trade": bool(ti.trade_allowed) if ti else False,
-                    "terminal_trade_allowed": bool(ti.trade_allowed) if ti else False,
-                    "account_trade_allowed": bool(ai.trade_allowed) if ai else False,
-                    "connected": True,
-                    "reason": "OK" if (ti and ai and ti.trade_allowed and ai.trade_allowed) else "check MT5",
-                }
-            except Exception:
-                pass
-        if live_algo is not None:
-            status["algo_trading"] = live_algo
-        # reconcile open_positions against live MT5 so the dashboard never shows
-        # phantom trades from a stale bot_status.json, and never misses real ones.
-        live = []
         if connector.is_connected():
             with mt5_lock():
                 live = mt5.positions_get() or []
         else:
-            try:
-                mt5.initialize()
-                live = mt5.positions_get() or []
-            except Exception:
-                pass
+            mt5.initialize()
+            live = mt5.positions_get() or []
+    except Exception:
+        pass
         if live:
             live_tickets = {p.ticket for p in live}
             kept = []

@@ -115,25 +115,54 @@ class KnowledgeStore:
 
     def recall(self, query: str, n_results: int = 5,
                kind: Optional[str] = None) -> list[dict]:
-        """Semantic recall of stored knowledge (optionally filtered by kind)."""
+        """Semantic recall of stored knowledge (optionally filtered by kind).
+
+        Issue #132: ranks by a compound score that weights similarity, recency,
+        and stored confidence so recent high-confidence findings outrank stale
+        or uncertain ones. De-duplicates by base_key.
+        """
         if self.collection.count() == 0:
             return []
+        # fetch a larger pool so re-ranking can surface the best N
+        fetch_n = min(n_results * 3, self.collection.count())
         where = {"kind": kind} if kind else None
         res = self.collection.query(
             query_texts=[query],
-            n_results=min(n_results, self.collection.count()),
+            n_results=fetch_n,
             where=where,
             include=["documents", "metadatas", "distances"],
         )
+        if not (res.get("ids") and res["ids"][0]):
+            return []
+
+        import math
+        now = time.time()
+        scored = []
+        seen_keys = set()
+        for i in range(len(res["ids"][0])):
+            meta = res["metadatas"][0][i]
+            base_key = meta.get("base_key") or res["ids"][0][i]
+            if base_key in seen_keys:
+                continue
+            seen_keys.add(base_key)
+            sim = 1.0 - (res["distances"][0][i] if res.get("distances") else 0)
+            sim = max(0.0, sim)
+            age_days = (now - float(meta.get("ts", now))) / 86400.0
+            conf = float(meta.get("confidence", 0.5) or 0.5)
+            # compound score: similarity * recency decay * confidence
+            score = sim * math.exp(-age_days / 30.0) * conf
+            scored.append((score, i))
+
+        scored.sort(key=lambda x: x[0], reverse=True)
         out = []
-        if res.get("ids") and res["ids"][0]:
-            for i in range(len(res["ids"][0])):
-                out.append({
-                    "id": res["ids"][0][i],
-                    "text": res["documents"][0][i],
-                    "metadata": res["metadatas"][0][i],
-                    "similarity": 1.0 - (res["distances"][0][i] if res.get("distances") else 0),
-                })
+        for _, i in scored[:n_results]:
+            out.append({
+                "id": res["ids"][0][i],
+                "text": res["documents"][0][i],
+                "metadata": res["metadatas"][0][i],
+                "similarity": 1.0 - (res["distances"][0][i] if res.get("distances") else 0),
+                "rank_score": round(_, 4),
+            })
         return out
 
     def count(self) -> int:

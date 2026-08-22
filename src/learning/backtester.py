@@ -54,8 +54,7 @@ class Backtester:
                  ticks_fn: Optional[Callable] = None, data_manager=None,
                  refresh_manager=None):
         """rates_fn/ticks_fn default to the live MT5 data layer. Inject alternatives
-        (e.g. src.data_sources.dukascopy.DukascopySource, DataManager) to backtest
-        the SAME engine on a DIFFERENT data source.
+        (e.g. DataManager) to backtest the SAME engine on a DIFFERENT data source.
         Both must match src.mt5.data.get_rates / get_ticks signatures.
         data_manager: optional DataManager instance for freshness checks.
         refresh_manager: optional DataRefreshManager for auto-refresh."""

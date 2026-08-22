@@ -314,7 +314,8 @@ class ScalpEngine:
                 excursion_analyzer=_exc, robust_tester=_robust,
                 current_params_fn=_cur_params,
                 apply_tuned_fn=_apply_tuned, onnx_predictor=getattr(self, "onnx_predictor", None),
-                change_validator=self.change_validator)
+                change_validator=self.change_validator,
+                make_backtester_fn=self._make_backtester)
         except Exception as e:
             logger.warning(f"ContinualResearcher unavailable: {e}")
 
@@ -655,21 +656,6 @@ class ScalpEngine:
         base_cfg = next((v for p, v in SYMBOL_BASELINES.items() if key.startswith(p)), None)
         has_baseline = base_cfg is not None
         has_tuned = (key in self.param_optimizer.tuned or resolved.upper() in self.param_optimizer.tuned)
-        # If a prior sl_only onboarding derived hard_sl_points, apply them to the
-        # baseline so needs_cycle_sl clears and onboarding does not re-trigger every
-        # restart.
-        if has_baseline and not (base_cfg or {}).get("hard_sl_points"):
-            try:
-                from src.learning.onboarding_tracker import OnboardingTracker
-                ot = OnboardingTracker()
-                st = ot.status(key) or {}
-                if st.get("hard_sl_points"):
-                    base_entry = next((p for p in SYMBOL_BASELINES if key.startswith(p)), None)
-                    if base_entry:
-                        SYMBOL_BASELINES[base_entry]["hard_sl_points"] = float(st["hard_sl_points"])
-                        base_cfg = SYMBOL_BASELINES[base_entry]
-            except Exception:
-                pass
         needs_cycle_sl = has_baseline and not (base_cfg or {}).get("hard_sl_points")
         if (has_baseline or has_tuned) and not needs_cycle_sl:
             return False
@@ -684,7 +670,11 @@ class ScalpEngine:
             if not hasattr(self, "_onboard_tracker"):
                 self._onboard_tracker = OnboardingTracker()
             if self._onboard_tracker.is_done(key):
-                self._promote_session_overrides(base)
+                if not hasattr(self, "_session_promoted"):
+                    self._session_promoted = set()
+                if key not in self._session_promoted:
+                    self._session_promoted.add(key)
+                    self._promote_session_overrides(base)
                 return True
             # BACKOFF: if a prior attempt FAILED, don't re-spawn a heavy onboarding pull every
             # cycle — wait a cooldown before retrying (prevents per-cycle network hammering).
@@ -844,29 +834,37 @@ class ScalpEngine:
         tracker.update(key, "sampling_cycles", n_cycles=cyc.get("n_cycles"),
                        hard_sl_points=recipe.get("hard_sl_points"))
         if sl_only:
-            # keep the proven ENTRY baseline; apply ONLY the data-derived exit magnitudes
-            # as a per-symbol override so this symbol trades its OWN OsMA-cycle SL (R3).
             exit_keys = ("hard_sl_points", "safety_tp_points", "be_trigger_pts",
                          "be_lock_pts", "trail_points")
             ex = {k: recipe[k] for k in exit_keys if k in recipe}
+            entry_keys = ("osma_min_long", "osma_max_short", "bulls_min_long",
+                          "bulls_max_short", "bears_min_long", "bears_max_short",
+                          "min_ema_slope", "atr_min", "atr_max", "macd_min_long",
+                          "macd_max_short", "dom_min", "runway_min", "max_stretch_atr",
+                          "atr_min_rel", "max_momentum_age", "rsi_long_max",
+                          "rsi_short_min", "min_confluence")
+            en = {k: recipe[k] for k in entry_keys if k in recipe and recipe[k] != 0}
             if ex:
                 if not hasattr(self, "_exit_override"):
                     self._exit_override = {}
                 self._exit_override.setdefault(key, {}).update(ex)
-            # Persist derived exits into SYMBOL_BASELINES so needs_cycle_sl clears
-            # and onboarding does not re-trigger every restart.
             try:
                 from src.learning.param_optimizer import SYMBOL_BASELINES
                 base_entry = next((p for p in SYMBOL_BASELINES if key.startswith(p)), None)
                 if base_entry and base_entry in SYMBOL_BASELINES:
-                    SYMBOL_BASELINES[base_entry].update(ex)
+                    merged = dict(SYMBOL_BASELINES[base_entry])
+                    merged.update(ex)
+                    for k, v in en.items():
+                        if not merged.get(k):
+                            merged[k] = v
+                    SYMBOL_BASELINES[base_entry] = merged
             except Exception:
                 pass
             tracker.update(key, "baseline_set", source=src_used, mode="sl_only",
                            hard_sl_points=recipe.get("hard_sl_points"),
                            n_cycles=cyc.get("n_cycles"))
             logger.warning(f"[ONBOARD] {base}: OsMA-cycle SL derived from own data -> "
-                           f"exit override {ex} (entry baseline preserved)")
+                           f"exit override {ex} | entry floors {en}")
             return
         params = dict(DEFAULTS)
         params.update({k: v for k, v in recipe.items() if not k.startswith("_")})
@@ -1901,6 +1899,10 @@ class ScalpEngine:
         Hybrid layer (#26/#29): current whale confidence-to-enter from the live
         CryptoRTI signal via the wave predictor. {} when no active signal. Cached
         per cycle, non-fatal.
+
+        R7: BTCUSD entries may be augmented by the CryptoRTI whale signal. If the
+        whale layer is unavailable, we must surface the violation at ERROR level so
+        it is not silently ignored.
         """
         if getattr(self, "_whale_pred_cycle", None) == self.cycle:
             return getattr(self, "_whale_pred_cache", {}) or {}
@@ -1909,16 +1911,22 @@ class ScalpEngine:
             from src.cryptorti import signal_client
             from src.cryptorti.wave_predictor import WhaleWavePredictor
             bias = signal_client.current_short_bias()
-            if bias:
-                if not hasattr(self, "_wave_predictor"):
-                    self._wave_predictor = WhaleWavePredictor()
-                result = self._wave_predictor.predict(
-                    usd=float(bias.get("amount_usd", 0) or 0),
-                    exchange=str(bias.get("exchange", "") or ""),
-                    direction="sell" if bias.get("action") == "sell" else "buy",
-                    stage=bias.get("stage") or bias.get("status")) or {}
+            if not bias:
+                logger.error("[R7-VIOLATION] BTCUSD whale signal unavailable; "
+                             "R7 requires complementary whale augmentation")
+                self._whale_pred_cycle = self.cycle
+                self._whale_pred_cache = result
+                return result
+            if not hasattr(self, "_wave_predictor"):
+                self._wave_predictor = WhaleWavePredictor()
+            result = self._wave_predictor.predict(
+                usd=float(bias.get("amount_usd", 0) or 0),
+                exchange=str(bias.get("exchange", "") or ""),
+                direction="sell" if bias.get("action") == "sell" else "buy",
+                stage=bias.get("stage") or bias.get("status")) or {}
         except Exception as e:
-            logger.debug(f"whale predict skip: {e}")
+            logger.error(f"[R7-VIOLATION] BTCUSD whale prediction failed: {e}. "
+                         "Check signal_client or whale_rag")
         self._whale_pred_cycle = self.cycle
         self._whale_pred_cache = result
         return result
@@ -2920,7 +2928,7 @@ class ScalpEngine:
                 # Refresh data for all active symbols before adaptive cycle
                 for base, adapter in list(self.adapters.items()):
                     try:
-                        self._refresh_data_if_needed(base, config.ENTRY_TIMEFRAME)
+                        self._refresh_data_if_needed(base, self._entry_timeframe_for(base))
                     except Exception:
                         pass
 
@@ -3214,10 +3222,17 @@ class ScalpEngine:
         # PER-SYMBOL entry timeframe (QMMP): BTCUSD trades H1 (spread-negative on M1);
         # others use the default ENTRY_TIMEFRAME. See config.entry_timeframe_for.
         _etf = config.entry_timeframe_for(resolved)
+        self._refresh_data_if_needed(base, _etf)
         rates = get_rates(resolved, timeframe=_etf, count=120)
         if not rates or len(rates) < 30:
-            logger.warning(f"{base}: insufficient rate data")
-            return
+            if getattr(self, "data_manager", None) is not None:
+                try:
+                    rates = self.data_manager.get_rates(base, _etf, count=120)
+                except Exception:
+                    pass
+            if not rates or len(rates) < 30:
+                logger.warning(f"{base}: insufficient rate data")
+                return
         _session = None
         try:
             from src.strategies.sessions import session_of
@@ -3281,6 +3296,32 @@ class ScalpEngine:
             except Exception:
                 pass
             return
+
+        # #42: LEARNED entry confidence — the PER-SYMBOL ONNX model (chronological
+        # holdout, scale-free features) predicts P(win). Given its validation is
+        # inherently the softest part of the pipeline, its live authority is
+        # CONSERVATIVE: a small NUDGE (not a 50/50 blend), and a veto only for
+        # genuinely low P(win) AND only once the symbol's model has a real sample.
+        # R7 fix (#152): run ONNX veto BEFORE the whale boost so the unreliable model
+        # cannot first boost and then kill an entry it would have vetoed.
+        if self.onnx_predictor is not None:
+            try:
+                p_win = self.onnx_predictor.predict_win_prob(indicators)
+                if p_win is not None:
+                    n_model = self.onnx_predictor.model_trades(indicators)
+                    before = signal.confidence
+                    # small nudge: +/-0.10 max, scaled by how far P(win) is from 0.5
+                    nudge = max(-0.10, min(0.10, (p_win - 0.5) * 0.4))
+                    signal.confidence = round(max(0.0, min(1.0, signal.confidence + nudge)), 3)
+                    # veto only a genuinely bad entry, and only for a matured model
+                    if p_win < 0.30 and n_model >= 120:
+                        logger.info(f"{base}: ONNX veto (P(win) {p_win:.2f}, model n={n_model})")
+                        return
+                    if abs(signal.confidence - before) > 0.01:
+                        logger.info(f"{base}: ONNX P(win) {p_win:.2f} (n={n_model}) "
+                                    f"nudge {before:.2f}->{signal.confidence:.2f}")
+            except Exception as e:
+                logger.debug(f"onnx confidence skip: {e}")
 
         # ── HYBRID whale/order-flow layer (#26/#29/#43) for BTC ──
         # OsMA drives regular entries; a live CryptoRTI whale signal that AGREES
@@ -3352,30 +3393,6 @@ class ScalpEngine:
                         return
             except Exception as e:
                 logger.debug(f"RAG analyze skip: {e}")
-
-        # #42: LEARNED entry confidence — the PER-SYMBOL ONNX model (chronological
-        # holdout, scale-free features) predicts P(win). Given its validation is
-        # inherently the softest part of the pipeline, its live authority is
-        # CONSERVATIVE: a small NUDGE (not a 50/50 blend), and a veto only for
-        # genuinely low P(win) AND only once the symbol's model has a real sample.
-        if self.onnx_predictor is not None:
-            try:
-                p_win = self.onnx_predictor.predict_win_prob(indicators)
-                if p_win is not None:
-                    n_model = self.onnx_predictor.model_trades(indicators)
-                    before = signal.confidence
-                    # small nudge: +/-0.10 max, scaled by how far P(win) is from 0.5
-                    nudge = max(-0.10, min(0.10, (p_win - 0.5) * 0.4))
-                    signal.confidence = round(max(0.0, min(1.0, signal.confidence + nudge)), 3)
-                    # veto only a genuinely bad entry, and only for a matured model
-                    if p_win < 0.30 and n_model >= 120:
-                        logger.info(f"{base}: ONNX veto (P(win) {p_win:.2f}, model n={n_model})")
-                        return
-                    if abs(signal.confidence - before) > 0.01:
-                        logger.info(f"{base}: ONNX P(win) {p_win:.2f} (n={n_model}) "
-                                    f"nudge {before:.2f}->{signal.confidence:.2f}")
-            except Exception as e:
-                logger.debug(f"onnx confidence skip: {e}")
 
         if signal.confidence < eff_conf_min:
             return

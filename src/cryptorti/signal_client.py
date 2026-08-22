@@ -109,22 +109,33 @@ async def _listen(store: SignalStore):
         return
     uri = f"wss://{HOST}:{PORT}"
     logger.info(f"CryptoRTI connecting to {uri}")
-    async for ws in websockets.connect(uri, ssl=ctx, ping_interval=30):
+    backoff = 1.0
+    max_backoff = 60.0
+    while True:
         try:
-            logger.info("CryptoRTI connected")
-            async for message in ws:
-                if message == "pong":
-                    continue
+            async for ws in websockets.connect(uri, ssl=ctx, ping_interval=30):
                 try:
-                    signal = json.loads(message)
-                except Exception:
+                    logger.info("CryptoRTI connected")
+                    backoff = 1.0  # reset on successful connection
+                    async for message in ws:
+                        if message == "pong":
+                            continue
+                        try:
+                            signal = json.loads(message)
+                        except Exception:
+                            continue
+                        store.update(signal)
+                        logger.info(f"CryptoRTI signal {signal.get('signal_id')}: "
+                                    f"stage={signal.get('stage')} status={signal.get('signal_status')}")
+                except Exception as e:
+                    logger.warning(f"CryptoRTI disconnected ({e}); reconnecting in {backoff}s…")
+                    await asyncio.sleep(backoff)
+                    backoff = min(backoff * 2.0, max_backoff)
                     continue
-                store.update(signal)
-                logger.info(f"CryptoRTI signal {signal.get('signal_id')}: "
-                            f"stage={signal.get('stage')} status={signal.get('signal_status')}")
         except Exception as e:
-            logger.warning(f"CryptoRTI disconnected ({e}); reconnecting…")
-            continue
+            logger.warning(f"CryptoRTI connection failed ({e}); retry in {backoff}s…")
+            await asyncio.sleep(backoff)
+            backoff = min(backoff * 2.0, max_backoff)
 
 
 def run():

@@ -23,12 +23,32 @@ from __future__ import annotations
 import os
 import json
 import logging
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from typing import Optional
 
 logger = logging.getLogger("edge_discovery")
 
 REGIMES = ("volatile", "trending", "ranging", "quiet")
+
+
+@contextmanager
+def _focused_rules_context(symbol: str, strategy_name: str, regimes: set):
+    """Issue #145: thread-safe temporary override of focused_rules for ONE symbol
+    during a single walk-forward evaluation. Replaces the old global monkeypatch."""
+    from src.learning import edge_weights as ew
+    orig = ew.focused_rules
+
+    def _override(s):
+        if (s or "").upper().startswith(symbol.upper()[:6]):
+            return [(strategy_name, regimes)]
+        return orig(s)
+
+    ew.focused_rules = _override
+    try:
+        yield
+    finally:
+        ew.focused_rules = orig
 
 
 def _overlay_path() -> str:
@@ -64,17 +84,13 @@ class EdgeDiscovery:
         overriding focused_rules for this symbol. Reuses backtester.walkforward_focused
         so the gate + exit model are identical to live tuning. Returns its metrics.
         """
-        from src.learning import edge_weights as ew
-        # monkeypatch focused_rules for the duration of this one backtest
-        orig = ew.focused_rules
-        ew.focused_rules = lambda s: [(strategy_name, regimes)] if (s or "").upper().startswith(symbol.upper()[:6]) else orig(s)
-        try:
-            return self.bt.walkforward_focused(symbol, params or {}, timeframe=timeframe)
-        except Exception as e:
-            logger.debug(f"single wf skip {symbol}/{strategy_name}: {e}")
-            return None
-        finally:
-            ew.focused_rules = orig
+        # Issue #145: thread-safe scoped override of focused_rules for this symbol
+        with _focused_rules_context(symbol, strategy_name, regimes):
+            try:
+                return self.bt.walkforward_focused(symbol, params or {}, timeframe=timeframe)
+            except Exception as e:
+                logger.debug(f"single wf skip {symbol}/{strategy_name}: {e}")
+                return None
 
     def sweep_symbol(self, symbol: str, params: Optional[dict] = None,
                      timeframe: str = "M15") -> dict:

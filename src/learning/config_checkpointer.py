@@ -49,7 +49,8 @@ def _config_fingerprint(cfg: dict) -> str:
         blob = json.dumps(cfg, sort_keys=True, default=str)
     except Exception:
         blob = str(sorted(cfg.items()))
-    return hashlib.md5(blob.encode()).hexdigest()[:12]
+    # Issue #129: SHA256[:16] instead of MD5[:12] to reduce collision risk.
+    return hashlib.sha256(blob.encode()).hexdigest()[:16]
 
 
 @dataclass
@@ -66,7 +67,8 @@ class ConfigCheckpointer:
     """Per-symbol best-known-config store with revert + failed-direction memory."""
 
     def __init__(self, knowledge_store=None, path: Optional[str] = None,
-                 min_sample: Optional[int] = None, revert_margin: float = 0.05):
+                 min_sample: Optional[int] = None, revert_margin: float = 0.05,
+                 failure_ttl_days: int = 90):
         """
         knowledge_store: optional KnowledgeStore for semantic failure memory.
         min_sample: min closed trades in the eval window before revert can fire.
@@ -78,6 +80,7 @@ class ConfigCheckpointer:
         self.min_sample = (min_sample if min_sample is not None
                            else getattr(config, "LEARNING_REVERT_MIN_SAMPLE", 15))
         self.revert_margin = revert_margin
+        self.failure_ttl_days = failure_ttl_days
         self._state = self._load()  # {symbol: {"best": {...}, "failed": {fp: {...}}}}
 
     # ── persistence ──
@@ -164,12 +167,12 @@ class ConfigCheckpointer:
             return {"action": "checkpointed", "reason": "first baseline"}
 
         # STALENESS GUARD (fix: the best-known was trapping the bot on a lucky-window
-        # config). If we are CURRENTLY on the best-known config and it is now itself
-        # LOSING (negative recent expectancy), the stored 'best' was a favourable-
-        # period artifact — DEMOTE it so a new config can take over instead of
-        # reverting to a config that no longer works.
-        on_best = _config_fingerprint(current_cfg) == best["fingerprint"]
-        if on_best and current_expectancy <= 0 and best["expectancy"] > 0:
+        # config). If the best-known config is now itself LOSING (negative recent
+        # expectancy), the stored 'best' was a favourable-period artifact — DEMOTE
+        # it so a new config can take over instead of reverting to a config that no
+        # longer works. Issue #130: demote preemptively regardless of whether we are
+        # currently on it.
+        if current_expectancy <= 0 and best["expectancy"] > 0:
             logger.warning(
                 f"[STALE-BEST] {symbol}: best-known (exp {best['expectancy']:.4f}) is now "
                 f"LOSING live (exp {current_expectancy:.4f}) — demoting the stale checkpoint "
@@ -235,6 +238,23 @@ class ConfigCheckpointer:
 
     def failed_fingerprints(self, symbol: str) -> list[str]:
         return list(self._sym(symbol).get("failed", {}).keys())
+
+    def clear_old_failures(self, days: int = None) -> int:
+        """Issue #133: expire failed-direction memory so a regime change can retry
+        an old direction after enough time has passed."""
+        cutoff = time.time() - (days if days is not None else self.failure_ttl_days) * 86400
+        cleared = 0
+        for sym, s in self._state.items():
+            failed = s.get("failed", {})
+            stale = [fp for fp, rec in failed.items() if rec.get("recorded_at", 0) < cutoff]
+            for fp in stale:
+                failed.pop(fp, None)
+                cleared += 1
+        if cleared:
+            self._persist()
+            logger.info(f"[CHECKPOINT] cleared {cleared} stale failed directions "
+                        f"older than {self.failure_ttl_days}d")
+        return cleared
 
     def snapshot(self) -> dict:
         """Compact view for the dashboard/status."""

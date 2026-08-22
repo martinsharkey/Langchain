@@ -160,7 +160,7 @@ def _data_bounds(ind: dict, lo_pct: float = 5, hi_pct: float = 95) -> dict:
         if len(bulls_neg) > 0:
             b_lo = float(bulls_neg.quantile(lo_pct / 100))
             b_hi = float(bulls_neg.quantile(hi_pct / 100))
-            bounds["bulls_short"] = (min(-0.01, b_hi), min(b_lo, 0.0))
+            bounds["bulls_short"] = (min(b_lo, -0.01), min(b_hi, 0.0))
     if len(bears) > 0:
         bears_pos = bears[bears > 0]
         bears_neg = bears[bears < 0]
@@ -171,7 +171,7 @@ def _data_bounds(ind: dict, lo_pct: float = 5, hi_pct: float = 95) -> dict:
         if len(bears_neg) > 0:
             b_lo = float(bears_neg.quantile(lo_pct / 100))
             b_hi = float(bears_neg.quantile(hi_pct / 100))
-            bounds["bears_long"] = (min(-0.01, b_hi), min(b_lo, 0.0))
+            bounds["bears_long"] = (min(b_lo, -0.01), min(b_hi, 0.0))
 
     # ATR: positive range
     atr = ind["atr"].dropna()
@@ -263,6 +263,7 @@ def _apply_floors(df: pd.DataFrame, ind: dict, floors: dict) -> pd.DataFrame:
         "entry_short": entry_short,
         "exit_long": exits,
         "exit_short": short_exits,
+        "short_exits": short_exits,
     }, index=df.index)
 
 

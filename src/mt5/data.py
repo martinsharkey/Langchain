@@ -9,6 +9,7 @@ Falls back to simulated data when neither is available.
 
 from typing import Optional
 from datetime import datetime, timedelta
+import time
 
 from src.mt5.connector import get_connector, MT5_AVAILABLE, mt5, mt5_error_handler, SILICON_MT5_AVAILABLE, mt5_lock
 from src.utils.logger import get_logger
@@ -66,6 +67,8 @@ def get_rates(
     timeframe: str = "H1",
     count: int = 100,
     lock: bool = True,
+    retries: int = 3,
+    retry_delay: float = 1.0,
 ) -> list[dict]:
     """
     Get OHLCV (Open, High, Low, Close, Volume) rate data.
@@ -79,12 +82,14 @@ def get_rates(
         count: Number of candles to fetch.
         lock: Whether to serialize this call behind mt5_lock(). Defaults to True.
             Disable only when called from a path that already holds the lock.
+        retries: Number of retries on transient failure (default 3).
+        retry_delay: Delay between retries in seconds (default 1.0).
 
     Returns:
         List of candle dictionaries with o, h, l, c, v, time fields.
 
     Raises:
-        ConnectionError: If MT5 not connected or no data available
+        ConnectionError: If MT5 not connected or no data available after retries.
     """
     connector = get_connector()
 
@@ -175,10 +180,18 @@ def get_rates(
 
         return result
 
-    if lock:
-        with mt5_lock():
+    last_error = None
+    for attempt in range(retries):
+        try:
+            if lock:
+                with mt5_lock():
+                    return _fetch()
             return _fetch()
-    return _fetch()
+        except ConnectionError as e:
+            last_error = e
+            if attempt < retries - 1:
+                time.sleep(retry_delay)
+    raise ConnectionError(f"MT5 get_rates failed after {retries} retries: {last_error}")
 
 
 def get_ticks(symbol: str, from_epoch: float, to_epoch: float, max_ticks: int = 5_000_000,

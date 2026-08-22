@@ -46,13 +46,13 @@ class ContinualResearcher:
                  pattern_optimizer=None, apply_exit_config=None, excursion_analyzer=None,
                  robust_tester=None, optimizer_reports_dir=None,
                  current_params_fn=None, apply_tuned_fn=None, onnx_predictor=None,
-                 change_validator=None):
+                 change_validator=None, make_backtester_fn=None):
         self.db = experience_db
         self.mql5 = mql5_knowledge
         self.ks = knowledge_store
         self.edge_discovery = edge_discovery
         self.repo = repo
-        self._last_run_day = None
+        self._last_run_at = 0.0  # epoch seconds; time-delta cadence, not day-boundary
         # #40: discover + LOCK IN the MACD-leads-OsMA pattern's best exits per symbol
         self.pattern_optimizer = pattern_optimizer
         self.apply_exit_config = apply_exit_config  # callable(symbol, sl_atr, tp_rr)
@@ -76,6 +76,7 @@ class ContinualResearcher:
         self.apply_tuned_fn = apply_tuned_fn
         self.onnx_predictor = onnx_predictor
         self.change_validator = change_validator
+        self.make_backtester_fn = make_backtester_fn
         self._evidence_cache = {}
         # Single per-symbol EVIDENCE STORE: every BT/FT result (live review, optimiser
         # cluster) is persisted here so ALL testing data lives in one
@@ -378,11 +379,10 @@ class ContinualResearcher:
         return prof
 
     def gold_evidence(self, base_symbol: str) -> dict:
-        """Measure our CURRENT live indicator settings against the RICH historic
-        evidence: (a) the GoldShark optimiser BACKTEST+FORWARD passes for this symbol
-        and (b) a Dukascopy backtest of the current settings. Writes a finding to the
-        knowledge store so the bot's tuning is informed by all of it. Fully non-fatal
-        and cached per day — never blocks the research cycle."""
+        """Measure our CURRENT live indicator settings against the GoldShark optimiser
+        BACKTEST+FORWARD passes. Writes a finding to the knowledge store so the bot's
+        tuning is informed by historic evidence. Fully non-fatal and cached per day —
+        never blocks the research cycle."""
         sym = base_symbol.upper()
         day = datetime.now(timezone.utc).strftime("%Y-%m-%d")
         if self._evidence_cache.get(sym, {}).get("day") == day:
@@ -568,8 +568,8 @@ class ContinualResearcher:
         review = self.review_symbol(base_symbol)
         # RE-READ prior findings at the START of the cycle so we build on them.
         prior = self._recall_prior_findings(base_symbol)
-        # Measure our CURRENT live indicator settings against the RICH historic evidence
-        # (GoldShark optimiser BT/FT + Dukascopy backtest). Non-fatal; writes a finding.
+        # Measure our CURRENT live indicator settings against the GoldShark optimiser
+        # BACKTEST+FORWARD passes. Non-fatal; writes a finding.
         evidence = self.gold_evidence(base_symbol)
         hypothesis = None
         knowledge = []
@@ -657,21 +657,96 @@ class ContinualResearcher:
     # ── daily orchestration ──
     def joint_optimise(self, base_symbol: str, resolved: str = None) -> dict:
         """JOINT evolutionary parameter search over the full space, seeded from the
-        GoldShark passes. Slow cadence.
-        Applies the winner only if it BEATS the incumbent (walk-forward validated) via
-        the injected apply_tuned_fn. Non-fatal; returns {improved, ...}."""
-        return {"improved": False, "reason": "dukascopy removed"}
+        GoldShark passes. Slow cadence. Uses the DataManager primary / MT5-fallback
+        backtester (NO Dukascopy). Applies the winner only if it BEATS the incumbent
+        (walk-forward validated) via the injected apply_tuned_fn. Non-fatal."""
+        if self.make_backtester_fn is None or self.current_params_fn is None:
+            return {"improved": False, "reason": "no backtest/params fn"}
 
+        # cadence: run every 3rd research day per symbol (it runs many backtests)
+        import datetime as _dt
+        day_ord = _dt.datetime.now(timezone.utc).toordinal()
+        if (day_ord % 3) != (abs(hash(base_symbol.upper())) % 3):
+            return {"improved": False, "reason": "not scheduled today"}
+
+        try:
+            from src.learning.evolutionary_optimizer import EvolutionaryOptimizer
+            from src.learning.param_optimizer import PARAM_SPACE
+        except Exception as e:
+            return {"improved": False, "reason": f"import: {e}"}
+
+        base = self.current_params_fn(base_symbol)
+        if not base:
+            return {"improved": False, "reason": "no base params"}
+
+        def _bt(sym, params, sl_atr=1.0, tp_rr=2.0):
+            bt = self.make_backtester_fn()
+            return bt.walkforward_focused(
+                sym, params, sl_atr=sl_atr, tp_rr=tp_rr,
+                timeframe="M1", bars=3000, windows=5
+            )
+
+        evo = EvolutionaryOptimizer(
+            PARAM_SPACE, _bt,
+            experience_db=self.db,
+            onnx_predictor=self.onnx_predictor
+        )
+        try:
+            out = evo.optimise(base_symbol, base, generations=5, pop_size=14)
+        except Exception as e:
+            logger.debug(f"joint optimise skip {base_symbol}: {e}")
+            return {"improved": False, "reason": str(e)[:80]}
+
+        if out and out.get("improved") and self.apply_tuned_fn:
+            if self.change_validator is not None:
+                v = self.change_validator.validate(
+                    base_symbol, out["params"], source="joint_evo"
+                )
+                if not v.get("passed"):
+                    logger.warning(
+                        f"[EVO] {base_symbol}: joint config REJECTED by best-ever gate "
+                        f"({v.get('reason')}) — not applied"
+                    )
+                    return {"improved": False,
+                            "reason": f"best-ever gate: {v.get('reason')}"}
+
+            try:
+                self.apply_tuned_fn(
+                    resolved or base_symbol, out["params"],
+                    source=f"joint_evo score {out['base_score']:.2f}->{out['score']:.2f}"
+                )
+                logger.warning(
+                    f"[EVO] {base_symbol}: applied joint-optimised config "
+                    f"(score {out['base_score']:.2f} -> {out['score']:.2f})"
+                )
+                if self.onnx_predictor is not None:
+                    try:
+                        self.onnx_predictor.train_symbol(base_symbol)
+                    except Exception:
+                        pass
+            except Exception as e:
+                logger.debug(f"apply joint config skip: {e}")
+
+        return {"improved": bool(out and out.get("improved")),
+                "score": out.get("score") if out else None}
     def daily_cycle(self, symbols: list[str], force: bool = False) -> dict:
+        """Run the once-per-day ReAct research pass across symbols."""
+        return self._daily_cycle(symbols, force=force)
+
+    def daily_cycle_for_symbol(self, base_symbol: str, resolved: str = None) -> dict:
+        """Alias for single-symbol daily pass."""
+        return self._daily_cycle([base_symbol])
         """
         Run the once-per-day ReAct research pass across symbols. Returns a summary.
-        Idempotent per UTC day unless force=True.
+        Idempotent per 24-hour window unless force=True (time-delta, not midnight
+        boundary, so a continuously-running bot still triggers every 24h).
         """
-        today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-        if not force and self._last_run_day == today:
-            return {"skipped": True, "reason": "already ran today"}
-        self._last_run_day = today
-        summary = {"day": today, "symbols": {}, "issues_filed": []}
+        now = time.time()
+        if not force and (now - self._last_run_at) < 86400:
+            return {"skipped": True, "reason": "already ran within 24h"}
+        self._last_run_at = now
+        day = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        summary = {"day": day, "symbols": {}, "issues_filed": []}
         # AUTO-INGEST: absorb any NEW/changed files dropped into the datastore into the
         # researcher's knowledge BEFORE reasoning, so every nugget is known + remembered.
         try:

@@ -4,8 +4,8 @@ Architecture:
     data/broker_data/<broker>/<symbol>/<TF>.parquet   — OHLCV bars
     data/broker_data/<broker>/<symbol>/ticks.parquet   — bid/ask ticks (optional)
 
-The DataManager replaces direct MT5/Dukascopy calls in backtesting, onboarding,
-and research. All data is pre-acquired by pull_mt5_history.py and stored locally.
+The DataManager replaces direct MT5 calls in backtesting, onboarding, and research.
+All data is pre-acquired by pull_mt5_history.py and stored locally.
 """
 
 from __future__ import annotations

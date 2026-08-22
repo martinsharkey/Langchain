@@ -33,8 +33,7 @@ class AdaptiveLoop:
         (so backtests use the tradable symbol, e.g. XAUUSD -> XAUUSD-ECN).
         rates_fn / ticks_fn: optional data-source callables matching
         src.mt5.data.get_rates / get_ticks signatures. Use them to validate
-        synthesized strategies on an independent historical source such as
-        Dukascopy (issue #80).
+        synthesized strategies on an independent historical source.
         """
         self.experience_db = experience_db
         self.registry = registry

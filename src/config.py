@@ -234,10 +234,9 @@ GROWTH_BALANCE_PER_LOT = float(os.getenv("GROWTH_BALANCE_PER_LOT", "31.0"))  # p
 GROWTH_MAX_LOT = float(os.getenv("GROWTH_MAX_LOT", "5.0"))            # broker/sanity ceiling
 # GROWTH_PYRAMID_MAX is DATA-DERIVED (R10), not a guess. Evidence: GoldShark optimiser
 # forward-tested passes (data/reprodata/goldshark13/optimiser_reports): realistic runs
-# 363016 Dukascopy (fwd-profitable median 5, max 15) and 1176166 tick (median 10, max 20);
-# best forward-profit passes cluster 3-8 legs. Set to the cleanest realistic run's
-# forward-validated ceiling (15). The 42-50 leg passes are optimiser range artifacts
-# (£1M-on-£100 compounding blow-ups) and are NOT used.
+# on account 1176166 (median 10, max 20); best forward-profit passes cluster 3-8 legs.
+# Set to the cleanest realistic run's forward-validated ceiling (15). The 42-50 leg
+# passes are optimiser range artifacts (£1M-on-£100 compounding blow-ups) and are NOT used.
 GROWTH_PYRAMID_MAX = int(os.getenv("GROWTH_PYRAMID_MAX", "15"))       # add-to-winner legs (evidence-derived)
 GROWTH_PYRAMID_MAX_EVIDENCE = os.getenv(
     "GROWTH_PYRAMID_MAX_EVIDENCE",
@@ -263,7 +262,7 @@ GROWTH_BASKET_ARM_POINTS = float(os.getenv("GROWTH_BASKET_ARM_POINTS", "200.0"))
 PYRAMID_TRAIL_SYMBOLS = [s.strip().upper() for s in
                          os.getenv("PYRAMID_TRAIL_SYMBOLS", "BTCUSD").split(",") if s.strip()]
 # BTCUSD exit — VALIDATED ON H1 (QMMP pipeline, 2026-08-18, cost-aware, tick-replay).
-# See data/qmmp/BTCUSD/model.json. Offline replay of the 30d Dukascopy tick stream proves
+# See data/qmmp/BTCUSD/model.json. Offline replay of the 30d broker tick stream proves
 # the original pipeline defaults (be=11057/trail=11057/sl=628348) were far above the median
 # winner MFE (~4174 pts live, ~141k pts on the 30d H1 replay), so BE/trail almost never
 # armed and the wide SL bled on reversals. Updated model.json values (be=5000/trail=5000/

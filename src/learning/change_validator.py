@@ -234,6 +234,9 @@ class ChangeValidator:
                                "params": {k: v for k, v in params.items() if not k.startswith("_")}}
             self._best_generalizes_cache.pop(sym, None)
             self._save()
+        else:
+            # CLEAR CACHE on FAIL — stale cache can permanently reject new configs after a regime shift
+            self._best_generalizes_cache.pop(sym, None)
         self._remember(sym, params, out, source)
         self._memo[mk] = out
         logger.warning(f"[VALIDATE] {sym} ({source}): {'PASS' if passed else 'REJECT'} "

@@ -100,69 +100,58 @@ DEFAULTS = {
 # floors are ATR-normalized (GoldShark raw value / gold M1 ATR ~2.3). Long floors are
 # minimums (>=), short floors maximums (<=). See WHALE_ANALYSIS + session memory.
 SYMBOL_BASELINES = {
+    # XAUUSD: no hardcoded floors. Onboarding pipeline discovers from backtest+forward-test,
+    # Optuna refines daily. This entry only carries structural config (indicator periods).
     "XAUUSD": {
-        # pass5469 PROVEN config (reproduced £100->£273 2.73x, WR 94%, PF 1.48 on tick
-        # data). EXACT raw floors from data/reprodata/pass5469_cfg.json + floors_raw so the
-        # live confluence gates on RAW osma/bulls/bears (NOT ATR-scaled) — this makes live
-        # match the backtest. Also carries the proven fixed-point exits (be/tp/trail/stop).
-        "floors_raw": True,
         "osma_fast": 12, "osma_slow": 26, "osma_signal": 9, "ema_period": 13,
-        "atr_period": 14, "min_ema_slope": 0.205, "atr_min": 1.4, "atr_max": 50.0,
-        "osma_min_long": 2.0, "bulls_min_long": 0.7, "bears_min_long": 1.8,
-        "osma_max_short": -0.7, "bulls_max_short": -1.5, "bears_max_short": -0.1,
-        "max_momentum_age": 26,
+        "atr_period": 14, "max_momentum_age": 26,
         "rsi_long_max": 100.0, "rsi_short_min": 0.0,
-        "sl_atr": 0.8, "tp_rr": 2.0, "min_confluence": 3,
-        # PROVEN GoldShark gold exit (GS_PROVEN variant). Broker SL is DATA-DERIVED, not
-        # the .set's 3347: 218 live trades show 400pts ($4.00) keeps ~96% of winners while
-        # cutting losers; safety_tp is a WIDE connectivity failsafe only (removed once
-        # trailing arms). be_trigger 200 (winners clear their p75 66pt dip by then), lock
-        # +50, then trail 73pts behind best price letting runners run (no TP cap).
-        "hard_sl_points": 400.0, "safety_tp_points": 1500.0,
-        "be_trigger_pts": 200.0, "be_lock_pts": 50.0, "trail_points": 73.0,
         "bal_per_lot": 31.0,
     },
-    # BTCUSD + GER40: floors DISCOVERED by independent per-symbol tick backtest
-    # (discover_floors.py) — NOT borrowed from gold. Entry direction is good (66-78%
-    # go green) but exit/frequency balance not yet profitable (PF<1) — these are a
-    # non-zero STARTING baseline for the optimizer to refine, not a proven-profitable
-    # config. ATR-normalized floors so they scale with the symbol's volatility.
+    # BTCUSD: no hardcoded floors. Onboarding pipeline discovers from backtest+forward-test,
+    # Optuna refines daily.
     "BTCUSD": {
-        # OWNER PYRAMID_TRAIL model pinned into the BASELINE so the learning loops cannot
-        # wipe it. Entry floors from frequency analysis (osma>=0.15, dom>=0.5, runway_min=0).
-        # EXITS = PIPELINE OUTPUT (data/qmmp/BTCUSD/model.json, 2026-08-17, cost-aware;
-        # native vectorbt + custom sim agree). BTCUSD trades H1; H1 cycle moves are ~70k+
-        # pts so exits are LARGE. DO NOT hand-edit — re-run the pipeline.
         "osma_fast": 12, "osma_slow": 26, "osma_signal": 9, "ema_period": 13,
-        "atr_period": 14, "min_ema_slope": 0.0, "atr_min": 0.0, "atr_max": 0.0,
-        "osma_min_long": 0.0, "bulls_min_long": 0.0, "bears_min_long": 0.0,
-        "osma_max_short": 0.0, "bulls_max_short": 0.0, "bears_max_short": 0.0,
-        "dom_min": 0.0, "runway_min": 0.0, "max_stretch_atr": 0.0, "atr_min_rel": 0.0,
-        "max_momentum_age": 26, "rsi_long_max": 100.0, "rsi_short_min": 0.0,
-        "macd_min_long": 0.0, "macd_max_short": 0.0,
-        "sl_atr": 1.62, "tp_rr": 2.0, "min_confluence": 1,
-        "hard_sl_points": 628348.0, "safety_tp_points": 628348.0,
-        "be_trigger_pts": 11057.0, "be_lock_pts": 1105.0, "trail_points": 11057.0,
+        "atr_period": 14, "max_momentum_age": 26,
+        "rsi_long_max": 100.0, "rsi_short_min": 0.0,
     },
-    "GER40": {
-        "osma_fast": 12, "osma_slow": 26, "osma_signal": 9, "ema_period": 13,
-        "atr_period": 14, "min_ema_slope": 0.05, "atr_min": 0.0, "atr_max": 0.0,
-        "osma_min_long": 0.2, "bulls_min_long": 1.0, "bears_min_long": 0.0,
-        "osma_max_short": -0.2, "bulls_max_short": 0.0, "bears_max_short": -1.0,
-        "max_momentum_age": 26, "rsi_long_max": 100.0, "rsi_short_min": 0.0,
-        "sl_atr": 0.8, "tp_rr": 2.0, "min_confluence": 3,
-        "hard_sl_points": 1034.4,
-    },
+    # AUDCAD: no hardcoded floors. Onboarding pipeline discovers from backtest+forward-test,
+    # Optuna refines daily.
     "AUDCAD": {
         "osma_fast": 12, "osma_slow": 26, "osma_signal": 9, "ema_period": 13,
-        "atr_period": 14, "min_ema_slope": 0.0, "atr_min": 0.0, "atr_max": 0.0,
-        "osma_min_long": 0.0, "bulls_min_long": 0.0, "bears_min_long": 0.0,
-        "osma_max_short": 0.0, "bulls_max_short": 0.0, "bears_max_short": 0.0,
-        "max_momentum_age": 26, "rsi_long_max": 100.0, "rsi_short_min": 0.0,
-        "sl_atr": 2.0, "tp_rr": 2.0, "min_confluence": 3,
-        "hard_sl_points": 1169.0,
+        "atr_period": 14, "max_momentum_age": 26,
+        "rsi_long_max": 100.0, "rsi_short_min": 0.0,
     },
 }
+
+# ---------------------------------------------------------------------------
+# HARD RULE: SYMBOL_BASELINES must NEVER contain hardcoded floor values.
+# Floor values MUST come from the onboarding pipeline (backtest+forward-test)
+# and be tuned automatically by Optuna. Violating this rule breaks automation.
+# ---------------------------------------------------------------------------
+_FLOOR_KEYS = {
+    "osma_min_long", "osma_max_short", "min_ema_slope",
+    "bulls_min_long", "bulls_max_short",
+    "bears_min_long", "bears_max_short",
+    "atr_min", "atr_max",
+    "sl_atr", "tp_rr", "min_confluence",
+    "hard_sl_points", "safety_tp_points",
+    "be_trigger_pts", "be_lock_pts", "trail_points",
+    "floors_raw", "dom_min", "runway_min", "max_stretch_atr", "atr_min_rel",
+    "macd_min_long", "macd_max_short",
+}
+
+def _assert_no_hardcoded_floors():
+    for sym, cfg in SYMBOL_BASELINES.items():
+        bad = _FLOOR_KEYS.intersection(cfg.keys())
+        if bad:
+            raise RuntimeError(
+                f"HARDCODED FLOORS DETECTED in SYMBOL_BASELINES['{sym}']: {sorted(bad)}. "
+                "Floor values MUST come from the onboarding pipeline, not be hardcoded. "
+                "Remove these values and let the pipeline discover them."
+            )
+
+_assert_no_hardcoded_floors()
 
 
 def _clamp(v, lo, hi, kind):
@@ -699,39 +688,51 @@ class ParameterOptimizer:
                 best_score = res["score"]; best_params = cand; best_res = res
                 improved = True; directive_worked = True
 
-        # 2) DIRECTED coordinate search — purposeful, not random. Steps each strength
-        # floor / period / exit param up & down; greedily adopts what clears the gate so
-        # the search descends coordinate-by-coordinate from the improving base.
-        # ATTRIBUTION: because we move ONE coordinate at a time, we know WHICH lever
-        # (and by how much expectancy/PF) drove each accepted improvement.
-        attribution = []   # [{param, from, to, score_gain}]
-        budget = max(iterations, 0)
-        for _pname, cand in self._directed_candidates(best_params):
-            if budget <= 0:
-                break
-            if self._is_failed(symbol, cand):
-                continue
-            budget -= 1; tried += 1
-            res = self.backtest_fn(symbol, cand, cand.get("sl_atr", 1.0), cand.get("tp_rr", 2.0))
-            if not res or not res.get("generalizes"):
-                continue
-            if cold_start:
-                best_score = res["score"]; best_params = cand; best_res = res
-                improved = True; cold_start = False
-                attribution.append({"param": _pname, "from": best_params.get(_pname),
-                                    "to": cand.get(_pname),
-                                    "score_gain": round(res["score"] - (-1.0), 3)})
-                logger.info(f"[OPTIMIZER] {symbol}: cold-start ACCEPTED min-PF {best_score:.2f} "
-                            f"via {_pname}")
-                continue
-            # robust objective: maximise the WORST-window PF (min across windows),
-            # tie-break on total R. Only keep if it clears the incumbent.
-            if res["score"] > best_score + 0.01:
-                attribution.append({"param": _pname, "from": best_params.get(_pname),
-                                    "to": cand.get(_pname),
-                                    "score_gain": round(res["score"] - best_score, 3)})
-                best_score = res["score"]; best_params = cand; best_res = res
-                improved = True
+            # 2) DIRECTED coordinate search — purposeful, not random. Steps each strength
+            # floor / period / exit param up & down; greedily adopts what clears the gate so
+            # the search descends coordinate-by-coordinate from the improving base.
+            # ATTRIBUTION: because we move ONE coordinate at a time, we know WHICH lever
+            # (and by how much expectancy/PF) drove each accepted improvement.
+            attribution = []   # [{param, from, to, score_gain}]
+            budget = max(iterations, 0)
+            # Issue #134: require a sensible win rate in addition to min-PF so a
+            # 4-big-win / 20-small-loss config does not pass the gate.
+            MIN_WIN_RATE = float(os.getenv("OPTIMIZER_MIN_WIN_RATE", "40.0"))
+
+            def _candidate_viable(res):
+                if not res or not res.get("generalizes"):
+                    return False
+                wr = res.get("win_rate")
+                if wr is not None and wr < MIN_WIN_RATE:
+                    return False
+                return True
+
+            for _pname, cand in self._directed_candidates(best_params):
+                if budget <= 0:
+                    break
+                if self._is_failed(symbol, cand):
+                    continue
+                budget -= 1; tried += 1
+                res = self.backtest_fn(symbol, cand, cand.get("sl_atr", 1.0), cand.get("tp_rr", 2.0))
+                if not _candidate_viable(res):
+                    continue
+                if cold_start:
+                    best_score = res["score"]; best_params = cand; best_res = res
+                    improved = True; cold_start = False
+                    attribution.append({"param": _pname, "from": best_params.get(_pname),
+                                        "to": cand.get(_pname),
+                                        "score_gain": round(res["score"] - (-1.0), 3)})
+                    logger.info(f"[OPTIMIZER] {symbol}: cold-start ACCEPTED min-PF {best_score:.2f} "
+                                f"via {_pname}")
+                    continue
+                # robust objective: maximise the WORST-window PF (min across windows),
+                # tie-break on total R. Only keep if it clears the incumbent.
+                if res["score"] > best_score + 0.01:
+                    attribution.append({"param": _pname, "from": best_params.get(_pname),
+                                        "to": cand.get(_pname),
+                                        "score_gain": round(res["score"] - best_score, 3)})
+                    best_score = res["score"]; best_params = cand; best_res = res
+                    improved = True
 
         # 3) PER-SESSION floor search: mutate session-specific magnitude overrides.
         # Disabled until the backtest can compute per-session sub-scores. Using the

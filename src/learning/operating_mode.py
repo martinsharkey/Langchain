@@ -129,6 +129,10 @@ class OperatingModeManager:
     def __init__(self, experience_db):
         self.experience_db = experience_db
         self.state: dict = {}   # symbol -> {mode, params, reason, updated_at}
+        # Issue #135: anti-thrash hysteresis so a symbol hovering at the mode
+        # boundary does not flip every cycle.
+        self._transition_hold: dict[str, int] = {}
+        self._HYSTERESIS_CYCLES = int(os.getenv("MODE_HYSTERESIS_CYCLES", "5"))
 
     def _recent(self, symbol: str, window: int = 40):
         import sqlite3, statistics
@@ -146,6 +150,8 @@ class OperatingModeManager:
         pf = round(gw / gl, 2) if gl > 0 else (gw if gw else 0.0)
         # PF variability: split the window into halves/thirds and measure spread,
         # so a symbol whose edge is unstable must clear a higher live bar.
+        # Issue #131: use a robust MAD-based estimator instead of raw stddev so a
+        # single outlier trade cannot spike the variance and mis-grade the mode.
         pf_stdev = 0.0
         if closed >= 12:
             chunks = [rows[i::3] for i in range(3)]   # interleaved thirds
@@ -155,7 +161,10 @@ class OperatingModeManager:
                 loss = abs(sum(r["profit_loss"] for r in ch if (r["profit_loss"] or 0) < 0))
                 pfs.append(g / loss if loss > 0 else (g if g else 0.0))
             try:
-                pf_stdev = round(statistics.pstdev(pfs), 3)
+                med = statistics.median(pfs)
+                mad = statistics.median([abs(v - med) for v in pfs]) or 1e-9
+                # MAD -> stddev consistent estimator for normal-ish tails
+                pf_stdev = round(mad / 0.6745, 3)
             except Exception:
                 pf_stdev = 0.0
         return closed, pf, win_rate, pf_stdev
@@ -168,6 +177,21 @@ class OperatingModeManager:
                          currently=currently,
                          override=overrides.get(symbol) or overrides.get("ALL"))
         prev = currently
+        # Issue #135: N-cycle hysteresis to prevent thrashing at the boundary.
+        hold = self._transition_hold.get(symbol, 0)
+        mode_changed = prev and prev != mp.mode
+        if mode_changed:
+            if hold > 0:
+                mp = ModeParams(prev,
+                                self.state[symbol]["confidence_min"],
+                                self.state[symbol]["countertrend_penalty"],
+                                f"hysteresis hold ({hold}/{self._HYSTERESIS_CYCLES}) — was {mp.reason}")
+                self._transition_hold[symbol] = hold - 1
+            else:
+                self._transition_hold[symbol] = self._HYSTERESIS_CYCLES
+        else:
+            self._transition_hold[symbol] = 0
+
         self.state[symbol] = {
             "mode": mp.mode, "confidence_min": mp.confidence_min,
             "countertrend_penalty": mp.countertrend_penalty, "reason": mp.reason,

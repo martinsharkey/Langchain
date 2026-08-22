@@ -116,7 +116,7 @@ _PAPER_TICKET_SEQ = 90_000_000
 def get_algo_status() -> AlgoStatus:
     """Read the live Algo Trading / trade-permission state from MT5."""
     connector = get_connector()
-    connected = connector.is_connected()
+    connected = connector.ensure_connected()
     term_ok = False
     acct_ok = False
     if MT5_AVAILABLE and connected:
@@ -302,6 +302,27 @@ class BrokerAdapter:
             }
 
     # ---- execution ----
+    def _validate_order(self, action: str, entry: float, sl: Optional[float],
+                        tp: Optional[float]) -> tuple[bool, str]:
+        """Pre-send sanity checks: SL/TP direction, zero RR, and minimum distance."""
+        if action == "buy":
+            if sl is not None and sl >= entry:
+                return False, f"SL {sl} must be below long entry {entry}"
+            if tp is not None and tp <= entry:
+                return False, f"TP {tp} must be above long entry {entry}"
+        elif action == "sell":
+            if sl is not None and sl <= entry:
+                return False, f"SL {sl} must be above short entry {entry}"
+            if tp is not None and tp >= entry:
+                return False, f"TP {tp} must be below short entry {entry}"
+        if sl is not None and tp is not None:
+            # Use the resolved symbol's point as the minimum price-distance sanity
+            # check. MT5's trade_stops_level will still enforce the real broker limit.
+            min_dist_price = self.spec.point * 2.0 if self.spec.point else 0.0
+            if abs(entry - sl) < min_dist_price:
+                return False, f"SL too close to entry (min {min_dist_price} price units)"
+        return True, "OK"
+
     def place(self, action: str, volume: float, sl: Optional[float] = None,
               tp: Optional[float] = None, comment: str = "agent",
               signal_price: Optional[float] = None) -> OrderResult:
@@ -320,6 +341,14 @@ class BrokerAdapter:
             return self._reject(action, volume, "no live price")
         price = tick["ask"] if action == "buy" else tick["bid"]
         signal_price = signal_price if signal_price is not None else price
+
+        # SL/TP validation BEFORE sending (issue #148)
+        valid, reason = self._validate_order(action, price, sl, tp)
+        if not valid:
+            _latency_log(action, self.spec.resolved, signal_price, price, 0.0,
+                         sl, tp, t0, time.time(), None, f"validation-failed:{reason}")
+            logger.error(f"Order validation failed: {reason}")
+            return self._reject(action, volume, reason)
 
         # OBSERVE: never place, never record
         if self.mode == "OBSERVE":
