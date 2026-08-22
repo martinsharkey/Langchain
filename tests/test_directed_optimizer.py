@@ -126,7 +126,9 @@ def test_gold_proven_edge_baseline_is_the_starting_point():
     # the model.json was produced on H1, so its floors ARE H1-scale.
     btc = o.current_params("BTCUSD")
     assert btc["osma_min_long"] == pytest.approx(17.971, abs=0.01), btc
-    assert btc["min_confluence"] == SYMBOL_BASELINES["BTCUSD"]["min_confluence"]
+    # min_confluence is a structural default (not a per-symbol floor), so it comes
+    # from DEFAULTS, not SYMBOL_BASELINES (which must never carry hardcoded floors).
+    assert btc["min_confluence"] == DEFAULTS["min_confluence"]
 
 
 def test_optimize_cold_start_accepts_first_generalizing_candidate():
@@ -183,4 +185,7 @@ def test_optimize_does_not_regress_after_cold_start():
     r = opt.optimize("XAUUSD", iterations=60)
     assert r["improved"] is True, f"expected improvement over incumbent, got {r}"
     assert r["score"] == 1.10, r
-    assert SYMBOL_BASELINES["BTCUSD"]["osma_min_long"] != SYMBOL_BASELINES["XAUUSD"]["osma_min_long"]
+    # SYMBOL_BASELINES must never carry hardcoded floors (R3/R5 automation rule):
+    # neither BTCUSD nor XAUUSD may define osma_min_long in the baseline.
+    assert "osma_min_long" not in SYMBOL_BASELINES["BTCUSD"]
+    assert "osma_min_long" not in SYMBOL_BASELINES["XAUUSD"]

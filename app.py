@@ -76,6 +76,22 @@ def start_engine():
     return _ENGINE_THREAD
 
 
+def _purge_app_modules():
+    """Drop cached `src.*` / `scripts.*` modules so a fresh import actually picks up
+    the changed code. Without this, `from src.trading.scalp_engine import ScalpEngine`
+    returns the STALE module from sys.modules and hot-reload silently no-ops."""
+    import importlib
+    purged = []
+    for name in list(sys.modules.keys()):
+        if name == "src" or name.startswith("src.") or name == "scripts" or name.startswith("scripts."):
+            purged.append(name)
+            del sys.modules[name]
+    if purged:
+        logger.info(f"[HOTRELOAD] purged {len(purged)} cached modules "
+                    f"({purged[0]} … {purged[-1]})")
+    return purged
+
+
 def _restart_engine():
     """Gracefully stop the current engine and start a fresh one."""
     global _ENGINE_THREAD, _ENGINE_INSTANCE
@@ -93,6 +109,8 @@ def _restart_engine():
             _ENGINE_THREAD.join(timeout=30)
         except Exception:
             pass
+    # Invalidate cached modules so the fresh engine thread imports the NEW code.
+    _purge_app_modules()
     logger.info("[HOTRELOAD] starting fresh engine…")
     start_engine()
 

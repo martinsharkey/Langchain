@@ -688,51 +688,51 @@ class ParameterOptimizer:
                 best_score = res["score"]; best_params = cand; best_res = res
                 improved = True; directive_worked = True
 
-            # 2) DIRECTED coordinate search — purposeful, not random. Steps each strength
-            # floor / period / exit param up & down; greedily adopts what clears the gate so
-            # the search descends coordinate-by-coordinate from the improving base.
-            # ATTRIBUTION: because we move ONE coordinate at a time, we know WHICH lever
-            # (and by how much expectancy/PF) drove each accepted improvement.
-            attribution = []   # [{param, from, to, score_gain}]
-            budget = max(iterations, 0)
-            # Issue #134: require a sensible win rate in addition to min-PF so a
-            # 4-big-win / 20-small-loss config does not pass the gate.
-            MIN_WIN_RATE = float(os.getenv("OPTIMIZER_MIN_WIN_RATE", "40.0"))
+        # 2) DIRECTED coordinate search — purposeful, not random. Steps each strength
+        # floor / period / exit param up & down; greedily adopts what clears the gate so
+        # the search descends coordinate-by-coordinate from the improving base.
+        # ATTRIBUTION: because we move ONE coordinate at a time, we know WHICH lever
+        # (and by how much expectancy/PF) drove each accepted improvement.
+        attribution = []   # [{param, from, to, score_gain}]
+        budget = max(iterations, 0)
+        # Issue #134: require a sensible win rate in addition to min-PF so a
+        # 4-big-win / 20-small-loss config does not pass the gate.
+        MIN_WIN_RATE = float(os.getenv("OPTIMIZER_MIN_WIN_RATE", "40.0"))
 
-            def _candidate_viable(res):
-                if not res or not res.get("generalizes"):
-                    return False
-                wr = res.get("win_rate")
-                if wr is not None and wr < MIN_WIN_RATE:
-                    return False
-                return True
+        def _candidate_viable(res):
+            if not res or not res.get("generalizes"):
+                return False
+            wr = res.get("win_rate")
+            if wr is not None and wr < MIN_WIN_RATE:
+                return False
+            return True
 
-            for _pname, cand in self._directed_candidates(best_params):
-                if budget <= 0:
-                    break
-                if self._is_failed(symbol, cand):
-                    continue
-                budget -= 1; tried += 1
-                res = self.backtest_fn(symbol, cand, cand.get("sl_atr", 1.0), cand.get("tp_rr", 2.0))
-                if not _candidate_viable(res):
-                    continue
-                if cold_start:
-                    best_score = res["score"]; best_params = cand; best_res = res
-                    improved = True; cold_start = False
-                    attribution.append({"param": _pname, "from": best_params.get(_pname),
-                                        "to": cand.get(_pname),
-                                        "score_gain": round(res["score"] - (-1.0), 3)})
-                    logger.info(f"[OPTIMIZER] {symbol}: cold-start ACCEPTED min-PF {best_score:.2f} "
-                                f"via {_pname}")
-                    continue
-                # robust objective: maximise the WORST-window PF (min across windows),
-                # tie-break on total R. Only keep if it clears the incumbent.
-                if res["score"] > best_score + 0.01:
-                    attribution.append({"param": _pname, "from": best_params.get(_pname),
-                                        "to": cand.get(_pname),
-                                        "score_gain": round(res["score"] - best_score, 3)})
-                    best_score = res["score"]; best_params = cand; best_res = res
-                    improved = True
+        for _pname, cand in self._directed_candidates(best_params):
+            if budget <= 0:
+                break
+            if self._is_failed(symbol, cand):
+                continue
+            budget -= 1; tried += 1
+            res = self.backtest_fn(symbol, cand, cand.get("sl_atr", 1.0), cand.get("tp_rr", 2.0))
+            if not _candidate_viable(res):
+                continue
+            if cold_start:
+                best_score = res["score"]; best_params = cand; best_res = res
+                improved = True; cold_start = False
+                attribution.append({"param": _pname, "from": best_params.get(_pname),
+                                    "to": cand.get(_pname),
+                                    "score_gain": round(res["score"] - (-1.0), 3)})
+                logger.info(f"[OPTIMIZER] {symbol}: cold-start ACCEPTED min-PF {best_score:.2f} "
+                            f"via {_pname}")
+                continue
+            # robust objective: maximise the WORST-window PF (min across windows),
+            # tie-break on total R. Only keep if it clears the incumbent.
+            if res["score"] > best_score + 0.01:
+                attribution.append({"param": _pname, "from": best_params.get(_pname),
+                                    "to": cand.get(_pname),
+                                    "score_gain": round(res["score"] - best_score, 3)})
+                best_score = res["score"]; best_params = cand; best_res = res
+                improved = True
 
         # 3) PER-SESSION floor search: mutate session-specific magnitude overrides.
         # Disabled until the backtest can compute per-session sub-scores. Using the

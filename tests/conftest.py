@@ -26,14 +26,22 @@ def _copy_data_to_temp() -> Path:
     src = Path(config.DATA_DIR)
     tmp = Path(tempfile.mkdtemp(prefix="langchain_data_"))
     if src.exists():
-        for item in src.iterdir():
+        # Snapshot the listing first so a file the live bot atomically replaces
+        # (os.replace) during the copy does not abort the whole suite. A vanished
+        # entry is simply skipped; it is not part of the deterministic fixture.
+        entries = list(src.iterdir())
+        for item in entries:
             if item.name == "snapshots":
                 continue
             dst = tmp / item.name
-            if item.is_dir():
-                shutil.copytree(item, dst)
-            else:
-                shutil.copy2(item, dst)
+            try:
+                if item.is_dir():
+                    shutil.copytree(item, dst)
+                else:
+                    shutil.copy2(item, dst)
+            except FileNotFoundError:
+                # file/dir disappeared between listing and copy (live bot write)
+                continue
     else:
         tmp.mkdir(parents=True, exist_ok=True)
     return tmp

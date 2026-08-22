@@ -59,7 +59,27 @@ def test_daily_cycle_idempotent():
         shutil.rmtree(d, ignore_errors=True)
 
 
+def test_joint_optimise_restored_not_stub():
+    """#150: joint_optimise() must be a real evolutionary search, not a no-op stub.
+    Without a backtester/params fn it returns a clean 'no backtest/params fn' reason
+    (not the old 'dukascopy removed' stub)."""
+    d = tempfile.mkdtemp()
+    try:
+        dbp = os.path.join(d, "exp.db")
+        _make_db(dbp, [("BTCUSD", "win", 0.5, "tp", "X")] * 12)
+        from src.learning.continual_researcher import ContinualResearcher
+        r = ContinualResearcher(_DB(dbp), mql5_knowledge=_MQL5(), knowledge_store=None)
+        out = r.joint_optimise("BTCUSD")
+        # no backtester/params fn injected -> clean early return, NOT the old stub
+        assert out.get("improved") is False
+        assert "dukascopy" not in str(out.get("reason", "")).lower()
+        assert out.get("reason") == "no backtest/params fn"
+    finally:
+        shutil.rmtree(d, ignore_errors=True)
+
+
 if __name__ == "__main__":
     test_review_and_hypothesis()
     test_daily_cycle_idempotent()
+    test_joint_optimise_restored_not_stub()
     print("continual researcher tests passed")

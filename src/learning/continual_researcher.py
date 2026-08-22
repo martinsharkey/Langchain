@@ -730,12 +730,6 @@ class ContinualResearcher:
         return {"improved": bool(out and out.get("improved")),
                 "score": out.get("score") if out else None}
     def daily_cycle(self, symbols: list[str], force: bool = False) -> dict:
-        """Run the once-per-day ReAct research pass across symbols."""
-        return self._daily_cycle(symbols, force=force)
-
-    def daily_cycle_for_symbol(self, base_symbol: str, resolved: str = None) -> dict:
-        """Alias for single-symbol daily pass."""
-        return self._daily_cycle([base_symbol])
         """
         Run the once-per-day ReAct research pass across symbols. Returns a summary.
         Idempotent per 24-hour window unless force=True (time-delta, not midnight

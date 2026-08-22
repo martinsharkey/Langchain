@@ -167,12 +167,13 @@ class ConfigCheckpointer:
             return {"action": "checkpointed", "reason": "first baseline"}
 
         # STALENESS GUARD (fix: the best-known was trapping the bot on a lucky-window
-        # config). If the best-known config is now itself LOSING (negative recent
-        # expectancy), the stored 'best' was a favourable-period artifact — DEMOTE
-        # it so a new config can take over instead of reverting to a config that no
-        # longer works. Issue #130: demote preemptively regardless of whether we are
-        # currently on it.
-        if current_expectancy <= 0 and best["expectancy"] > 0:
+        # config). If we are CURRENTLY ON the best-known config and it is now itself
+        # LOSING (negative recent expectancy), the stored 'best' was a favourable-
+        # period artifact — DEMOTE it so a new config can take over instead of
+        # reverting to a config that no longer works. A DIFFERENT losing config still
+        # takes the normal "revert" path below (restore the still-profitable best).
+        on_best = _config_fingerprint(current_cfg) == best["fingerprint"]
+        if on_best and current_expectancy <= 0 and best["expectancy"] > 0:
             logger.warning(
                 f"[STALE-BEST] {symbol}: best-known (exp {best['expectancy']:.4f}) is now "
                 f"LOSING live (exp {current_expectancy:.4f}) — demoting the stale checkpoint "

@@ -20,12 +20,12 @@ class _Registry:
 
 
 class _Backtester:
-    """Returns a generalizing result only for (EMA_TrendFollow, trending)."""
+    """Returns a generalizing result only for (OsMA_Confluence, trending)."""
     def walkforward_focused(self, symbol, params, timeframe="M15", **kw):
         import src.learning.edge_weights as ew
         rules = ew.focused_rules(symbol) or []
         for name, regimes in rules:
-            if name == "EMA_TrendFollow" and "trending" in regimes:
+            if name == "OsMA_Confluence" and "trending" in regimes:
                 return {"pfs": [1.3, 1.25, 1.4], "wrs": [50, 48, 52],
                         "n_total": 120, "generalizes": True, "score": 1.25}
         return {"pfs": [0.8], "wrs": [30], "n_total": 40,
@@ -44,13 +44,13 @@ def test_sweep_writes_overlay_and_accessors_merge(monkeypatch=None):
         importlib.reload(ew)  # pick up temp DATA_DIR for overlay path
 
         from src.learning.edge_discovery import EdgeDiscovery
-        reg = _Registry(["EMA_TrendFollow", "RSI_Momentum"])
+        reg = _Registry(["OsMA_Confluence", "RSI_Momentum"])
         disc = EdgeDiscovery(reg, _Backtester(), min_pf=1.15)
         overlay = disc.sweep_all(["XYZUSD"], timeframe="M15", persist=True)
 
         # overlay captured the validated pocket
-        assert overlay["focused_edge"]["XYZUSD"] == [["EMA_TrendFollow", ["trending"]]], overlay
-        assert "EMA_TrendFollow" in overlay["edge_weights"]["XYZUSD"]
+        assert overlay["focused_edge"]["XYZUSD"] == [["OsMA_Confluence", ["trending"]]], overlay
+        assert "OsMA_Confluence" in overlay["edge_weights"]["XYZUSD"]
 
         # file written
         p = os.path.join(d, "edge_weights.json")
@@ -60,9 +60,9 @@ def test_sweep_writes_overlay_and_accessors_merge(monkeypatch=None):
 
         # accessors merge overlay over static seed
         ew.reload_overlay()
-        assert ew.focused_rules("XYZUSD-ECN") == [("EMA_TrendFollow", {"trending"})]
-        assert ew.edge_weight("XYZUSD", "EMA_TrendFollow") > 1.0
-        assert ew.regime_edge_weight("XYZUSD", "EMA_TrendFollow", "trending") >= 1.15
+        assert ew.focused_rules("XYZUSD-ECN") == [("OsMA_Confluence", {"trending"})]
+        assert ew.edge_weight("XYZUSD", "OsMA_Confluence") > 1.0
+        assert ew.regime_edge_weight("XYZUSD", "OsMA_Confluence", "trending") >= 1.15
 
         config.DATA_DIR = orig_dir
     finally:
