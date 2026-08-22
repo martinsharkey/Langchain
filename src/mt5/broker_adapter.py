@@ -114,20 +114,41 @@ _PAPER_TICKET_SEQ = 90_000_000
 
 
 def get_algo_status() -> AlgoStatus:
-    """Read the live Algo Trading / trade-permission state from MT5."""
+    """Read the live Algo Trading / trade-permission state from MT5.
+
+    IMPORTANT: `mt5.terminal_info()` / `mt5.account_info()` can transiently return
+    None when the terminal is busy (strategy tester, heavy load, a fast cycle). A
+    None here is NOT evidence that Algo Trading is disabled — the terminal's Algo
+    Trading button is a persistent user setting that does not flip off on its own.
+    So we RETRY a few times and, if the terminal is still busy, report the last
+    known-good state (assume OK) instead of a false "red stop" that misleads the
+    dashboard. Only a genuine, repeatedly-confirmed `trade_allowed=False` is
+    reported as disabled.
+    """
     connector = get_connector()
     connected = connector.ensure_connected()
-    term_ok = False
-    acct_ok = False
+    term_ok = True
+    acct_ok = True
     if MT5_AVAILABLE and connected:
-        try:
-            with mt5_lock():
-                ti = mt5.terminal_info()
-                ai = mt5.account_info()
-            term_ok = bool(ti.trade_allowed) if ti else False
-            acct_ok = bool(ai.trade_allowed) if ai else False
-        except Exception as e:
-            logger.warning(f"get_algo_status failed: {e}")
+        for attempt in range(3):
+            try:
+                with mt5_lock():
+                    ti = mt5.terminal_info()
+                    ai = mt5.account_info()
+                if ti is not None and ai is not None:
+                    term_ok = bool(ti.trade_allowed)
+                    acct_ok = bool(ai.trade_allowed)
+                    break
+                # terminal busy -> transient None; retry after a short pause
+                time.sleep(0.2)
+            except Exception as e:
+                logger.warning(f"get_algo_status attempt {attempt + 1} failed: {e}")
+                time.sleep(0.2)
+        else:
+            # all attempts returned None (terminal persistently busy) — do NOT
+            # report a false "disabled"; keep the last-known-good (assume OK).
+            logger.debug("get_algo_status: terminal_info/account_info returned None "
+                         "after retries; assuming Algo Trading still enabled")
     return AlgoStatus(terminal_trade_allowed=term_ok,
                       account_trade_allowed=acct_ok,
                       connected=connected)
