@@ -125,6 +125,8 @@ class ScalpEngine:
         self._closed_state_cache: dict[int, object] = {}
         self._variant_perf_cache = {}
         self._symbol_personality_cache = {}
+        # Learning stack initialisation order is documented in docs/LEARNING_DAG.md.
+        # Read that before reordering any of the blocks below.
         # proactive self-performance researcher (analyzes what's working)
         try:
             from src.learning.performance_researcher import PerformanceResearcher

@@ -47,6 +47,31 @@ SIGNALS_PATH = os.path.join(config.DATA_DIR, "cryptorti_signals.json")
 # Signal stages that indicate an active short opportunity
 ACTIVE_SHORT_STATUSES = ("active_short", "selling_confirmed")
 
+# Issue #143/#144: keys Danny should embed in the WebSocket payload so the bot
+# can compute confidence independently and diagnose the signal mechanism.
+EXPECTED_TAPE_KEYS = ("vpin", "delta", "cvd_ratio", "orderbook_imbalance")
+
+
+def _diagnose_signal(signal: dict) -> dict:
+    """Issue #144: surface whether a signal has the expected tape/confirmation
+    payload. Logs a clear diagnostic for Danny-blocked debugging."""
+    stage = signal.get("stage", "")
+    status = signal.get("signal_status", "")
+    wt = signal.get("whale_transfer") or {}
+    usd = wt.get("amount_usd", 0) or 0
+    tape = signal.get("tape") or {}
+    missing_tape = [k for k in EXPECTED_TAPE_KEYS if k not in tape]
+    has_confirmed = status == "selling_confirmed" or stage == "selling_confirmed"
+    return {
+        "signal_id": signal.get("signal_id"),
+        "stage": stage,
+        "status": status,
+        "amount_usd": usd,
+        "has_tape": bool(tape and not missing_tape),
+        "missing_tape_keys": missing_tape,
+        "is_selling_confirmed": has_confirmed,
+    }
+
 
 class SignalStore:
     """In-memory store of active signals, persisted to JSON for consumers."""
@@ -125,6 +150,20 @@ async def _listen(store: SignalStore):
                         except Exception:
                             continue
                         store.update(signal)
+                        diag = _diagnose_signal(signal)
+                        if not diag["is_selling_confirmed"]:
+                            logger.warning(
+                                f"[CRYPTORTI-DIAG] signal {diag['signal_id']}: "
+                                f"stage={diag['stage']} status={diag['status']} "
+                                f"(not selling_confirmed); tape_complete={diag['has_tape']} "
+                                f"missing_tape={diag['missing_tape_keys']}"
+                            )
+                        elif not diag["has_tape"]:
+                            logger.warning(
+                                f"[CRYPTORTI-DIAG] signal {diag['signal_id']}: "
+                                f"selling_confirmed BUT missing tape metrics "
+                                f"{diag['missing_tape_keys']} — issue #143"
+                            )
                         logger.info(f"CryptoRTI signal {signal.get('signal_id')}: "
                                     f"stage={signal.get('stage')} status={signal.get('signal_status')}")
                 except Exception as e:
@@ -171,19 +210,33 @@ def current_short_bias() -> Optional[dict]:
         status = s.get("signal_status", "")
         stage = s.get("stage", "")
         usd = (s.get("whale_transfer") or {}).get("amount_usd", 0) or 0
-        if (status in ACTIVE_SHORT_STATUSES or stage == "selling_confirmed") and usd >= 1_000_000:
-            tape = s.get("tape") or {}
-            vpin_pct = tape.get("vpin_percentile", 0) or 0
-            # confidence scaled by tape strength; capped modest (it's a bias)
-            conf = 0.45 + min(vpin_pct, 100) / 100 * 0.2  # 0.45–0.65
-            return {
-                "signal_id": s.get("signal_id"),
-                "action": "sell",
-                "confidence": round(conf, 3),
-                "amount_usd": usd,
-                "vpin_percentile": vpin_pct,
-                "reason": f"CryptoRTI whale short: ${usd:,.0f} deposit, VPIN pct {vpin_pct}",
-            }
+        # Issue #143/#144: prefer selling_confirmed when available; fall back to
+        # active_short only if tape metrics are present (otherwise the signal is
+        # unconfirmed and the confidence model cannot train reliably).
+        confirmed = status == "selling_confirmed" or stage == "selling_confirmed"
+        active_short = status == "active_short" or stage == "active_short"
+        tape = s.get("tape") or {}
+        tape_complete = all(k in tape for k in EXPECTED_TAPE_KEYS)
+        if usd < 1_000_000:
+            continue
+        if confirmed:
+            reason_kind = "selling_confirmed"
+        elif active_short and tape_complete:
+            reason_kind = "active_short + tape"
+        else:
+            continue
+        vpin_pct = tape.get("vpin_percentile", 0) or 0
+        # confidence scaled by tape strength; capped modest (it's a bias)
+        conf = 0.45 + min(vpin_pct, 100) / 100 * 0.2  # 0.45–0.65
+        return {
+            "signal_id": s.get("signal_id"),
+            "action": "sell",
+            "confidence": round(conf, 3),
+            "amount_usd": usd,
+            "vpin_percentile": vpin_pct,
+            "reason": f"CryptoRTI whale short ({reason_kind}): ${usd:,.0f} deposit, VPIN pct {vpin_pct}",
+            "confirmed": confirmed,
+        }
     return None
 
 

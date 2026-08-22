@@ -2,6 +2,12 @@
 
 > This file is the FIRST thing to read in a new chat. It tells you what this
 > project is, what we're building, what's broken, what's next, and the rules.
+> 
+> **Active core docs (keep current):** WORKSPACE_RULES.md, ARCHITECTURE.md,
+> ARCHITECTURE_OVERVIEW.md, TESTING.md, DEPLOY.md, CORE_RULES (src/core_rules.py),
+> README.md, QMMP_SPEC.md, GOLDSHARK_INSIGHTS.md.
+> 
+> **Historical docs:** moved to `review/` directory; read only for context.
 
 ## Workspace Rules
 

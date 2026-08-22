@@ -101,6 +101,10 @@ class EdgeDiscovery:
         """
         strategies = [s.name for s in self.registry.list_strategies()] \
             if hasattr(self.registry, "list_strategies") else list(self.registry._strategies.keys())
+        # R1: the sole entry signal is OsMA_Confluence. Never sweep/validate other
+        # strategies as entry pockets — a GoldenCross/BB/RSI pocket would violate the
+        # one-entry rule and drift the focused rules away from the proven signal.
+        strategies = [s for s in strategies if s == "OsMA_Confluence"]
         focused, edge_w, regime_e, detail = [], {}, {}, []
         for name in strategies:
             best_regimes = set()
