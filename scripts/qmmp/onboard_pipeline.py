@@ -29,6 +29,7 @@ import numpy as np, pandas as pd, polars as pl, bisect
 from numba import njit
 from src.strategies.indicators import (osma as osma_fn, bulls_power as bp, bears_power as bpw,
                                         atr as atr_fn, ema as ema_fn)
+from src.config import MT5_DATA_PATH
 
 FAST, SLOW, SIG = 12, 26, 9
 QDIR = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "data", "qmmp")
@@ -771,7 +772,8 @@ def _run_mt5_validation(symbol: str, tf: str, model: dict, R_backtest: pd.DataFr
     Generates .ini configs, launches metatester64.exe, and parses the HTML report."""
     _this_dir = os.path.dirname(os.path.abspath(__file__))
     _workspace = os.path.dirname(os.path.dirname(os.path.dirname(_this_dir)))
-    mt5_dir = os.path.join(_workspace, "MT5", "VT Markets (Pty) MT5 Terminal")
+    # Use MT5_DATA_PATH if set, otherwise fall back to hardcoded path
+    mt5_dir = MT5_DATA_PATH or os.path.join(_workspace, "MT5", "VT Markets (Pty) MT5 Terminal - DATA")
     tester_profiles = os.path.join(mt5_dir, "Bases", "Default", "MQL5", "Profiles", "Tester")
     os.makedirs(tester_profiles, exist_ok=True)
     ini_path = os.path.join(tester_profiles, f"GoldShark_{symbol}_validate.ini")

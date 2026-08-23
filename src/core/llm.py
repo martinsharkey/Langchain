@@ -24,6 +24,7 @@ Configure providers in .env file (at least one required):
     DEEPSEEK_API_KEY=...              (5M free tokens)
     AI21_API_KEY=...                  (trial credits)
     XAI_API_KEY=...                   (Grok, $25 signup credit)
+    IBM_ADVANTAGE_API_KEY=sk-...      (free tier via /v1 OpenAI-compatible endpoint)
 
 For standalone reuse in other projects:
     pip install git+https://github.com/martinsharkey/langchain.git

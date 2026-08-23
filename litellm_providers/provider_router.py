@@ -55,6 +55,7 @@ import random
 import logging
 from typing import Optional
 
+import requests
 from langchain_core.language_models import BaseChatModel
 from langchain_litellm import ChatLiteLLM
 
@@ -119,6 +120,92 @@ KILO_API_BASE = "https://api.kilo.ai/api/gateway/v1"
 
 # IBM Advantage Models base URL (OpenAI-compatible /v1 endpoint)
 IBM_ADVANTAGE_BASE_URL = "https://api.nextgen-beta.ica.ibm.com/ica/v1"
+IBM_CHAT_MODELS_URL = f"{IBM_ADVANTAGE_BASE_URL}/chat-models"
+
+# Cache for dynamically discovered IBM chat models
+_ibm_chat_models_cache: Optional[list[str]] = None
+_ibm_chat_models_cache_ts: float = 0.0
+_IBM_MODELS_CACHE_TTL = 300  # 5 minutes
+
+
+def _fetch_ibm_chat_models() -> list[str]:
+    """
+    Query the IBM ICA /chat-models endpoint and return available model IDs.
+    Falls back to an empty list if the endpoint is unreachable or unauthenticated.
+    """
+    global _ibm_chat_models_cache, _ibm_chat_models_cache_ts
+    now = time.time()
+    if _ibm_chat_models_cache is not None and (now - _ibm_chat_models_cache_ts) < _IBM_MODELS_CACHE_TTL:
+        return _ibm_chat_models_cache
+
+    api_key = os.getenv("IBM_ADVANTAGE_API_KEY", "")
+    if not api_key:
+        logger.debug("IBM_ADVANTAGE_API_KEY not set; skipping dynamic model discovery")
+        return []
+
+    headers = {"Authorization": f"Bearer {api_key}"}
+    try:
+        resp = requests.get(IBM_CHAT_MODELS_URL, headers=headers, timeout=10)
+        if resp.status_code == 200:
+            data = resp.json()
+            models = []
+            if isinstance(data, list):
+                for item in data:
+                    if isinstance(item, dict):
+                        mid = item.get("id") or item.get("model_id") or item.get("name")
+                        if mid:
+                            models.append(str(mid))
+                    elif isinstance(item, str):
+                        models.append(item)
+            elif isinstance(data, dict):
+                for key in ("data", "models", "chat_models"):
+                    if key in data and isinstance(data[key], list):
+                        for item in data[key]:
+                            if isinstance(item, dict):
+                                mid = item.get("id") or item.get("model_id") or item.get("name")
+                                if mid:
+                                    models.append(str(mid))
+                            elif isinstance(item, str):
+                                models.append(item)
+                        break
+            models = [m for m in models if m]
+            _ibm_chat_models_cache = models
+            _ibm_chat_models_cache_ts = now
+            logger.info(f"Discovered {len(models)} IBM chat models via /chat-models")
+            return models
+        else:
+            logger.debug(f"IBM /chat-models returned {resp.status_code}")
+    except Exception as exc:
+        logger.debug(f"IBM /chat-models discovery failed: {exc}")
+    return []
+
+
+# Static fallback IBM models (used when discovery is unavailable)
+_IBM_FALLBACK_MODELS = [
+    "ibm/granite-4-h-small",
+    "ibm/meta-llama/llama-4-maverick-17b-128e-instruct-fp8",
+    "ibm/meta-llama/llama-3-3-70b-instruct",
+    "ibm/granite-3-3-8b-instruct",
+]
+
+
+def _get_ibm_provider_entries() -> list[tuple]:
+    """
+    Build IBM provider entries. Prefer dynamically discovered models;
+    fall back to the static list when discovery is unavailable.
+    """
+    discovered = _fetch_ibm_chat_models()
+    if discovered:
+        return [(m, "IBM_ADVANTAGE_API_KEY", 3, True, IBM_ADVANTAGE_BASE_URL) for m in discovered]
+    return [(m, "IBM_ADVANTAGE_API_KEY", 3, True, IBM_ADVANTAGE_BASE_URL) for m in _IBM_FALLBACK_MODELS]
+
+
+def _refresh_ibm_models():
+    """Force refresh of the IBM model cache."""
+    global _ibm_chat_models_cache, _ibm_chat_models_cache_ts
+    _ibm_chat_models_cache = None
+    _ibm_chat_models_cache_ts = 0.0
+
 
 PROVIDERS = [
     # ═══ Tier 0: Primary paid/provisioned API keys (fastest, most reliable) ═══
@@ -144,12 +231,12 @@ PROVIDERS = [
     ("gemini/gemini-1.5-pro", "GEMINI_API_KEY", 3, True, None),
 
     # ═══ Tier 3b: IBM Advantage Models (free tier, OpenAI-compatible /v1 endpoint) ═══
-    # All 4 models use the same IBM_ADVANTAGE_API_KEY + IBM_ADVANTAGE_BASE_URL.
-    # Model names use ibm/ prefix so they're clearly identifiable in logs and the router.
-    ("ibm/claude-haiku-4-5", "IBM_ADVANTAGE_API_KEY", 3, True, IBM_ADVANTAGE_BASE_URL),
-    ("ibm/meta-llama/llama-4-maverick-17b-128e-instruct-fp8", "IBM_ADVANTAGE_API_KEY", 3, True, IBM_ADVANTAGE_BASE_URL),
-    ("ibm/gemma-4-26b-a4b-it", "IBM_ADVANTAGE_API_KEY", 3, True, IBM_ADVANTAGE_BASE_URL),
+    # Static fallback list. Dynamically discovered models from /chat-models are
+    # appended at runtime in _get_available_providers() when IBM_ADVANTAGE_API_KEY is set.
     ("ibm/granite-4-h-small", "IBM_ADVANTAGE_API_KEY", 3, True, IBM_ADVANTAGE_BASE_URL),
+    ("ibm/meta-llama/llama-4-maverick-17b-128e-instruct-fp8", "IBM_ADVANTAGE_API_KEY", 3, True, IBM_ADVANTAGE_BASE_URL),
+    ("ibm/meta-llama/llama-3-3-70b-instruct", "IBM_ADVANTAGE_API_KEY", 3, True, IBM_ADVANTAGE_BASE_URL),
+    ("ibm/granite-3-3-8b-instruct", "IBM_ADVANTAGE_API_KEY", 3, True, IBM_ADVANTAGE_BASE_URL),
 
     # ═══ Tier 4: Good free tiers (no credit card) ═══
     ("openrouter/meta-llama/llama-3.3-70b-instruct:free", "OPENROUTER_API_KEY", 4, True, None),
@@ -217,6 +304,15 @@ def _get_available_providers() -> list[tuple]:
                 # Key-free providers use a dummy API key to satisfy the
                 # OpenAI Python client. The gateway ignores the dummy key.
                 available.append((model, env_var, weight, DUMMY_API_KEY, api_base))
+
+    # Dynamically append discovered IBM models (deduplicated, same tier/weight)
+    api_key = os.getenv("IBM_ADVANTAGE_API_KEY", "")
+    if api_key:
+        discovered = _fetch_ibm_chat_models()
+        existing_models = {e[0] for e in available}
+        for model in discovered:
+            if model not in existing_models:
+                available.append((model, "IBM_ADVANTAGE_API_KEY", 3, True, IBM_ADVANTAGE_BASE_URL))
 
     if not available:
         logger.warning(

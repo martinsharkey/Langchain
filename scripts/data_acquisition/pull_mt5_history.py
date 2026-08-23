@@ -75,15 +75,17 @@ def connect_mt5():
         pass
 
     # Initialize with the same parameters the connector uses
-    from src.config import MT5_ACCOUNT, MT5_PASSWORD, MT5_SERVER, MT5_PATH
+    from src.config import MT5_ACCOUNT, MT5_PASSWORD, MT5_SERVER, MT5_PATH, MT5_DATA_PATH
     init_kwargs = {
         "login": MT5_ACCOUNT if MT5_ACCOUNT > 0 else None,
         "password": MT5_PASSWORD if MT5_PASSWORD else None,
         "server": MT5_SERVER if MT5_SERVER else None,
     }
-    if MT5_PATH:
+    # Use MT5_DATA_PATH for data acquisition terminal, fall back to MT5_PATH
+    mt5_terminal_path = MT5_DATA_PATH or MT5_PATH
+    if mt5_terminal_path:
         # Resolve to terminal64.exe if a directory was given
-        mt5_path = MT5_PATH
+        mt5_path = mt5_terminal_path
         if not mt5_path.lower().endswith("terminal64.exe"):
             candidate = os.path.join(mt5_path, "terminal64.exe")
             if os.path.isfile(candidate):

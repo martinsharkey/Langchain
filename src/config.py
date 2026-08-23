@@ -81,6 +81,7 @@ except (ValueError, TypeError):
 MT5_PASSWORD = os.getenv("MT5_PASSWORD", "")
 MT5_SERVER = os.getenv("MT5_SERVER", "")
 MT5_PATH = os.getenv("MT5_PATH", "")
+MT5_DATA_PATH = os.getenv("MT5_DATA_PATH", "")  # Separate data-acquisition terminal clone
 
 # ─── Trading Parameters ─────────────────────────────────────
 SYMBOL = "XAUUSD"         # Base/primary symbol (broker suffix resolved at runtime)
