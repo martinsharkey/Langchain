@@ -386,11 +386,19 @@ _result = _init_result
         logger.warning("Could not connect via Docker bridge")
         return False
     
-    def _connect_native(self, retries: int, delay: int) -> bool:
-        """Connect using native MetaTrader5 package (Windows only)."""
-        if self._connected:
+    def _connect_native(self, retries: int, delay: int, force: bool = False) -> bool:
+        """Connect using native MetaTrader5 package (Windows only).
+
+        `force=True` performs a full shutdown()+initialize() cycle. This is
+        required when the connection has gone STALE (e.g. the terminal was
+        saturated by Strategy Tester agents and terminal_info() returns None):
+        a bare mt5.initialize() returns True immediately because the module is
+        already initialized, but the underlying connection is broken, so we must
+        tear it down and re-attach.
+        """
+        if self._connected and not force:
             return True
-        
+
         # Resolve MT5_PATH to a terminal executable if the user supplied a
         # directory. Passing the full terminal64.exe path makes MT5 attach to
         # that specific terminal even when multiple instances are installed.
@@ -399,10 +407,17 @@ _result = _init_result
             candidate = os.path.join(mt5_path, "terminal64.exe")
             if os.path.isfile(candidate):
                 mt5_path = candidate
-        
+
+        if force:
+            try:
+                mt5.shutdown()
+            except Exception:
+                pass
+            self._connected = False
+
         for attempt in range(1, retries + 1):
             logger.info(f"Connecting to MT5 natively (attempt {attempt}/{retries})...")
-            
+
             init_kwargs = {
                 "login": MT5_ACCOUNT if MT5_ACCOUNT > 0 else None,
                 "password": MT5_PASSWORD if MT5_PASSWORD else None,
@@ -410,21 +425,21 @@ _result = _init_result
             }
             if mt5_path:
                 init_kwargs["path"] = mt5_path
-            
+
             initialized = mt5.initialize(**init_kwargs)
-            
+
             if initialized:
                 self._connected = True
                 self._account_info = self._get_account_info()
                 logger.info(f"Connected to MT5 successfully")
                 return True
-            
+
             error = mt5.last_error() if hasattr(mt5, 'last_error') else "Unknown"
             logger.warning(f"MT5 connection failed: {error}")
-            
+
             if attempt < retries:
                 time.sleep(delay)
-        
+
         logger.warning("Could not connect to MT5")
         return False
     
@@ -469,16 +484,29 @@ _result = _init_result
                 return False
 
         return self._connected
+
+    def _is_stale(self) -> bool:
+        """True when the connection is marked connected but the terminal is
+        actually unresponsive (terminal_info() returns None repeatedly). This is
+        the signature of a saturated/broken terminal that needs a full reconnect,
+        not a bare initialize()."""
+        if not (MT5_AVAILABLE and self._connected):
+            return False
+        try:
+            ti = mt5.terminal_info()
+            return ti is None
+        except Exception:
+            return True
     
     def ensure_connected(self) -> bool:
         """Ensure MT5 is connected; reconnect if the connection dropped with
         exponential backoff (issue #147)."""
-        if self.is_connected():
+        if self.is_connected() and not self._is_stale():
             return True
 
         with self._reconnect_lock:
             now = time.time()
-            if self.is_connected():
+            if self.is_connected() and not self._is_stale():
                 return True
             # exponential backoff: wait at least the current backoff seconds
             elapsed = now - self._last_reconnect_attempt
@@ -486,10 +514,15 @@ _result = _init_result
                 return False
             self._last_reconnect_attempt = now
             self._reconnect_backoff = min(self._reconnect_backoff * 2.0, 60.0)
-            logger.warning(f"MT5 connection lost — reconnecting in {self._reconnect_backoff}s (backoff)...")
+            # If the connection is marked connected but the terminal is actually
+            # unresponsive (terminal_info() -> None), a bare initialize() will NOT
+            # fix it — we must force a full shutdown()+initialize() cycle.
+            force = self._is_stale()
+            logger.warning(f"MT5 connection lost — reconnecting in {self._reconnect_backoff}s "
+                           f"(backoff, force={force})...")
             self._connected = False
             try:
-                if self._connect_native(retries=3, delay=2):
+                if self._connect_native(retries=3, delay=2, force=force):
                     logger.info("MT5 reconnect successful")
                     self._reconnect_backoff = 2.0  # reset on success
                     return True

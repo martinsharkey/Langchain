@@ -130,7 +130,6 @@ PROVIDERS = [
     # Uses openai/ prefix with custom api_base for LiteLLM compatibility.
     ("openai/kilo-auto/free", "USE_KILO_GATEWAY", 1, False, KILO_API_BASE),
     ("openai/nvidia/nemotron-3-super-120b-a12b:free", "USE_KILO_GATEWAY", 1, False, KILO_API_BASE),
-    ("openai/inclusionai/ling-3.0-flash:free", "USE_KILO_GATEWAY", 1, False, KILO_API_BASE),
     ("openai/poolside/laguna-s-2.1:free", "USE_KILO_GATEWAY", 1, False, KILO_API_BASE),
     ("openai/nvidia/nemotron-3-ultra-550b-a55b:free", "USE_KILO_GATEWAY", 1, False, KILO_API_BASE),
     ("openai/openrouter/free", "USE_KILO_GATEWAY", 1, False, KILO_API_BASE),
