@@ -74,7 +74,32 @@ def get_symbol_status(symbol: str) -> dict:
                             "total_trades": session_data.get("trades", 0),
                             "sl_multiplier": session_data.get("sl_mult", 0.0),
                             "tp_ratio": session_data.get("tp_ratio", 0.0),
+                            "alternative_timeframes": []
                         }
+                
+                # Add all alternative timeframes for each session
+                if "all_timeframes_per_session" in vbt_data:
+                    for session_name, tf_results in vbt_data["all_timeframes_per_session"].items():
+                        if session_name in sessions:
+                            # Filter out the selected timeframe and add alternatives
+                            selected_tf = sessions[session_name]["timeframe"]
+                            alternatives = []
+                            for tf_result in tf_results:
+                                if tf_result.get("timeframe") != selected_tf:
+                                    alternatives.append({
+                                        "timeframe": tf_result.get("timeframe", "M15"),
+                                        "best_strategy": tf_result.get("primary_ind", "Unknown"),
+                                        "secondary_filter": tf_result.get("secondary_ind", "none"),
+                                        "profit_factor": tf_result.get("pf", 0.0),
+                                        "win_rate": tf_result.get("wr", 0.0),
+                                        "sharpe_ratio": tf_result.get("sharpe", 0.0),
+                                        "total_trades": tf_result.get("trades", 0),
+                                    })
+                            sessions[session_name]["alternative_timeframes"] = sorted(
+                                alternatives, 
+                                key=lambda x: x["profit_factor"], 
+                                reverse=True
+                            )
                 
                 # Also extract floors per session
                 if "floors" in vbt_data:

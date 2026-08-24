@@ -332,54 +332,82 @@ export default function SymbolOnboarding() {
                               {Object.entries(sym.sessions).map(([sessionName, session]) => {
                                 const isEnabled = (sessionPreferences[sym.symbol] || Object.keys(sym.sessions)).includes(sessionName)
                                 return (
-                                  <div
-                                    key={sessionName}
-                                    className={`bg-slate-600/30 p-3 rounded border-2 transition-colors cursor-pointer ${
-                                      isEnabled ? 'border-blue-500/50' : 'border-slate-600/50'
-                                    }`}
-                                    onClick={() => handleToggleSession(sym.symbol, sessionName)}
-                                  >
-                                    <div className="flex items-start justify-between mb-2">
-                                      <div className="flex items-center gap-2 flex-1">
-                                        <input
-                                          type="checkbox"
-                                          checked={isEnabled}
-                                          onChange={() => handleToggleSession(sym.symbol, sessionName)}
-                                          onClick={(e) => e.stopPropagation()}
-                                          className="w-4 h-4 rounded accent-blue-500 cursor-pointer"
-                                        />
-                                        <p className={`font-semibold ${isEnabled ? 'text-slate-100' : 'text-slate-400'}`}>
-                                          {sessionName}
-                                        </p>
+                                   <div
+                                     key={sessionName}
+                                     className={`bg-slate-600/30 p-3 rounded border-2 transition-colors cursor-pointer ${
+                                       isEnabled ? 'border-blue-500/50' : 'border-slate-600/50'
+                                     }`}
+                                     onClick={() => handleToggleSession(sym.symbol, sessionName)}
+                                   >
+                                     <div className="flex items-start justify-between mb-2">
+                                       <div className="flex items-center gap-2 flex-1">
+                                         <input
+                                           type="checkbox"
+                                           checked={isEnabled}
+                                           onChange={() => handleToggleSession(sym.symbol, sessionName)}
+                                           onClick={(e) => e.stopPropagation()}
+                                           className="w-4 h-4 rounded accent-blue-500 cursor-pointer"
+                                         />
+                                         <div>
+                                           <p className={`font-semibold ${isEnabled ? 'text-slate-100' : 'text-slate-400'}`}>
+                                             {sessionName}
+                                           </p>
+                                           <p className="text-xs text-slate-400">🕐 {session.timeframe}</p>
+                                         </div>
+                                       </div>
+                                       <span className={`text-xs px-2 py-1 rounded ${
+                                         session.profit_factor >= 1.5 ? 'bg-green-500/20 text-green-400' :
+                                         session.profit_factor >= 1.0 ? 'bg-blue-500/20 text-blue-400' :
+                                         'bg-yellow-500/20 text-yellow-400'
+                                       }`}>
+                                         PF {session.profit_factor.toFixed(2)}
+                                       </span>
+                                     </div>
+                                     <div className="grid grid-cols-3 gap-2 text-xs">
+                                       <div>
+                                         <p className="text-slate-500">Strategy</p>
+                                         <p className="text-slate-300">{session.best_strategy}</p>
+                                       </div>
+                                       <div>
+                                         <p className="text-slate-500">WR / Sharpe</p>
+                                         <p className="text-slate-300">{(session.win_rate * 100).toFixed(0)}% / {session.sharpe_ratio.toFixed(1)}</p>
+                                       </div>
+                                       <div>
+                                         <p className="text-slate-500">SL/TP / Trades</p>
+                                       <p className="text-slate-300">{session.sl_multiplier}x/{session.tp_ratio.toFixed(1)} • {session.total_trades}</p>
+                                     </div>
+                                   </div>
+                                   {session.floor_config && (
+                                     <div className="mt-2 pt-2 border-t border-slate-600">
+                                       <p className="text-xs text-slate-500">Floor Config: {session.floor_config.strategy} • SL={session.floor_config.sl} TP={session.floor_config.tp}</p>
+                                     </div>
+                                    )}
+                                    {session.alternative_timeframes && session.alternative_timeframes.length > 0 && (
+                                      <div className="mt-2 pt-2 border-t border-slate-600">
+                                        <p className="text-xs text-slate-500 mb-1">📊 Alternative Timeframes:</p>
+                                        <div className="space-y-1">
+                                          {session.alternative_timeframes.map((alt, idx) => (
+                                            <div key={idx} className="flex items-center justify-between text-xs bg-slate-700/30 p-1.5 rounded">
+                                              <div className="flex items-center gap-2">
+                                                <span className="text-slate-400 font-mono">{alt.timeframe}</span>
+                                                <span className="text-slate-500">{alt.best_strategy}</span>
+                                              </div>
+                                              <div className="flex items-center gap-2">
+                                                <span className={`px-1.5 rounded ${
+                                                  alt.profit_factor >= 1.5 ? 'bg-green-500/20 text-green-400' :
+                                                  alt.profit_factor >= 1.0 ? 'bg-blue-500/20 text-blue-400' :
+                                                  'bg-yellow-500/20 text-yellow-400'
+                                                }`}>
+                                                  {alt.profit_factor.toFixed(2)}
+                                                </span>
+                                                <span className="text-slate-500">{(alt.win_rate * 100).toFixed(0)}%</span>
+                                              </div>
+                                            </div>
+                                          ))}
+                                        </div>
                                       </div>
-                                      <span className={`text-xs px-2 py-1 rounded ${
-                                        session.profit_factor >= 1.5 ? 'bg-green-500/20 text-green-400' :
-                                        session.profit_factor >= 1.0 ? 'bg-blue-500/20 text-blue-400' :
-                                        'bg-yellow-500/20 text-yellow-400'
-                                      }`}>
-                                        PF {session.profit_factor.toFixed(2)}
-                                      </span>
-                                    </div>
-                                    <div className="grid grid-cols-3 gap-2 text-xs">
-                                      <div>
-                                        <p className="text-slate-500">Strategy</p>
-                                        <p className="text-slate-300">{session.best_strategy}</p>
-                                      </div>
-                                      <div>
-                                        <p className="text-slate-500">WR / Sharpe</p>
-                                        <p className="text-slate-300">{(session.win_rate * 100).toFixed(0)}% / {session.sharpe_ratio.toFixed(1)}</p>
-                                      </div>
-                                      <div>
-                                        <p className="text-slate-500">SL/TP / Trades</p>
-                                      <p className="text-slate-300">{session.sl_multiplier}x/{session.tp_ratio.toFixed(1)} • {session.total_trades}</p>
-                                    </div>
-                                  </div>
-                                  {session.floor_config && (
-                                    <div className="mt-2 pt-2 border-t border-slate-600">
-                                      <p className="text-xs text-slate-500">Floor Config: {session.floor_config.strategy} • SL={session.floor_config.sl} TP={session.floor_config.tp}</p>
-                                    </div>
-                                   )}
-                                </div>
+                                    )}
+                                 </div>
                               )
                             })}
                             </div>

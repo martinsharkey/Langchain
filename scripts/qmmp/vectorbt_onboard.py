@@ -507,12 +507,26 @@ Generated: {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}
         
         # Save JSON results
         results_file = self.symbol_dir / f"{self.symbol}_vectorbt_results.json"
+        
+        # Prepare all_timeframes_per_session: for each session, show all tested timeframes
+        all_timeframes_per_session = {}
+        for session in self.sessions:
+            all_timeframes_per_session[session] = []
+        
+        # Collect all results per session+timeframe
+        for tf_key, strategies_by_session in self.results.items():
+            for session, strategy_list in strategies_by_session.items():
+                if strategy_list:
+                    best_for_tf = max(strategy_list, key=lambda x: x['pf'])
+                    all_timeframes_per_session[session].append(best_for_tf)
+        
         with open(results_file, 'w') as f:
             json.dump({
                 'symbol': self.symbol,
                 'timestamp': datetime.now(timezone.utc).isoformat(),
                 'validated_strategies': validated,
-                'floors': floors
+                'floors': floors,
+                'all_timeframes_per_session': all_timeframes_per_session
             }, f, indent=2)
         
         print(f"  [RESULTS] {results_file.name}")

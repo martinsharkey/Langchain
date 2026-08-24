@@ -105,6 +105,7 @@ export interface SymbolStatus {
 
 export interface SessionResult {
   session: string
+  timeframe?: string
   best_strategy: string
   secondary_filter: string
   profit_factor: number
@@ -119,6 +120,15 @@ export interface SessionResult {
     sl: number
     tp: number
   }
+  alternative_timeframes?: Array<{
+    timeframe: string
+    best_strategy: string
+    secondary_filter: string
+    profit_factor: number
+    win_rate: number
+    sharpe_ratio: number
+    total_trades: number
+  }>
 }
 
 export interface OnboardingTask {
