@@ -887,6 +887,14 @@ def index():
         return f.read()
 
 
+@app.route("/v2")
+def dashboard_v2():
+    """New dashboard v2 - strategy analytics and optimization tracking."""
+    tpl = os.path.join(os.path.dirname(__file__), "templates", "dashboard_v2.html")
+    with open(tpl, encoding="utf-8") as f:
+        return f.read()
+
+
 @app.after_request
 def _no_cache(resp):
     """Prevent the browser from serving a stale cached dashboard/endpoints."""
@@ -894,3 +902,26 @@ def _no_cache(resp):
     resp.headers["Pragma"] = "no-cache"
     resp.headers["Expires"] = "0"
     return resp
+
+
+# ── Dashboard API v2 ──
+# Initialize and register analytics API endpoints
+try:
+    from src.dashboard.api_v2 import initialize as init_api_v2
+    from src.dashboard.routes_v2 import register_routes as register_v2_routes
+    
+    # Initialize with paths
+    init_api_v2(EXPERIENCE_DB, DATA_DIR)
+    register_v2_routes(app)
+    logger.info("Dashboard API v2 initialized")
+except Exception as e:
+    logger.warning(f"Dashboard API v2 initialization failed: {e}")
+
+# ── Symbol Management API ──
+# Register symbol onboarding endpoints
+try:
+    from dashboard.api_symbols import register_symbol_routes
+    register_symbol_routes(app)
+    logger.info("Symbol management API initialized")
+except Exception as e:
+    logger.warning(f"Symbol management API initialization failed: {e}")

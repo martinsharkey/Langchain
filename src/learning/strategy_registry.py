@@ -625,6 +625,28 @@ class StrategyRegistry:
             _register_osma(self)
         except Exception as _e:  # pragma: no cover - defensive
             logger.warning(f"OsMA_Confluence default registration skipped: {_e}")
+        
+        # (1d) Register Bollinger_OsMA (fixed divergence logic for mean-reversion)
+        # Used in FOCUSED_EDGE for BTCUSD, GER40, and as primary on XAUUSD
+        try:
+            from src.strategies.bollinger_osma import register as _register_bollinger
+            _register_bollinger(self)
+        except Exception as _e:  # pragma: no cover - defensive
+            logger.warning(f"Bollinger_OsMA default registration skipped: {_e}")
+        
+        # (1e) Register OsMA_RegimeAdaptive (NEW: consolidation detection + higher TP)
+        try:
+            from src.strategies.osma_regime_adaptive import register as _register_regime
+            _register_regime(self)
+        except Exception as _e:  # pragma: no cover - defensive
+            logger.warning(f"OsMA_RegimeAdaptive default registration skipped: {_e}")
+        
+        # (1f) Register RangeBreakout (PROFITABLE: PF 2.75, WR 85.4%)
+        try:
+            from src.strategies.range_breakout import register as _register_range
+            _register_range(self)
+        except Exception as _e:  # pragma: no cover - defensive
+            logger.warning(f"RangeBreakout default registration skipped: {_e}")
     
     def register(self, strategy: StrategyDefinition):
         """Register a new strategy."""

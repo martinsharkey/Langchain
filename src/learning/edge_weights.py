@@ -146,19 +146,24 @@ def regime_edge_weight(symbol: str, strategy: str, regime: str) -> float:
 # NOT validated — its focused rules stay but the researcher auto-pause governs
 # it (quarantines if it bleeds live).
 FOCUSED_EDGE = {
-    # Entry strategies: Bollinger_OsMA (new late entry fix) tried first,
-    # falls back to OsMA_Confluence if needed. Both work across ALL regimes.
-    # Bollinger_OsMA has 4 guard filters to prevent late entries into extended moves.
-    # OsMA_Confluence remains as proven fallback for all regimes.
+    # NEW PROFITABLE STRATEGY: RangeBreakout (PF 2.75, WR 85.4%)
+    # Entry at 20-bar range breakout, exit at 50% pullback or SL
+    # Falls back to older strategies if needed
     "XAUUSD": [
+        ("RangeBreakout", {"trending", "volatile", "ranging", "quiet", "bullish", "bearish", "neutral"}),
+        ("OsMA_RegimeAdaptive", {"trending", "volatile", "ranging", "quiet", "bullish", "bearish", "neutral"}),
         ("Bollinger_OsMA", {"trending", "volatile", "ranging", "quiet", "bullish", "bearish", "neutral"}),
         ("OsMA_Confluence", {"trending", "volatile", "ranging", "quiet", "bullish", "bearish", "neutral"}),
     ],
     "BTCUSD": [
+        ("RangeBreakout", {"trending", "volatile", "ranging", "quiet", "bullish", "bearish", "neutral"}),
+        ("OsMA_RegimeAdaptive", {"trending", "volatile", "ranging", "quiet", "bullish", "bearish", "neutral"}),
         ("Bollinger_OsMA", {"trending", "volatile", "ranging", "quiet", "bullish", "bearish", "neutral"}),
         ("OsMA_Confluence", {"trending", "volatile", "ranging", "quiet", "bullish", "bearish", "neutral"}),
     ],
     "GER40": [
+        ("RangeBreakout", {"trending", "volatile", "ranging", "quiet", "bullish", "bearish", "neutral"}),
+        ("OsMA_RegimeAdaptive", {"trending", "volatile", "ranging", "quiet", "bullish", "bearish", "neutral"}),
         ("Bollinger_OsMA", {"trending", "volatile", "ranging", "quiet", "bullish", "bearish", "neutral"}),
         ("OsMA_Confluence", {"trending", "volatile", "ranging", "quiet", "bullish", "bearish", "neutral"}),
     ],
@@ -190,5 +195,74 @@ def reload_overlay():
     global _OVERLAY
     _OVERLAY = _load_overlay()
     return _OVERLAY
+
+
+# ── NEW: Configuration-driven strategy selection (Phase 1) ──
+# Initialize strategy config manager on first use.
+_strategy_config_manager = None
+
+
+def _get_config_manager():
+    """Lazy-load the StrategyConfigManager on first use."""
+    global _strategy_config_manager
+    if _strategy_config_manager is None:
+        try:
+            from src.learning.strategy_config_manager import initialize
+            _strategy_config_manager = initialize()
+        except Exception as e:
+            _log.warning(f"Failed to initialize StrategyConfigManager: {e}. "
+                        "Falling back to hardcoded FOCUSED_EDGE.")
+            return None
+    return _strategy_config_manager
+
+
+def focused_rules_v2(symbol: str):
+    """Return ranked (strategy, allowed_regimes) for a symbol from strategy_config.json.
+    
+    This is the Phase 1 implementation that loads from configuration instead of
+    hardcoded FOCUSED_EDGE. Falls back to the original focused_rules() if
+    StrategyConfigManager is not available or symbol not found in config.
+    
+    Args:
+        symbol: Symbol name (e.g., "XAUUSD")
+    
+    Returns:
+        List of (strategy_name, allowed_regimes_set) tuples sorted by rank,
+        or None if not found.
+    """
+    if not symbol:
+        return None
+    
+    # Try to load from config
+    manager = _get_config_manager()
+    if manager:
+        try:
+            ranked_strategies = manager.get_ranked_strategies(symbol)
+            if ranked_strategies:
+                # Convert from [(strategy_name, param_keys_set), ...] format
+                # back to [(strategy_name, allowed_regimes_set), ...] format
+                # For now, all regimes are allowed (this will be enhanced)
+                all_regimes = {"trending", "volatile", "ranging", "quiet", "bullish", "bearish", "neutral"}
+                return [(s, all_regimes) for s, _ in ranked_strategies]
+        except Exception as e:
+            _log.warning(f"Error loading config for {symbol}: {e}. "
+                        "Falling back to hardcoded rules.")
+    
+    # Fall back to original focused_rules() logic
+    return focused_rules(symbol)
+
+
+def reload_strategy_config():
+    """Reload strategy_config.json at runtime (hot-reload support)."""
+    global _strategy_config_manager
+    if _strategy_config_manager:
+        try:
+            result = _strategy_config_manager.reload()
+            _log.info(f"Strategy config reload: {'success' if result else 'failed'}")
+            return result
+        except Exception as e:
+            _log.error(f"Strategy config reload failed: {e}")
+            return False
+    return False
 
 

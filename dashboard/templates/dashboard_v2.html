@@ -1,0 +1,1115 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Trading Dashboard v2 - Strategy Analytics</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/axios@1.4.0/dist/axios.min.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        :root {
+            --bg-primary: #0f172a;
+            --bg-secondary: #1e293b;
+            --bg-tertiary: #334155;
+            --border-color: #475569;
+            --text-primary: #ffffff;
+            --text-secondary: #cbd5e1;
+            --text-muted: #94a3b8;
+            --color-blue: #3b82f6;
+            --color-green: #10b981;
+            --color-red: #ef4444;
+            --color-yellow: #f59e0b;
+            --color-purple: #a855f7;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            background-color: var(--bg-primary);
+            color: var(--text-primary);
+            line-height: 1.6;
+        }
+
+        /* Header */
+        header {
+            background-color: var(--bg-secondary);
+            border-bottom: 1px solid var(--border-color);
+            padding: 1.5rem;
+            margin-bottom: 2rem;
+            position: sticky;
+            top: 0;
+            z-index: 50;
+        }
+
+        .header-content {
+            max-width: 1400px;
+            margin: 0 auto;
+        }
+
+        .header-top {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 1.5rem;
+        }
+
+        h1 {
+            font-size: 1.875rem;
+            font-weight: 700;
+        }
+
+        .header-subtitle {
+            font-size: 0.875rem;
+            color: var(--text-muted);
+            margin-top: 0.25rem;
+        }
+
+        .summary-cards {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 1rem;
+        }
+
+        .summary-card {
+            background-color: var(--bg-tertiary);
+            border: 1px solid var(--border-color);
+            border-radius: 0.5rem;
+            padding: 1rem;
+            text-align: center;
+        }
+
+        .summary-value {
+            font-size: 1.5rem;
+            font-weight: 700;
+            margin-bottom: 0.5rem;
+        }
+
+        .summary-label {
+            font-size: 0.75rem;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+
+        /* Navigation Tabs */
+        nav {
+            border-bottom: 1px solid var(--border-color);
+            background-color: rgba(30, 41, 59, 0.5);
+            position: sticky;
+            top: 8rem;
+            z-index: 40;
+        }
+
+        .nav-container {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 0 1.5rem;
+            display: flex;
+            gap: 2rem;
+        }
+
+        .nav-tab {
+            padding: 1rem 0;
+            border-bottom: 2px solid transparent;
+            color: var(--text-muted);
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            font-size: 0.95rem;
+        }
+
+        .nav-tab:hover {
+            color: var(--text-primary);
+        }
+
+        .nav-tab.active {
+            border-bottom-color: var(--color-blue);
+            color: var(--color-blue);
+        }
+
+        /* Main Content */
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 0 1.5rem 2rem;
+        }
+
+        .page {
+            display: none;
+        }
+
+        .page.active {
+            display: block;
+        }
+
+        /* Strategy Dashboard */
+        .dashboard-grid {
+            display: grid;
+            grid-template-columns: 2fr 1fr;
+            gap: 2rem;
+            margin-bottom: 2rem;
+        }
+
+        .card {
+            background-color: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: 0.5rem;
+            overflow: hidden;
+        }
+
+        .card-header {
+            background-color: var(--bg-tertiary);
+            padding: 1rem 1.5rem;
+            border-bottom: 1px solid var(--border-color);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .card-header h2 {
+            font-size: 1.125rem;
+            font-weight: 600;
+        }
+
+        .card-body {
+            padding: 1.5rem;
+        }
+
+        .filters {
+            display: flex;
+            gap: 0.75rem;
+            margin-bottom: 1rem;
+        }
+
+        .filter-btn {
+            padding: 0.5rem 1rem;
+            border: 1px solid var(--border-color);
+            background-color: var(--bg-tertiary);
+            color: var(--text-secondary);
+            border-radius: 0.375rem;
+            cursor: pointer;
+            font-size: 0.875rem;
+            transition: all 0.2s ease;
+        }
+
+        .filter-btn:hover {
+            background-color: var(--bg-primary);
+            color: var(--text-primary);
+        }
+
+        .filter-btn.active {
+            background-color: var(--color-blue);
+            border-color: var(--color-blue);
+            color: white;
+        }
+
+        /* Table */
+        .table-wrapper {
+            overflow-x: auto;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+
+        thead {
+            background-color: var(--bg-tertiary);
+        }
+
+        th {
+            padding: 1rem 1.5rem;
+            text-align: left;
+            font-weight: 600;
+            font-size: 0.875rem;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            border-bottom: 1px solid var(--border-color);
+        }
+
+        td {
+            padding: 1rem 1.5rem;
+            border-bottom: 1px solid var(--border-color);
+            font-size: 0.95rem;
+        }
+
+        tbody tr {
+            transition: background-color 0.2s ease;
+            cursor: pointer;
+        }
+
+        tbody tr:hover {
+            background-color: rgba(30, 41, 59, 0.5);
+        }
+
+        tbody tr.selected {
+            background-color: rgba(59, 130, 246, 0.1);
+        }
+
+        /* Badges */
+        .badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.5rem;
+            padding: 0.375rem 0.75rem;
+            border-radius: 0.25rem;
+            font-size: 0.75rem;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+
+        .badge-success {
+            background-color: rgba(16, 185, 129, 0.2);
+            color: var(--color-green);
+        }
+
+        .badge-pending {
+            background-color: rgba(148, 163, 184, 0.2);
+            color: var(--text-secondary);
+        }
+
+        /* Metrics */
+        .metric {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 0.75rem 0;
+            border-bottom: 1px solid rgba(71, 85, 105, 0.5);
+        }
+
+        .metric:last-child {
+            border-bottom: none;
+        }
+
+        .metric-label {
+            color: var(--text-muted);
+            font-size: 0.9rem;
+        }
+
+        .metric-value {
+            font-weight: 600;
+            font-size: 0.95rem;
+        }
+
+        .metric-value.positive {
+            color: var(--color-green);
+        }
+
+        .metric-value.negative {
+            color: var(--color-red);
+        }
+
+        .metric-value.neutral {
+            color: var(--color-yellow);
+        }
+
+        /* Side Panel */
+        .side-panel {
+            background-color: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: 0.5rem;
+            padding: 1.5rem;
+            height: fit-content;
+            position: sticky;
+            top: 16rem;
+        }
+
+        .side-panel h3 {
+            font-size: 1.125rem;
+            font-weight: 600;
+            margin-bottom: 1rem;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .side-panel-section {
+            margin-bottom: 1.5rem;
+            padding-bottom: 1.5rem;
+            border-bottom: 1px solid var(--border-color);
+        }
+
+        .side-panel-section:last-child {
+            margin-bottom: 0;
+            padding-bottom: 0;
+            border-bottom: none;
+        }
+
+        .section-title {
+            font-size: 0.875rem;
+            font-weight: 600;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            margin-bottom: 0.75rem;
+        }
+
+        /* Hero Section */
+        .hero {
+            background: linear-gradient(135deg, rgba(59, 130, 246, 0.2) 0%, rgba(168, 85, 247, 0.2) 100%);
+            border: 1px solid rgba(59, 130, 246, 0.3);
+            border-radius: 0.5rem;
+            padding: 2rem;
+            margin-bottom: 2rem;
+        }
+
+        .hero h2 {
+            font-size: 1.5rem;
+            font-weight: 700;
+            margin-bottom: 1rem;
+        }
+
+        .hero-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+            gap: 1rem;
+        }
+
+        .hero-stat {
+            background-color: rgba(30, 41, 59, 0.5);
+            border-radius: 0.375rem;
+            padding: 1rem;
+            text-align: center;
+        }
+
+        .hero-stat-value {
+            font-size: 1.875rem;
+            font-weight: 700;
+            margin-bottom: 0.5rem;
+        }
+
+        .hero-stat-label {
+            font-size: 0.8rem;
+            color: var(--text-muted);
+        }
+
+        /* Discovery Status */
+        .status-item {
+            background-color: rgba(30, 41, 59, 0.5);
+            border: 1px solid var(--border-color);
+            border-radius: 0.5rem;
+            padding: 1rem;
+            margin-bottom: 1rem;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .status-item-left h4 {
+            font-weight: 600;
+            margin-bottom: 0.25rem;
+        }
+
+        .status-item-left p {
+            font-size: 0.875rem;
+            color: var(--text-muted);
+        }
+
+        /* Loading State */
+        .loading {
+            text-align: center;
+            padding: 2rem;
+            color: var(--text-muted);
+        }
+
+        .spinner {
+            display: inline-block;
+            width: 1rem;
+            height: 1rem;
+            border: 2px solid var(--border-color);
+            border-top-color: var(--color-blue);
+            border-radius: 50%;
+            animation: spin 0.6s linear infinite;
+            margin-right: 0.5rem;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        /* Responsive */
+        @media (max-width: 1024px) {
+            .dashboard-grid {
+                grid-template-columns: 1fr;
+            }
+
+            .side-panel {
+                position: static;
+            }
+
+            .summary-cards {
+                grid-template-columns: repeat(2, 1fr);
+            }
+        }
+
+        @media (max-width: 768px) {
+            .header-top {
+                flex-direction: column;
+                align-items: flex-start;
+                gap: 1rem;
+            }
+
+            .nav-container {
+                flex-wrap: wrap;
+                gap: 0.5rem;
+            }
+
+            .nav-tab {
+                padding: 0.75rem;
+                font-size: 0.85rem;
+            }
+
+            .summary-cards {
+                grid-template-columns: 1fr;
+            }
+
+            th, td {
+                padding: 0.75rem;
+                font-size: 0.85rem;
+            }
+        }
+
+        /* Error state */
+        .error-message {
+            background-color: rgba(239, 68, 68, 0.2);
+            border: 1px solid rgba(239, 68, 68, 0.5);
+            border-radius: 0.5rem;
+            padding: 1rem;
+            color: var(--color-red);
+            margin-bottom: 1rem;
+        }
+
+        /* Empty state */
+        .empty-state {
+            text-align: center;
+            padding: 3rem 1rem;
+            color: var(--text-muted);
+        }
+
+        .empty-state-icon {
+            font-size: 3rem;
+            margin-bottom: 1rem;
+            opacity: 0.5;
+        }
+    </style>
+</head>
+<body>
+    <header>
+        <div class="header-content">
+            <div class="header-top">
+                <div>
+                    <h1>Trading Dashboard</h1>
+                    <p class="header-subtitle">Strategy Performance & Optimization Analysis</p>
+                </div>
+                <div class="summary-cards" id="headerSummary">
+                    <div class="summary-card">
+                        <div class="summary-value" id="totalStrategies">-</div>
+                        <div class="summary-label">Total</div>
+                    </div>
+                    <div class="summary-card">
+                        <div class="summary-value" id="validatedStrategies">-</div>
+                        <div class="summary-label">Validated</div>
+                    </div>
+                    <div class="summary-card">
+                        <div class="summary-value" id="avgPF">-</div>
+                        <div class="summary-label">Avg PF</div>
+                    </div>
+                    <div class="summary-card">
+                        <div class="summary-value" id="bestPF">-</div>
+                        <div class="summary-label">Best PF</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </header>
+
+    <nav>
+        <div class="nav-container">
+            <div class="nav-tab active" data-page="strategies">Strategies</div>
+            <div class="nav-tab" data-page="backtest">Backtest</div>
+            <div class="nav-tab" data-page="optimization">Optimization</div>
+            <div class="nav-tab" data-page="live">Live Trading</div>
+            <div class="nav-tab" data-page="discovery">Discovery</div>
+        </div>
+    </nav>
+
+    <div class="container">
+        <!-- Strategies Page -->
+        <div id="strategies-page" class="page active">
+            <div class="hero">
+                <h2>Strategy Performance Overview</h2>
+                <div class="hero-grid">
+                    <div class="hero-stat">
+                        <div class="hero-stat-value" id="heroTotal">0</div>
+                        <div class="hero-stat-label">Total</div>
+                    </div>
+                    <div class="hero-stat">
+                        <div class="hero-stat-value" id="heroValidated">0</div>
+                        <div class="hero-stat-label">Validated</div>
+                    </div>
+                    <div class="hero-stat">
+                        <div class="hero-stat-value" id="heroAvgPF">-</div>
+                        <div class="hero-stat-label">Avg PF</div>
+                    </div>
+                    <div class="hero-stat">
+                        <div class="hero-stat-value" id="heroBestPF">-</div>
+                        <div class="hero-stat-label">Best PF</div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="dashboard-grid">
+                <div class="card">
+                    <div class="card-header">
+                        <h2>All Strategies</h2>
+                        <div class="filters">
+                            <button class="filter-btn active" data-filter="all">All</button>
+                            <button class="filter-btn" data-filter="validated">Validated</button>
+                        </div>
+                    </div>
+                    <div class="card-body">
+                        <div id="strategiesTable" class="table-wrapper">
+                            <div class="loading"><span class="spinner"></span> Loading strategies...</div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="side-panel" id="strategyDetail">
+                    <h3>📊 Strategy Details</h3>
+                    <p style="color: var(--text-muted); font-size: 0.9rem;">Select a strategy to view details</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- Discovery Page -->
+        <div id="discovery-page" class="page">
+            <h2 style="margin-bottom: 2rem;">Vectorbt Edge Discovery</h2>
+            <div id="discoveryContent">
+                <div class="loading"><span class="spinner"></span> Loading discovery data...</div>
+            </div>
+        </div>
+
+        <!-- Other Pages (Stubs) -->
+        <div id="backtest-page" class="page">
+            <h2 style="margin-bottom: 2rem;">Walk-Forward Validation Results</h2>
+            <div class="card" style="margin-bottom: 2rem;">
+                <div class="card-header">
+                    <h3>Strategy Selection</h3>
+                    <select id="backtestStrategySelect" style="padding: 0.5rem; border-radius: 0.375rem; border: 1px solid var(--border-color); background-color: var(--bg-tertiary); color: var(--text-primary);">
+                        <option value="">-- Select Strategy --</option>
+                    </select>
+                </div>
+                <div id="backtestDetail" class="card-body" style="display: none;">
+                    <div style="margin-bottom: 2rem;">
+                        <h4 style="margin-bottom: 1rem;">Walk-Forward Validation (3 Windows)</h4>
+                        <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 1rem; margin-bottom: 2rem;">
+                            <div id="wfWindow1" class="status-item"></div>
+                            <div id="wfWindow2" class="status-item"></div>
+                            <div id="wfWindow3" class="status-item"></div>
+                        </div>
+                        <div style="padding: 1rem; background-color: rgba(30, 41, 59, 0.5); border-radius: 0.375rem;">
+                            <div class="metric">
+                                <span class="metric-label">Generalizes</span>
+                                <span id="btGeneralizes" class="metric-value">-</span>
+                            </div>
+                            <div class="metric">
+                                <span class="metric-label">Min Window PF</span>
+                                <span id="btMinPF" class="metric-value">-</span>
+                            </div>
+                        </div>
+                    </div>
+                    <div>
+                        <h4 style="margin-bottom: 1rem;">Performance Metrics</h4>
+                        <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 1rem;">
+                            <div class="metric">
+                                <span class="metric-label">Profit Factor</span>
+                                <span id="btPF" class="metric-value">-</span>
+                            </div>
+                            <div class="metric">
+                                <span class="metric-label">Win Rate</span>
+                                <span id="btWR" class="metric-value">-</span>
+                            </div>
+                            <div class="metric">
+                                <span class="metric-label">Sharpe Ratio</span>
+                                <span id="btSharpe" class="metric-value">-</span>
+                            </div>
+                            <div class="metric">
+                                <span class="metric-label">Total Trades</span>
+                                <span id="btTrades" class="metric-value">-</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div id="optimization-page" class="page">
+            <h2 style="margin-bottom: 2rem;">Optuna Parameter Tuning</h2>
+            <div class="card" style="margin-bottom: 2rem;">
+                <div class="card-header">
+                    <h3>Active Studies</h3>
+                </div>
+                <div id="optunaStudies" class="card-body">
+                    <div class="loading"><span class="spinner"></span> Loading studies...</div>
+                </div>
+            </div>
+        </div>
+
+        <div id="live-page" class="page">
+            <h2 style="margin-bottom: 2rem;">Account State & Live Trades</h2>
+            <div class="dashboard-grid">
+                <div class="card">
+                    <div class="card-header">
+                        <h3>Open Positions</h3>
+                    </div>
+                    <div id="livePositions" class="card-body">
+                        <div class="loading"><span class="spinner"></span> Loading positions...</div>
+                    </div>
+                </div>
+                <div class="card">
+                    <div class="card-header">
+                        <h3>Recent Closed Trades</h3>
+                    </div>
+                    <div id="recentTrades" class="card-body">
+                        <div class="loading"><span class="spinner"></span> Loading trades...</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const API_BASE = '/api/v2';
+
+        // Tab Navigation
+        document.querySelectorAll('.nav-tab').forEach(tab => {
+            tab.addEventListener('click', () => {
+                const pageName = tab.dataset.page;
+                
+                // Update active tab
+                document.querySelectorAll('.nav-tab').forEach(t => t.classList.remove('active'));
+                tab.classList.add('active');
+
+                // Update active page
+                document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+                document.getElementById(`${pageName}-page`).classList.add('active');
+
+                // Load page data
+                if (pageName === 'strategies') {
+                    loadStrategies();
+                } else if (pageName === 'discovery') {
+                    loadDiscovery();
+                }
+            });
+        });
+
+        // Filter buttons
+        document.querySelectorAll('.filter-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
+                btn.classList.add('active');
+                renderStrategyTable(btn.dataset.filter);
+            });
+        });
+
+        let allStrategies = [];
+
+        // Load and display strategies
+        async function loadStrategies() {
+            try {
+                const response = await axios.get(`${API_BASE}/strategies`);
+                allStrategies = response.data.data || [];
+                
+                // Update hero stats
+                const validated = allStrategies.filter(s => s.validated).length;
+                const avgPF = allStrategies.reduce((sum, s) => sum + (s.vectorbt_pf || 0), 0) / (allStrategies.length || 1);
+                const bestPF = Math.max(...allStrategies.map(s => s.vectorbt_pf || 0));
+
+                document.getElementById('heroTotal').textContent = allStrategies.length;
+                document.getElementById('heroValidated').textContent = validated;
+                document.getElementById('heroAvgPF').textContent = avgPF.toFixed(2);
+                document.getElementById('heroBestPF').textContent = isFinite(bestPF) ? bestPF.toFixed(2) : '-';
+
+                renderStrategyTable('all');
+
+                // Update header
+                updateHeaderSummary();
+            } catch (error) {
+                console.error('Error loading strategies:', error);
+                document.getElementById('strategiesTable').innerHTML = 
+                    `<div class="error-message">Failed to load strategies: ${error.message}</div>`;
+            }
+        }
+
+        // Render strategy table
+        function renderStrategyTable(filter) {
+            const filtered = filter === 'validated' 
+                ? allStrategies.filter(s => s.validated)
+                : allStrategies;
+
+            if (filtered.length === 0) {
+                document.getElementById('strategiesTable').innerHTML = 
+                    `<div class="empty-state">
+                        <div class="empty-state-icon">📭</div>
+                        <p>No strategies found</p>
+                    </div>`;
+                return;
+            }
+
+            let html = `
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Strategy</th>
+                            <th>Symbol</th>
+                            <th>PF</th>
+                            <th>WR</th>
+                            <th>Sharpe</th>
+                            <th>Trades</th>
+                            <th>Status</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+            `;
+
+            filtered.forEach(strategy => {
+                const statusBadge = strategy.validated 
+                    ? '<span class="badge badge-success">✓ Validated</span>'
+                    : '<span class="badge badge-pending">Pending</span>';
+
+                const pf = strategy.vectorbt_pf 
+                    ? `<span style="color: ${strategy.vectorbt_pf > 1.2 ? 'var(--color-green)' : strategy.vectorbt_pf > 1.0 ? 'var(--color-yellow)' : 'var(--color-red)'}">${strategy.vectorbt_pf.toFixed(2)}</span>`
+                    : '-';
+
+                const wr = strategy.backtest?.wr 
+                    ? `<span style="color: ${strategy.backtest.wr > 0.5 ? 'var(--color-green)' : 'var(--color-yellow)'}">${(strategy.backtest.wr * 100).toFixed(1)}%</span>`
+                    : '-';
+
+                html += `
+                    <tr onclick="selectStrategy(this, '${strategy.name}', ${allStrategies.indexOf(strategy)})">
+                        <td><strong>${strategy.name}</strong></td>
+                        <td>${strategy.symbol}</td>
+                        <td>${pf}</td>
+                        <td>${wr}</td>
+                        <td>${strategy.backtest?.sharpe?.toFixed(2) ?? '-'}</td>
+                        <td>${strategy.backtest?.trades ?? '-'}</td>
+                        <td>${statusBadge}</td>
+                    </tr>
+                `;
+            });
+
+            html += '</tbody></table>';
+            document.getElementById('strategiesTable').innerHTML = html;
+        }
+
+        // Select strategy and show details
+        function selectStrategy(row, name, index) {
+            document.querySelectorAll('#strategiesTable tbody tr').forEach(r => r.classList.remove('selected'));
+            row.classList.add('selected');
+
+            const strategy = allStrategies[index];
+            let detailHtml = `<h3>📊 ${strategy.name}</h3>`;
+            
+            detailHtml += `<div class="side-panel-section">
+                <div style="font-size: 0.9rem; color: var(--text-muted);">${strategy.symbol}</div>`;
+
+            if (strategy.backtest) {
+                detailHtml += `
+                    <div class="side-panel-section">
+                        <div class="section-title">Backtest</div>
+                        <div class="metric">
+                            <span class="metric-label">Profit Factor</span>
+                            <span class="metric-value positive">${strategy.backtest.pf.toFixed(2)}</span>
+                        </div>
+                        <div class="metric">
+                            <span class="metric-label">Win Rate</span>
+                            <span class="metric-value positive">${(strategy.backtest.wr * 100).toFixed(1)}%</span>
+                        </div>
+                        <div class="metric">
+                            <span class="metric-label">Sharpe</span>
+                            <span class="metric-value neutral">${strategy.backtest.sharpe.toFixed(2)}</span>
+                        </div>
+                        <div class="metric">
+                            <span class="metric-label">Trades</span>
+                            <span class="metric-value">${strategy.backtest.trades}</span>
+                        </div>
+                    </div>
+                `;
+            }
+
+            if (strategy.regime_edges.length > 0) {
+                detailHtml += `
+                    <div class="side-panel-section">
+                        <div class="section-title">Regime Edges</div>
+                `;
+                strategy.regime_edges.forEach(edge => {
+                    const color = edge.multiplier > 1.1 ? 'var(--color-green)' : 
+                                 edge.multiplier > 1.0 ? 'var(--color-yellow)' : 'var(--color-red)';
+                    detailHtml += `
+                        <div class="metric">
+                            <span class="metric-label" style="text-transform: capitalize">${edge.regime}</span>
+                            <span class="metric-value" style="color: ${color}">${edge.multiplier.toFixed(2)}x</span>
+                        </div>
+                    `;
+                });
+                detailHtml += '</div>';
+            }
+
+            if (strategy.live) {
+                detailHtml += `
+                    <div class="side-panel-section">
+                        <div class="section-title">Live Performance</div>
+                        <div class="metric">
+                            <span class="metric-label">Trades</span>
+                            <span class="metric-value">${strategy.live.trades}</span>
+                        </div>
+                        <div class="metric">
+                            <span class="metric-label">P&L</span>
+                            <span class="metric-value ${strategy.live.pnl > 0 ? 'positive' : 'negative'}">$${strategy.live.pnl.toFixed(2)}</span>
+                        </div>
+                    </div>
+                `;
+            }
+
+            detailHtml += '</div>';
+            document.getElementById('strategyDetail').innerHTML = detailHtml;
+        }
+
+        // Load vectorbt discovery
+        async function loadDiscovery() {
+            try {
+                const response = await axios.get(`${API_BASE}/vectorbt/discovery`);
+                const data = response.data.data;
+
+                let html = `
+                    <div class="card">
+                        <div class="card-header">
+                            <h2>Discovery Status</h2>
+                        </div>
+                        <div class="card-body">
+                            <div class="metric">
+                                <span class="metric-label">Last Sweep</span>
+                                <span>${new Date(data.swept_at).toLocaleString()}</span>
+                            </div>
+                            <div class="metric">
+                                <span class="metric-label">Min PF Threshold</span>
+                                <span>${data.min_pf_threshold.toFixed(2)}</span>
+                            </div>
+                            <div class="metric">
+                                <span class="metric-label">Timeframe</span>
+                                <span>${data.timeframe}</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="card" style="margin-top: 2rem;">
+                        <div class="card-header">
+                            <h2>Per-Symbol Validation</h2>
+                        </div>
+                        <div class="card-body">
+                `;
+
+                Object.entries(data.symbols).forEach(([symbol, info]) => {
+                    const badge = info.validated 
+                        ? '<span class="badge badge-success">✓ Validated</span>'
+                        : '<span class="badge badge-pending">Pending</span>';
+
+                    html += `
+                        <div class="status-item">
+                            <div class="status-item-left">
+                                <h4>${symbol}</h4>
+                                <p>${info.pockets} pocket(s)</p>
+                            </div>
+                            <div>${badge}</div>
+                        </div>
+                    `;
+                });
+
+                html += '</div></div>';
+                document.getElementById('discoveryContent').innerHTML = html;
+            } catch (error) {
+                console.error('Error loading discovery:', error);
+                document.getElementById('discoveryContent').innerHTML = 
+                    `<div class="error-message">Failed to load discovery data: ${error.message}</div>`;
+            }
+        }
+
+        // Update header summary
+        async function updateHeaderSummary() {
+            try {
+                const response = await axios.get(`${API_BASE}/summary`);
+                const data = response.data.data;
+
+                document.getElementById('totalStrategies').textContent = data.total_strategies;
+                document.getElementById('validatedStrategies').textContent = data.validated_strategies;
+                document.getElementById('avgPF').textContent = data.avg_profit_factor.toFixed(2);
+                document.getElementById('bestPF').textContent = data.best_strategy?.pf?.toFixed(2) ?? '-';
+            } catch (error) {
+                console.error('Error loading summary:', error);
+            }
+        }
+
+        // Load backtest data
+        async function loadBacktest() {
+            try {
+                if (!allStrategies.length) await loadStrategies();
+                
+                // Populate strategy select
+                const select = document.getElementById('backtestStrategySelect');
+                select.innerHTML = '<option value="">-- Select Strategy --</option>';
+                allStrategies.forEach((s, i) => {
+                    if (s.backtest) {
+                        select.innerHTML += `<option value="${i}">${s.name} (${s.symbol})</option>`;
+                    }
+                });
+                
+                // Load on selection
+                select.addEventListener('change', (e) => {
+                    if (e.target.value) {
+                        displayBacktestDetail(allStrategies[e.target.value]);
+                    }
+                });
+            } catch (error) {
+                console.error('Error loading backtest:', error);
+            }
+        }
+
+        function displayBacktestDetail(strategy) {
+            const detail = document.getElementById('backtestDetail');
+            if (!strategy.backtest) {
+                detail.style.display = 'none';
+                return;
+            }
+
+            detail.style.display = 'block';
+            const bt = strategy.backtest;
+            const wf = strategy.backtest_windows || [];
+
+            // Display walk-forward windows
+            for (let i = 0; i < 3; i++) {
+                const window = wf[i] || {};
+                const elem = document.getElementById(`wfWindow${i + 1}`);
+                elem.innerHTML = `
+                    <div style="padding: 1rem; background-color: rgba(30, 41, 59, 0.5); border-radius: 0.375rem;">
+                        <h5 style="margin-bottom: 0.75rem;">Window ${i + 1}</h5>
+                        <div class="metric">
+                            <span class="metric-label">PF</span>
+                            <span class="metric-value" style="color: ${(window.pf || 0) > 1.2 ? 'var(--color-green)' : 'var(--color-yellow)'}">${(window.pf || '-')}</span>
+                        </div>
+                        <div class="metric">
+                            <span class="metric-label">WR</span>
+                            <span class="metric-value">${window.wr ? (window.wr * 100).toFixed(1) + '%' : '-'}</span>
+                        </div>
+                        <div class="metric">
+                            <span class="metric-label">Trades</span>
+                            <span class="metric-value">${window.trades || '-'}</span>
+                        </div>
+                    </div>
+                `;
+            }
+
+            // Display generalization
+            const generalizes = wf.length > 0 && wf.every(w => (w.pf || 0) >= 1.0);
+            document.getElementById('btGeneralizes').innerHTML = generalizes ? 
+                '<span style="color: var(--color-green)">✓ Yes</span>' : 
+                '<span style="color: var(--color-red)">✗ No</span>';
+            
+            const minPF = wf.length > 0 ? Math.min(...wf.map(w => w.pf || 0)) : 'N/A';
+            document.getElementById('btMinPF').textContent = minPF !== 'N/A' ? minPF.toFixed(2) : 'N/A';
+
+            // Display metrics
+            document.getElementById('btPF').textContent = bt.pf?.toFixed(2) || '-';
+            document.getElementById('btWR').textContent = bt.wr ? (bt.wr * 100).toFixed(1) + '%' : '-';
+            document.getElementById('btSharpe').textContent = bt.sharpe?.toFixed(2) || '-';
+            document.getElementById('btTrades').textContent = bt.trades || '-';
+        }
+
+        // Load optimization data
+        async function loadOptimization() {
+            try {
+                if (!allStrategies.length) await loadStrategies();
+                
+                let html = '';
+                const withOptuna = allStrategies.filter(s => s.optuna);
+                
+                if (withOptuna.length === 0) {
+                    html = '<p style="color: var(--text-muted);">No active Optuna studies</p>';
+                } else {
+                    withOptuna.forEach(s => {
+                        const opt = s.optuna;
+                        html += `
+                            <div class="status-item" style="margin-bottom: 1rem;">
+                                <div class="status-item-left">
+                                    <h4>${opt.study || s.name}</h4>
+                                    <p>${s.symbol} - ${s.name}</p>
+                                </div>
+                                <div style="text-align: right;">
+                                    <div class="metric-value">${opt.trials || 0} trials</div>
+                                    <div class="metric-label">Best: ${opt.best_value?.toFixed(2) || '-'}</div>
+                                </div>
+                            </div>
+                        `;
+                    });
+                }
+                
+                document.getElementById('optunaStudies').innerHTML = html;
+            } catch (error) {
+                console.error('Error loading optimization:', error);
+            }
+        }
+
+        // Load live trading data
+        async function loadLiveTrading() {
+            try {
+                // Display open positions summary
+                document.getElementById('livePositions').innerHTML = `
+                    <div class="metric">
+                        <span class="metric-label">Open Positions</span>
+                        <span class="metric-value">Loading...</span>
+                    </div>
+                `;
+                
+                // Display recent trades summary
+                document.getElementById('recentTrades').innerHTML = `
+                    <div class="metric">
+                        <span class="metric-label">Recent Trades</span>
+                        <span class="metric-value">Loading...</span>
+                    </div>
+                `;
+            } catch (error) {
+                console.error('Error loading live trading:', error);
+            }
+        }
+
+        // Update tab loading
+        const originalTabListener = document.querySelectorAll('.nav-tab')[0]?.onclick;
+        document.querySelectorAll('.nav-tab').forEach(tab => {
+            const originalClick = tab.onclick;
+            tab.addEventListener('click', () => {
+                const pageName = tab.dataset.page;
+                if (pageName === 'backtest') {
+                    loadBacktest();
+                } else if (pageName === 'optimization') {
+                    loadOptimization();
+                } else if (pageName === 'live') {
+                    loadLiveTrading();
+                }
+            });
+        });
+
+        // Initial load
+        loadStrategies();
+        updateHeaderSummary();
+
+        // Auto-refresh every 30 seconds
+        setInterval(updateHeaderSummary, 30000);
+    </script>
+</body>
+</html>

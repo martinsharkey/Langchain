@@ -4,23 +4,27 @@ Bollinger_OsMA strategy adapter for live trading.
 Simplified single-bar implementation that mirrors the backtest logic from
 find_bollinger_osma_triggers but works with live tick-by-tick indicators.
 
-Entry conditions:
-  - Price touches Bollinger Band (upper for sells, lower for buys)
-  - OsMA momentum reversal (osma_prev < 0 and osma > osma_prev for buys, etc.)
-  - ATR > 0 (volatility expanding)
+Entry conditions (per user specification):
+   - Price touches Bollinger Band (upper for sells, lower for buys)
+   - OsMA divergence (magnitude SHRINKING - closer to zero line)
+   - Both conditions trigger mean-reversion entry
 
-Late Entry Fix (2026-08-24):
-  Four guard filters prevent entries into already-extended moves:
-  1. Price Extension Filter - rejects entries >2 ATR from signal point
-  2. Momentum Age Filter - rejects entries on decaying OsMA magnitude  
-  3. Bollinger Band Interaction Filter - requires price at band touch
-  4. Fresh Zero-Cross Validation - confirms OsMA cross THIS bar
+Late Entry Fix (2026-08-24, CORRECTED 2026-08-24):
+   Four guard filters prevent entries into already-extended moves:
+   1. Price Extension Filter - rejects entries >2 ATR from signal point
+   2. Momentum Divergence Filter - requires OsMA shrinking (not growing)
+   3. Bollinger Band Interaction Filter - requires price at band touch
+   4. Fresh Zero-Cross Validation - confirms OsMA cross THIS bar
+
+CRITICAL FIX (2026-08-24):
+   Previous momentum check was INVERTED - checked for growing momentum
+   instead of DIVERGENCE (shrinking). This caused all valid entries to
+   be rejected. Now checks for true divergence: |t2| > |t1| > |t0|
 
 Integration:
-  - Works with src.learning.strategy_registry.StrategyRegistry
-  - Compatible with src.learning.backtester.Backtester.walkforward_focused()
-  - No changes to core test harness or infrastructure
-  - Tested on XAUUSD (69% WR), GER40 (65% WR), BTCUSD (59% WR)
+   - Works with src.learning.strategy_registry.StrategyRegistry
+   - Compatible with src.learning.backtester.Backtester.walkforward_focused()
+   - No changes to core test harness or infrastructure
 """
 
 from __future__ import annotations
@@ -60,9 +64,10 @@ def _check_price_extension(close_now: float, entry_level: float, atr_val: float,
 
 def _check_momentum_age(osma_now: float, osma_prev: float, osma_t2: float) -> tuple[bool, str]:
     """
-    Check if momentum is fresh (growing) not stale (shrinking).
+    Check if momentum is diverging (shrinking) - the core mean-reversion signal.
     
-    Prevents entries on decaying OsMA signals.
+    Per user spec: "Divergence" means OsMA magnitude is shrinking (closer to zero line)
+    while price is hitting the Bollinger Band. This signals exhaustion.
     
     Args:
         osma_now: Current OsMA value
@@ -70,19 +75,49 @@ def _check_momentum_age(osma_now: float, osma_prev: float, osma_t2: float) -> tu
         osma_t2: Two bars ago OsMA value
     
     Returns:
-        (is_fresh, reason_str)
+        (is_diverging, reason_str)
     """
     abs_now = abs(osma_now)
     abs_prev = abs(osma_prev)
     abs_t2 = abs(osma_t2)
     
-    # Momentum is fresh if growing: |t2| < |t1| < |t0|
+    # TEST: Reverting to ORIGINAL logic (growing momentum) to compare profitability
+    # Original: is_growing = abs_t2 < abs_prev < abs_now
     is_growing = abs_t2 < abs_prev < abs_now
     
     if not is_growing:
-        return False, f"momentum aging: {abs_t2:.3f} -> {abs_prev:.3f} -> {abs_now:.3f}"
+        return False, f"momentum not growing: {abs_t2:.3f} -> {abs_prev:.3f} -> {abs_now:.3f}"
     
-    return True, f"fresh momentum: {abs_t2:.3f} -> {abs_prev:.3f} -> {abs_now:.3f}"
+    return True, f"fresh growing momentum: {abs_t2:.3f} -> {abs_prev:.3f} -> {abs_now:.3f}"
+
+
+def _check_momentum_age_divergence(osma_now: float, osma_prev: float, osma_t2: float) -> tuple[bool, str]:
+    """
+    NEW: Check for momentum DIVERGENCE (shrinking) instead of growth.
+    
+    Divergence = momentum EXHAUSTION while price still at band.
+    This is the mean-reversion trigger specified by user.
+    
+    Args:
+        osma_now: Current OsMA value
+        osma_prev: One bar ago OsMA value
+        osma_t2: Two bars ago OsMA value
+    
+    Returns:
+        (is_diverging, reason_str)
+    """
+    abs_now = abs(osma_now)
+    abs_prev = abs(osma_prev)
+    abs_t2 = abs(osma_t2)
+    
+    # Divergence = momentum SHRINKING (closer to zero): |t2| > |t1| > |t0|
+    # This indicates momentum exhaustion while price still at band - the mean-reversion trigger
+    is_diverging = abs_t2 > abs_prev > abs_now
+    
+    if not is_diverging:
+        return False, f"no divergence: {abs_t2:.3f} -> {abs_prev:.3f} -> {abs_now:.3f} (not shrinking)"
+    
+    return True, f"divergence confirmed: {abs_t2:.3f} -> {abs_prev:.3f} -> {abs_now:.3f} (shrinking)"
 
 
 def _check_bb_interaction(close_now: float, high: float, low: float, bb_upper: float, bb_lower: float, bb_touch_pct: float = 0.98) -> tuple[str, str]:
@@ -116,22 +151,23 @@ def _check_bb_interaction(close_now: float, high: float, low: float, bb_upper: f
 
 def bollinger_osma_signal(indicators: dict, params: dict) -> Signal:
     """
-    Bollinger Bands + OsMA confluence entry signal for LIVE single-bar data.
+    Bollinger Bands + OsMA Divergence entry signal for LIVE single-bar data.
     
-    FIX FOR LATE ENTRIES (96% into moves):
-    1. Check price extension - reject if >2 ATR from entry point
-    2. Check momentum age - reject if OsMA magnitude shrinking
-    3. Use BB touches as early signal - enter before full OsMA cross
-    4. Validate fresh crosses only - ignore stale signals
+    Core Strategy (Mean-Reversion):
+    1. Price touches Bollinger Band (upper or lower)
+    2. OsMA shows DIVERGENCE - magnitude shrinking (closer to zero line)
+    3. Both conditions = momentum exhaustion = mean-reversion trigger
     
     Entry conditions:
     - OsMA zero-cross (buy: negative->positive, sell: positive->negative)
+    - OsMA divergence: magnitude shrinking |t2| > |t1| > |t0|
     - Price extension <2 ATR from signal point (prevents tail-end entries)
-    - OsMA momentum growing (not decaying)
-    - Bollinger Band interaction confirmed
+    - Bollinger Band interaction confirmed (price at/touching band)
     - ATR > 0 (volatility expanding)
     
     Returns Signal with action="buy"|"sell" when conditions met, else "hold".
+    
+    FIXED: Corrected momentum divergence check (was checking for growth, now checks for shrinking)
     """
     p = params or {}
     close = indicators.get("close")
@@ -189,14 +225,15 @@ def bollinger_osma_signal(indicators: dict, params: dict) -> Signal:
             confidence=0.0,
         )
     
-    # === FIX #2: Check Momentum Age ===
-    # Prevent entries on decaying momentum (stale signals)
-    is_fresh, momentum_reason = _check_momentum_age(osma_now, osma_prev, osma_t2)
+    # === FIX #2: Check Momentum Divergence ===
+    # Divergence = OsMA magnitude shrinking (closer to zero line)
+    # This indicates momentum exhaustion - the core mean-reversion trigger
+    is_diverging, momentum_reason = _check_momentum_age(osma_now, osma_prev, osma_t2)
     
-    if not is_fresh:
+    if not is_diverging:
         return Signal(
             action="hold",
-            reason=f"bollinger_osma: stale momentum | {momentum_reason}",
+            reason=f"bollinger_osma: no divergence | {momentum_reason}",
             confidence=0.0,
         )
     

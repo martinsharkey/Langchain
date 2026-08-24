@@ -519,6 +519,11 @@ def compute_indicator_series(data: list[dict], params: Optional[dict] = None):
     body = (close - open_).abs() / rng
     uwick = (high - pd.concat([close, open_], axis=1).max(axis=1)) / rng
     lwick = (pd.concat([close, open_], axis=1).min(axis=1) - low) / rng
+    
+    # Range highs/lows (20-bar lookback for range breakout strategy)
+    range_period = 20
+    range_high_s = high.rolling(range_period).max().shift(1)  # Exclude current bar
+    range_low_s = low.rolling(range_period).min().shift(1)
 
     def g(series, i, default=0.0):
         try:
@@ -547,6 +552,7 @@ def compute_indicator_series(data: list[dict], params: Optional[dict] = None):
             "cci": g(cci_s, i, 0.0), "obv": g(obv_s, i, 0.0),
             "bulls_power": g(bulls_s, i, 0.0), "bears_power": g(bears_s, i, 0.0),
             "osma": g(osma_s, i, 0.0),
+            "range_high": g(range_high_s, i, c), "range_low": g(range_low_s, i, c),
             "point": pt, "spread_points": sp,
             "support_levels": [], "resistance_levels": [],
             "trend": trend,

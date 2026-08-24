@@ -1,0 +1,34 @@
+[
+  {
+    "symbol": "BTCUSD",
+    "primary_indicator": "osma",
+    "secondary_indicator": "atr_14",
+    "primary_params": "",
+    "secondary_params": "",
+    "signal_type": "expanded_multi",
+    "sl_atr_mult": 0.5,
+    "tp_rr_ratio": 3.0,
+    "pf": 1.1854961487241584,
+    "wr": 0.1796448087431694,
+    "trades": 1464,
+    "gross_win": 128123.41071428565,
+    "gross_loss": 108075.77035714293,
+    "sharpe": 0.6387953434311178
+  },
+  {
+    "symbol": "XAUUSD",
+    "primary_indicator": "rsi_14",
+    "secondary_indicator": "stdev_20",
+    "primary_params": "",
+    "secondary_params": "",
+    "signal_type": "expanded_multi",
+    "sl_atr_mult": 0.5,
+    "tp_rr_ratio": 3.5,
+    "pf": 1.1236827578612265,
+    "wr": 0.14845024469820556,
+    "trades": 613,
+    "gross_win": 2752.1450000000077,
+    "gross_loss": 2449.2178571428576,
+    "sharpe": 0.44752270012283385
+  }
+]
