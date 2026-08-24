@@ -127,8 +127,8 @@ class VectorbtOnboarder:
                         continue
                     
                     print(f"    Bars: {len(session_data)} | Testing combinations...")
-                     
-                     indicators = optimizer.calculate_indicators_for_session(session_data)
+                    
+                    indicators = optimizer.calculate_indicators_for_session(session_data)
                     if not indicators:
                         print(f"    [SKIP] Failed to calculate indicators")
                         continue
