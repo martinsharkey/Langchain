@@ -27,7 +27,7 @@ QMMP_DIR = os.path.join(DATA_DIR, "qmmp")
 
 
 def get_symbol_status(symbol: str) -> dict:
-    """Get current status of a symbol."""
+    """Get current status of a symbol with session-specific results."""
     symbol_dir = os.path.join(QMMP_DIR, symbol)
     
     status = {
@@ -35,6 +35,7 @@ def get_symbol_status(symbol: str) -> dict:
         "status": "ready",
         "progress": None,
         "results": None,
+        "sessions": None,
         "error": None,
         "last_updated": None,
     }
@@ -50,28 +51,82 @@ def get_symbol_status(symbol: str) -> dict:
                 status["progress"] = task["progress"]
                 return status
     
-    # Check if results exist
-    results_file = os.path.join(symbol_dir, "onboarding_results.json")
-    if os.path.exists(results_file):
+    # Check if vectorbt results exist (preferred over onboarding_results.json)
+    vectorbt_results_file = os.path.join(symbol_dir, f"{symbol}_vectorbt_results.json")
+    if os.path.exists(vectorbt_results_file):
         try:
-            with open(results_file) as f:
-                results = json.load(f)
+            with open(vectorbt_results_file) as f:
+                vbt_data = json.load(f)
                 status["status"] = "onboarded"
-                status["results"] = {
-                    "best_strategy": results.get("best_strategy", "Unknown"),
-                    "profit_factor": results.get("profit_factor", 0.0),
-                    "win_rate": results.get("win_rate", 0.0),
-                    "sharpe_ratio": results.get("sharpe_ratio", 0.0),
-                    "total_trades": results.get("total_trades", 0),
-                    "validated": results.get("validated", False),
-                }
+                
+                # Extract session-specific data
+                sessions = {}
+                if "validated_strategies" in vbt_data:
+                    for session_name, session_data in vbt_data["validated_strategies"].items():
+                        sessions[session_name] = {
+                            "session": session_name,
+                            "best_strategy": session_data.get("primary_ind", "Unknown"),
+                            "secondary_filter": session_data.get("secondary_ind", "none"),
+                            "profit_factor": session_data.get("pf", 0.0),
+                            "win_rate": session_data.get("wr", 0.0),
+                            "sharpe_ratio": session_data.get("sharpe", 0.0),
+                            "total_trades": session_data.get("trades", 0),
+                            "sl_multiplier": session_data.get("sl_mult", 0.0),
+                            "tp_ratio": session_data.get("tp_ratio", 0.0),
+                        }
+                
+                # Also extract floors per session
+                if "floors" in vbt_data:
+                    for session_name, floor_data in vbt_data["floors"].items():
+                        if session_name in sessions:
+                            sessions[session_name]["floor_config"] = floor_data
+                
+                status["sessions"] = sessions
+                
+                # Overall results (aggregate from best session)
+                if sessions:
+                    best_session = max(sessions.values(), key=lambda x: x["profit_factor"])
+                    status["results"] = {
+                        "best_strategy": best_session["best_strategy"],
+                        "profit_factor": best_session["profit_factor"],
+                        "win_rate": best_session["win_rate"],
+                        "sharpe_ratio": best_session["sharpe_ratio"],
+                        "total_trades": best_session["total_trades"],
+                        "best_session": best_session["session"],
+                        "validated": True,
+                    }
+                
                 # Get last updated time
-                mtime = os.path.getmtime(results_file)
+                mtime = os.path.getmtime(vectorbt_results_file)
                 status["last_updated"] = datetime.fromtimestamp(mtime).isoformat()
         except Exception as e:
-            logger.warning(f"Failed to load results for {symbol}: {e}")
+            logger.warning(f"Failed to load vectorbt results for {symbol}: {e}")
             status["error"] = str(e)
             status["status"] = "error"
+    
+    # Fallback to onboarding_results.json if no vectorbt results
+    elif not status["sessions"]:
+        results_file = os.path.join(symbol_dir, "onboarding_results.json")
+        if os.path.exists(results_file):
+            try:
+                with open(results_file) as f:
+                    results = json.load(f)
+                    status["status"] = "onboarded"
+                    status["results"] = {
+                        "best_strategy": results.get("best_strategy", "Unknown"),
+                        "profit_factor": results.get("profit_factor", 0.0),
+                        "win_rate": results.get("win_rate", 0.0),
+                        "sharpe_ratio": results.get("sharpe_ratio", 0.0),
+                        "total_trades": results.get("total_trades", 0),
+                        "validated": results.get("validated", False),
+                    }
+                    # Get last updated time
+                    mtime = os.path.getmtime(results_file)
+                    status["last_updated"] = datetime.fromtimestamp(mtime).isoformat()
+            except Exception as e:
+                logger.warning(f"Failed to load results for {symbol}: {e}")
+                status["error"] = str(e)
+                status["status"] = "error"
     
     return status
 

@@ -94,10 +94,30 @@ export interface SymbolStatus {
     win_rate: number
     sharpe_ratio: number
     total_trades: number
+    best_session?: string
     validated: boolean
   }
+  sessions?: Record<string, SessionResult>
   error?: string
   last_updated?: string
+}
+
+export interface SessionResult {
+  session: string
+  best_strategy: string
+  secondary_filter: string
+  profit_factor: number
+  win_rate: number
+  sharpe_ratio: number
+  total_trades: number
+  sl_multiplier: number
+  tp_ratio: number
+  floor_config?: {
+    strategy: string
+    filter: string
+    sl: number
+    tp: number
+  }
 }
 
 export interface OnboardingTask {

@@ -262,33 +262,84 @@ export default function SymbolOnboarding() {
 
                     {/* Results (if available) */}
                     {sym.results && (
-                      <div className="mt-4 pt-4 border-t border-slate-600 grid grid-cols-2 gap-3">
+                      <div className="mt-4 pt-4 border-t border-slate-600 space-y-4">
                         <div>
-                          <p className="text-xs text-slate-400">Best Strategy</p>
-                          <p className="text-sm font-semibold text-white">{sym.results.best_strategy}</p>
+                          <p className="text-xs text-slate-400 mb-2">Overall Best Results</p>
+                          <div className="grid grid-cols-2 gap-3">
+                            <div>
+                              <p className="text-xs text-slate-400">Best Strategy</p>
+                              <p className="text-sm font-semibold text-white">{sym.results.best_strategy}</p>
+                            </div>
+                            <div>
+                              <p className="text-xs text-slate-400">Best Session</p>
+                              <p className="text-sm font-semibold text-blue-400">{sym.results.best_session}</p>
+                            </div>
+                            <div>
+                              <p className="text-xs text-slate-400">Profit Factor</p>
+                              <p className={`text-sm font-semibold ${sym.results.profit_factor >= 1.2 ? 'text-green-400' : 'text-yellow-400'}`}>
+                                {sym.results.profit_factor.toFixed(2)}
+                              </p>
+                            </div>
+                            <div>
+                              <p className="text-xs text-slate-400">Win Rate</p>
+                              <p className="text-sm font-semibold text-white">{(sym.results.win_rate * 100).toFixed(1)}%</p>
+                            </div>
+                            <div>
+                              <p className="text-xs text-slate-400">Sharpe Ratio</p>
+                              <p className="text-sm font-semibold text-white">{sym.results.sharpe_ratio.toFixed(2)}</p>
+                            </div>
+                            <div>
+                              <p className="text-xs text-slate-400">Total Trades</p>
+                              <p className="text-sm font-semibold text-white">{sym.results.total_trades}</p>
+                            </div>
+                          </div>
                         </div>
+
+                        {/* Session Breakdown */}
+                        {sym.sessions && Object.keys(sym.sessions).length > 0 && (
+                          <div>
+                            <p className="text-xs text-slate-400 mb-2">📊 Per-Session Results</p>
+                            <div className="space-y-2 max-h-60 overflow-y-auto">
+                              {Object.entries(sym.sessions).map(([sessionName, session]) => (
+                                <div key={sessionName} className="bg-slate-600/30 p-3 rounded border border-slate-600">
+                                  <div className="flex items-center justify-between mb-2">
+                                    <p className="font-semibold text-slate-200">{sessionName}</p>
+                                    <span className={`text-xs px-2 py-1 rounded ${
+                                      session.profit_factor >= 1.5 ? 'bg-green-500/20 text-green-400' :
+                                      session.profit_factor >= 1.0 ? 'bg-blue-500/20 text-blue-400' :
+                                      'bg-yellow-500/20 text-yellow-400'
+                                    }`}>
+                                      PF {session.profit_factor.toFixed(2)}
+                                    </span>
+                                  </div>
+                                  <div className="grid grid-cols-3 gap-2 text-xs">
+                                    <div>
+                                      <p className="text-slate-500">Strategy</p>
+                                      <p className="text-slate-300">{session.best_strategy}</p>
+                                    </div>
+                                    <div>
+                                      <p className="text-slate-500">WR / Sharpe</p>
+                                      <p className="text-slate-300">{(session.win_rate * 100).toFixed(0)}% / {session.sharpe_ratio.toFixed(1)}</p>
+                                    </div>
+                                    <div>
+                                      <p className="text-slate-500">SL/TP / Trades</p>
+                                      <p className="text-slate-300">{session.sl_multiplier}x/{session.tp_ratio.toFixed(1)} • {session.total_trades}</p>
+                                    </div>
+                                  </div>
+                                  {session.floor_config && (
+                                    <div className="mt-2 pt-2 border-t border-slate-600">
+                                      <p className="text-xs text-slate-500">Floor Config: {session.floor_config.strategy} • SL={session.floor_config.sl} TP={session.floor_config.tp}</p>
+                                    </div>
+                                  )}
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+
                         <div>
-                          <p className="text-xs text-slate-400">Profit Factor</p>
-                          <p className={`text-sm font-semibold ${sym.results.profit_factor >= 1.2 ? 'text-green-400' : 'text-yellow-400'}`}>
-                            {sym.results.profit_factor.toFixed(2)}
-                          </p>
-                        </div>
-                        <div>
-                          <p className="text-xs text-slate-400">Win Rate</p>
-                          <p className="text-sm font-semibold text-white">{(sym.results.win_rate * 100).toFixed(1)}%</p>
-                        </div>
-                        <div>
-                          <p className="text-xs text-slate-400">Sharpe Ratio</p>
-                          <p className="text-sm font-semibold text-white">{sym.results.sharpe_ratio.toFixed(2)}</p>
-                        </div>
-                        <div>
-                          <p className="text-xs text-slate-400">Total Trades</p>
-                          <p className="text-sm font-semibold text-white">{sym.results.total_trades}</p>
-                        </div>
-                        <div>
-                          <p className="text-xs text-slate-400">Validation</p>
-                          <p className={`text-sm font-semibold ${sym.results.validated ? 'text-green-400' : 'text-yellow-400'}`}>
-                            {sym.results.validated ? '✓ Validated' : 'Pending'}
+                          <p className="text-xs text-slate-400">
+                            Validation: {sym.results.validated ? '✓ Validated' : 'Pending'}
                           </p>
                         </div>
                       </div>
