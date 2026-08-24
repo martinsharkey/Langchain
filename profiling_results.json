@@ -1,0 +1,75 @@
+{
+  "timestamp": "2026-08-24T16:46:49.175290+00:00",
+  "vectorbt_trials": [
+    {
+      "symbol": "XAUUSD",
+      "timeframe": "H4",
+      "session": "asian",
+      "iterations": 10,
+      "indicators_ms": 2.836999949067831,
+      "trial_min_ms": 0.03490014933049679,
+      "trial_max_ms": 0.11250004172325134,
+      "trial_mean_ms": 0.049480004236102104,
+      "trial_median_ms": 0.04090007860213518,
+      "trial_std_ms": 0.022219282702170846
+    }
+  ],
+  "optuna_trials": [],
+  "feedback_loop": {
+    "name": "Optuna \u2192 Vectorbt Validation Cycle",
+    "stages": [
+      {
+        "stage": 1,
+        "name": "Optuna Optimization",
+        "input": "Discovered indicator (e.g., osma) with baseline params",
+        "process": "Run 50-100 trials, each backtesting with suggested params",
+        "output": "Best tuned params (e.g., osma_fast=15, osma_slow=30)",
+        "time_estimate_ms": 5000,
+        "time_with_8core_ms": 625.0
+      },
+      {
+        "stage": 2,
+        "name": "Walk-Forward Validation",
+        "input": "Tuned params from Optuna",
+        "process": "Re-run Vectorbt walk-forward test with new params (3-fold OOS)",
+        "output": "Is PF >= baseline? Is it > 1.2? Did overfitting occur?",
+        "time_estimate_ms": 100,
+        "critical": "Must use FRESH data windows, not training data"
+      },
+      {
+        "stage": 3,
+        "name": "Comparison & Validation",
+        "input": "Baseline results vs Tuned results",
+        "process": "Calculate improvement: (tuned_pf - baseline_pf) / baseline_pf",
+        "output": "Accept or reject tuned params based on validation",
+        "acceptance_criteria": [
+          "Tuned PF > baseline PF",
+          "Tuned PF passes walk-forward validation",
+          "Improvement >= 1% (or configurable threshold)",
+          "No overfitting detected (OOS performance similar to IS)"
+        ],
+        "time_estimate_ms": 10
+      },
+      {
+        "stage": 4,
+        "name": "Deployment",
+        "input": "Validated tuned params",
+        "process": "Save to {symbol}__{session}__{indicator}_tuned.json",
+        "output": "Params ready for live trading",
+        "time_estimate_ms": 5
+      },
+      {
+        "stage": 5,
+        "name": "Live Feedback (Continuous Loop)",
+        "input": "Actual trades from live bot",
+        "process": "Collect trades, analyze per-session performance",
+        "output": "Feed real trade outcomes back to Optuna",
+        "frequency": "Daily/Weekly/Monthly depending on trade count",
+        "triggers_new_cycle": true,
+        "note": "This is what completes the self-learning loop"
+      }
+    ],
+    "total_time_sequential_ms": 5165,
+    "total_time_with_8core_parallel_ms": 740.0
+  }
+}
