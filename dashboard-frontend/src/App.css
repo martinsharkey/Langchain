@@ -1,0 +1,36 @@
+/* App styles */
+.metric-badge {
+  @apply inline-flex items-center px-3 py-1 rounded-full text-sm font-semibold;
+}
+
+.metric-badge.positive {
+  @apply bg-green-500/20 text-green-400;
+}
+
+.metric-badge.negative {
+  @apply bg-red-500/20 text-red-400;
+}
+
+.metric-badge.neutral {
+  @apply bg-slate-500/20 text-slate-400;
+}
+
+.strategy-card {
+  @apply bg-slate-800 rounded-lg border border-slate-700 p-4 hover:border-slate-600 transition-colors cursor-pointer;
+}
+
+.strategy-card:hover {
+  @apply bg-slate-700/50;
+}
+
+.section-header {
+  @apply text-2xl font-bold text-slate-50 mb-6;
+}
+
+.table-row-hover {
+  @apply hover:bg-slate-800/50 transition-colors;
+}
+
+.loading-skeleton {
+  @apply animate-pulse bg-slate-700 rounded;
+}
