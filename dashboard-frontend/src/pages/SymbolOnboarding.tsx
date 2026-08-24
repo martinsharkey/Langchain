@@ -378,9 +378,10 @@ export default function SymbolOnboarding() {
                                     <div className="mt-2 pt-2 border-t border-slate-600">
                                       <p className="text-xs text-slate-500">Floor Config: {session.floor_config.strategy} • SL={session.floor_config.sl} TP={session.floor_config.tp}</p>
                                     </div>
-                                  )}
+                                   )}
                                 </div>
-                              ))}
+                              )
+                            })}
                             </div>
                           </div>
                         )}
