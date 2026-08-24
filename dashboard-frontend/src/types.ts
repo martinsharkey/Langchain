@@ -99,6 +99,12 @@ export interface SymbolStatus {
   }
   sessions?: Record<string, SessionResult>
   enabled_sessions?: string[]  // Sessions enabled for trading
+  date_range?: {
+    start_date: string
+    end_date: string
+    duration_days: number
+    duration_str: string
+  }
   error?: string
   last_updated?: string
 }

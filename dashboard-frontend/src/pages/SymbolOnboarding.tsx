@@ -319,6 +319,21 @@ export default function SymbolOnboarding() {
                           </div>
                         </div>
 
+                        {/* Backtest Date Range */}
+                        {sym.date_range && (
+                          <div className="bg-slate-700/30 p-3 rounded border border-slate-600">
+                            <p className="text-xs text-slate-400 mb-2">📅 Backtest Period</p>
+                            <div className="space-y-1">
+                              <p className="text-xs text-slate-300">
+                                <span className="text-slate-500">Period:</span> {new Date(sym.date_range.start_date).toLocaleDateString()} → {new Date(sym.date_range.end_date).toLocaleDateString()}
+                              </p>
+                              <p className="text-xs text-slate-300">
+                                <span className="text-slate-500">Duration:</span> {sym.date_range.duration_str}
+                              </p>
+                            </div>
+                          </div>
+                        )}
+
                         {/* Session Breakdown */}
                         {sym.sessions && Object.keys(sym.sessions).length > 0 && (
                           <div>

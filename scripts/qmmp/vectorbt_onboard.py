@@ -76,8 +76,28 @@ class VectorbtOnboarder:
                 return False
             
             print(f"  Successfully loaded data for {len(all_timeframe_data)} timeframes")
+            
+            # Calculate date range across all timeframes
+            date_ranges = {}
+            overall_start = None
+            overall_end = None
             for tf, data in all_timeframe_data.items():
-                print(f"    {tf}: {len(data)} bars")
+                start_date = data.index[0]
+                end_date = data.index[-1]
+                date_ranges[tf] = {
+                    'start': start_date.isoformat(),
+                    'end': end_date.isoformat(),
+                    'bars': len(data)
+                }
+                print(f"    {tf}: {len(data)} bars ({start_date.strftime('%Y-%m-%d')} to {end_date.strftime('%Y-%m-%d')})")
+                
+                # Track overall date range
+                if overall_start is None or start_date < overall_start:
+                    overall_start = start_date
+                if overall_end is None or end_date > overall_end:
+                    overall_end = end_date
+            
+            print(f"\n  Overall Date Range: {overall_start.strftime('%Y-%m-%d')} to {overall_end.strftime('%Y-%m-%d')}")
             
             # Stage 2: Session-filtered optimization for each timeframe
             print(f"\n[Stage 2] Session-filtered optimization ({len(self.sessions)} sessions, {len(self.timeframes)} timeframes)...\n")
@@ -107,8 +127,8 @@ class VectorbtOnboarder:
                         continue
                     
                     print(f"    Bars: {len(session_data)} | Testing combinations...")
-                    
-                    indicators = optimizer.calculate_indicators_for_session(session_data)
+                     
+                     indicators = optimizer.calculate_indicators_for_session(session_data)
                     if not indicators:
                         print(f"    [SKIP] Failed to calculate indicators")
                         continue
@@ -137,9 +157,9 @@ class VectorbtOnboarder:
             print(f"\n[Stage 5] EA generation...")
             self._generate_ea(validated, floors)
             
-            # Stage 6: Generate report
+            # Stage 6: Generate report and save results
             print(f"\n[Stage 6] Report generation...")
-            self._generate_report(validated, floors)
+            self._generate_report(validated, floors, date_ranges, overall_start, overall_end)
             
             print(f"\n{'='*120}")
             print(f"ONBOARDING COMPLETE: {self.symbol}".center(120))
@@ -455,12 +475,27 @@ string DetermineSession() {{
         
         print(f"  [GENERATED] {ea_file.name}")
     
-    def _generate_report(self, validated: dict, floors: dict):
+    def _generate_report(self, validated: dict, floors: dict, date_ranges: dict = None, start_date = None, end_date = None):
         """Generate comprehensive onboarding report."""
         report = f"""# Symbol Onboarding Report: {self.symbol}
 
 Generated: {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}
 
+## Backtest Data Range
+
+"""
+        if start_date and end_date:
+            report += f"- Period: {start_date.strftime('%Y-%m-%d')} to {end_date.strftime('%Y-%m-%d')}\n"
+            days = (end_date - start_date).days
+            report += f"- Duration: {days} days (~{days/7:.1f} weeks, ~{days/30:.1f} months)\n"
+        
+        if date_ranges:
+            report += "- Timeframes tested:\n"
+            for tf in sorted(date_ranges.keys()):
+                info = date_ranges[tf]
+                report += f"  - {tf}: {info['bars']} bars ({info['start'][:10]} to {info['end'][:10]})\n"
+        
+        report += """
 ## Vectorbt Session Analysis
 
 ### Best Strategy Per Session (Walk-Forward Validated)
@@ -520,10 +555,21 @@ Generated: {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}
                     best_for_tf = max(strategy_list, key=lambda x: x['pf'])
                     all_timeframes_per_session[session].append(best_for_tf)
         
+        # Prepare date range info for results
+        date_range_info = None
+        if start_date and end_date:
+            date_range_info = {
+                'start_date': start_date.isoformat(),
+                'end_date': end_date.isoformat(),
+                'duration_days': (end_date - start_date).days,
+                'timeframes': date_ranges
+            }
+        
         with open(results_file, 'w') as f:
             json.dump({
                 'symbol': self.symbol,
                 'timestamp': datetime.now(timezone.utc).isoformat(),
+                'date_range': date_range_info,
                 'validated_strategies': validated,
                 'floors': floors,
                 'all_timeframes_per_session': all_timeframes_per_session

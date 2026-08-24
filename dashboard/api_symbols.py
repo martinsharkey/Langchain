@@ -61,6 +61,7 @@ def get_symbol_status(symbol: str) -> dict:
                 
                 # Extract session-specific data
                 sessions = {}
+                date_range_info = None
                 if "validated_strategies" in vbt_data:
                     for session_name, session_data in vbt_data["validated_strategies"].items():
                         sessions[session_name] = {
@@ -76,6 +77,19 @@ def get_symbol_status(symbol: str) -> dict:
                             "tp_ratio": session_data.get("tp_ratio", 0.0),
                             "alternative_timeframes": []
                         }
+                
+                # Extract date range info
+                if "date_range" in vbt_data and vbt_data["date_range"]:
+                    date_range_info = {
+                        "start_date": vbt_data["date_range"].get("start_date", "Unknown"),
+                        "end_date": vbt_data["date_range"].get("end_date", "Unknown"),
+                        "duration_days": vbt_data["date_range"].get("duration_days", 0)
+                    }
+                    # Extract duration string
+                    days = date_range_info["duration_days"]
+                    weeks = days / 7
+                    months = days / 30
+                    date_range_info["duration_str"] = f"{days} days (~{weeks:.1f} weeks, ~{months:.1f} months)"
                 
                 # Add all alternative timeframes for each session
                 if "all_timeframes_per_session" in vbt_data:
@@ -101,13 +115,8 @@ def get_symbol_status(symbol: str) -> dict:
                                 reverse=True
                             )
                 
-                # Also extract floors per session
-                if "floors" in vbt_data:
-                    for session_name, floor_data in vbt_data["floors"].items():
-                        if session_name in sessions:
-                            sessions[session_name]["floor_config"] = floor_data
-                
                 status["sessions"] = sessions
+                status["date_range"] = date_range_info
                 
                 # Overall results (aggregate from best session)
                 if sessions:
