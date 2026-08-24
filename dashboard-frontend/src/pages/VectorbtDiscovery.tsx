@@ -1,9 +1,9 @@
 import { useEffect, useState } from 'react'
 import { dashboardAPI } from '../api'
-import { VectorbtDiscovery } from '../types'
+import { VectorbtDiscovery as VectorbtDiscoveryData } from '../types'
 
 export default function VectorbtDiscovery() {
-  const [discovery, setDiscovery] = useState<VectorbtDiscovery | null>(null)
+  const [discovery, setDiscovery] = useState<VectorbtDiscoveryData | null>(null)
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
