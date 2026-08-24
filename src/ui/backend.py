@@ -26,10 +26,14 @@ project_root = Path(__file__).parent.parent.parent
 sys.path.insert(0, str(project_root))
 
 from src.data_acquisition.manager import DataManager, DataSourceConfig
+from src.dashboard.optimization_routes_flask import bp as optimization_bp
 
 app = Flask(__name__)
 CORS(app)
 socketio = SocketIO(app, cors_allowed_origins="*")
+
+# Register optimization dashboard blueprint
+app.register_blueprint(optimization_bp, url_prefix="/api/v2/optimization")
 
 # Configuration
 QMMP_DIR = project_root / "data" / "qmmp"

@@ -11,19 +11,31 @@ Endpoints:
 
 from flask import Blueprint, jsonify, request
 from src.dashboard.optimization_results_component import SessionOptimizationDashboard
+from src.dashboard.optimization_dashboard_bridge import OptimizationDashboardBridge
+from src.dashboard.optimization_dashboard_performance import (
+    get_cached_dashboard,
+    invalidate_symbol_cache,
+    with_performance_tracking,
+    get_performance_report,
+    QueryOptimizer
+)
 from src.utils.logger import get_logger
 import logging
 
 _log = get_logger("optimization_routes_v2")
+_bridge = OptimizationDashboardBridge()
 
 # Create blueprint (will be registered in main Flask app)
 bp = Blueprint("optimization_v2", __name__, url_prefix="/api/v2/optimization")
 
 
 @bp.route("/results/<symbol>", methods=["GET"])
+@with_performance_tracking("GET /results/{symbol}")
 def get_optimization_results(symbol):
     """
     Get optimization results for all sessions of a symbol.
+    
+    Uses caching to minimize disk I/O and improve response time.
     
     Returns per-session:
     - Vectorbt discovery results (baseline indicator, PF)
@@ -33,25 +45,41 @@ def get_optimization_results(symbol):
     - Enable/Disable status
     """
     try:
-        dashboard = SessionOptimizationDashboard(symbol=symbol)
-        dashboard.load_from_files()
+        # Use cached dashboard for performance
+        cached_dashboard = get_cached_dashboard(symbol)
+        results = cached_dashboard.get_results()
+        
+        if not results:
+            return jsonify({
+                "symbol": symbol,
+                "sessions": {},
+                "summary": {
+                    "total": 0,
+                    "accepted": 0,
+                    "rejected": 0,
+                    "pending": 0,
+                    "enabled": 0
+                }
+            }), 200
+        
+        # Calculate summary
+        summary = {
+            "total": len(results),
+            "accepted": sum(1 for r in results.values() if r.get("status") == "accepted"),
+            "rejected": sum(1 for r in results.values() if r.get("status") == "rejected"),
+            "pending": sum(1 for r in results.values() if r.get("status") == "pending"),
+            "enabled": sum(1 for r in results.values() if r.get("enabled", True))
+        }
         
         return jsonify({
             "symbol": symbol,
-            "timestamp": list(dashboard.results.values())[0].timestamp if dashboard.results else None,
-            "sessions": dashboard.get_all_cards(),
-            "summary": {
-                "total": len(dashboard.sessions),
-                "accepted": sum(1 for r in dashboard.results.values() 
-                              if r.status.value == "accepted"),
-                "rejected": sum(1 for r in dashboard.results.values() 
-                              if r.status.value == "rejected"),
-                "pending": sum(1 for r in dashboard.results.values() 
-                             if r.status.value == "pending"),
-                "enabled": sum(1 for r in dashboard.results.values() 
-                             if r.is_enabled()),
-            }
+            "sessions": results,
+            "summary": summary
         }), 200
+    
+    except Exception as e:
+        _log.error(f"Failed to get results for {symbol}: {e}", exc_info=True)
+        return jsonify({"error": str(e)}), 500
     
     except Exception as e:
         _log.error(f"Failed to get optimization results: {e}", exc_info=True)
@@ -87,6 +115,7 @@ def get_session_optimization_result(symbol, session):
 
 
 @bp.route("/control/<symbol>/<session>", methods=["POST"])
+@with_performance_tracking("POST /control/{symbol}/{session}")
 def toggle_session_optimization(symbol, session):
     """
     Toggle enable/disable for a session's optimization.
@@ -95,6 +124,7 @@ def toggle_session_optimization(symbol, session):
     JSON body: {"enabled": true}  or  {"enabled": false}
     
     Can only toggle sessions that have accepted or rejected validation results.
+    Applies changes directly to live parameter optimizer.
     """
     try:
         data = request.get_json() or {}
@@ -103,30 +133,17 @@ def toggle_session_optimization(symbol, session):
         if enabled is None:
             return jsonify({"error": "Missing 'enabled' field in request body"}), 400
         
-        dashboard = SessionOptimizationDashboard(symbol=symbol)
-        dashboard.load_from_files()
+        # Use bridge to apply changes to live optimizer
+        result = _bridge.apply_session_toggle(symbol, session, enabled)
         
-        if session not in dashboard.results:
-            return jsonify({"error": f"Session {session} not found"}), 404
+        # Invalidate cache so next request gets fresh data
+        invalidate_symbol_cache(symbol)
         
-        result = dashboard.results[session]
-        
-        # Can only toggle if optimization is complete
-        if result.status.value not in ["accepted", "rejected"]:
-            return jsonify({
-                "error": f"Cannot toggle: optimization status is {result.status.value}"
-            }), 400
-        
-        # Save override
-        result.override_enabled = enabled
-        
-        return jsonify({
-            "symbol": symbol,
-            "session": session,
-            "enabled": result.is_enabled(),
-            "status": result.status.value,
-            "message": f"Session {session} {'enabled' if enabled else 'disabled'} for live trading"
-        }), 200
+        if result.get("applied"):
+            return jsonify(result), 200
+        else:
+            error_code = 404 if "not found" in result.get("error", "").lower() else 400
+            return jsonify(result), error_code
     
     except Exception as e:
         _log.error(f"Failed to toggle session: {e}", exc_info=True)
@@ -175,4 +192,41 @@ def get_optimization_summary(symbol):
     
     except Exception as e:
         _log.error(f"Failed to get optimization summary: {e}", exc_info=True)
+        return jsonify({"error": str(e)}), 500
+
+
+@bp.route("/performance", methods=["GET"])
+def get_performance_stats():
+    """
+    Get dashboard performance statistics.
+    
+    Returns:
+    - Cache hit rate
+    - API latency percentiles
+    - Error count
+    - Toggle operation count
+    """
+    try:
+        stats = get_performance_report()
+        return jsonify(stats), 200
+    except Exception as e:
+        _log.error(f"Failed to get performance stats: {e}")
+        return jsonify({"error": str(e)}), 500
+
+
+@bp.route("/cache/<symbol>/invalidate", methods=["POST"])
+def invalidate_cache(symbol):
+    """
+    Manually invalidate cache for a symbol.
+    
+    Called after toggle operations to ensure fresh data on next request.
+    """
+    try:
+        invalidate_symbol_cache(symbol)
+        return jsonify({
+            "message": f"Cache invalidated for {symbol}",
+            "symbol": symbol
+        }), 200
+    except Exception as e:
+        _log.error(f"Failed to invalidate cache: {e}")
         return jsonify({"error": str(e)}), 500
