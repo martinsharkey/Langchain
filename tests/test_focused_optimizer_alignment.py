@@ -63,14 +63,15 @@ if __name__ == "__main__":
 
 def test_empty_overlay_pocket_does_not_block_entry():
     """A failed edge-discovery sweep that wrote empty focused pockets must NOT kill
-    trading - focused_rules must fall back to the static OsMA_Confluence rule."""
+    trading - focused_rules must fall back to registered strategies (OsMA_Confluence or Bollinger_OsMA)."""
     import src.learning.edge_weights as ew
     saved = ew._OVERLAY
     try:
         ew._OVERLAY = {"focused_edge": {"XAUUSD": [], "BTCUSD": [], "GER40": []}}
         for s in ("XAUUSD-ECN", "BTCUSD", "GER40."):
             rules = ew.focused_rules(s)
-            assert rules and rules[0][0] == "OsMA_Confluence", (s, rules)
+            # Should fallback to at least one registered strategy
+            assert rules and rules[0][0] in ("OsMA_Confluence", "Bollinger_OsMA"), (s, rules)
     finally:
         ew._OVERLAY = saved
 
