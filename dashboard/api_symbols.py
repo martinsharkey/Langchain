@@ -235,6 +235,62 @@ def register_symbol_routes(app):
             logger.error(f"Failed to get symbol {symbol}: {e}")
             return jsonify({"error": str(e)}), 500
     
+    @app.route("/api/symbols/<symbol>/sessions", methods=["GET"])
+    def get_session_preferences(symbol):
+        """Get enabled sessions for a symbol."""
+        try:
+            symbol_dir = os.path.join(QMMP_DIR, symbol.upper())
+            prefs_file = os.path.join(symbol_dir, "session_preferences.json")
+            
+            if os.path.exists(prefs_file):
+                with open(prefs_file) as f:
+                    prefs = json.load(f)
+                return jsonify(prefs)
+            
+            # Default: all sessions enabled
+            return jsonify({
+                "symbol": symbol.upper(),
+                "enabled_sessions": [
+                    "asian", "london", "newyork", "overlap_london_ny",
+                    "friday_evening", "weekend_saturday", "sunday_trading"
+                ]
+            })
+        except Exception as e:
+            logger.error(f"Failed to get session preferences for {symbol}: {e}")
+            return jsonify({"error": str(e)}), 500
+    
+    @app.route("/api/symbols/<symbol>/sessions", methods=["POST"])
+    def set_session_preferences(symbol):
+        """Set enabled sessions for a symbol."""
+        try:
+            data = request.get_json()
+            enabled_sessions = data.get("enabled_sessions", [])
+            
+            symbol_dir = os.path.join(QMMP_DIR, symbol.upper())
+            os.makedirs(symbol_dir, exist_ok=True)
+            
+            prefs_file = os.path.join(symbol_dir, "session_preferences.json")
+            prefs = {
+                "symbol": symbol.upper(),
+                "enabled_sessions": enabled_sessions,
+                "updated_at": datetime.utcnow().isoformat(),
+            }
+            
+            with open(prefs_file, 'w') as f:
+                json.dump(prefs, f, indent=2)
+            
+            logger.info(f"Updated session preferences for {symbol}: {len(enabled_sessions)} sessions enabled")
+            
+            return jsonify({
+                "symbol": symbol.upper(),
+                "message": f"Session preferences updated",
+                "enabled_sessions": enabled_sessions,
+            }), 200
+        
+        except Exception as e:
+            logger.error(f"Failed to set session preferences for {symbol}: {e}")
+            return jsonify({"error": str(e)}), 500
+    
     @app.route("/api/symbols/<symbol>/onboard", methods=["POST"])
     def onboard_symbol(symbol):
         """Start onboarding process for a symbol."""

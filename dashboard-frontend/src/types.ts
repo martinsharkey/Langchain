@@ -98,6 +98,7 @@ export interface SymbolStatus {
     validated: boolean
   }
   sessions?: Record<string, SessionResult>
+  enabled_sessions?: string[]  // Sessions enabled for trading
   error?: string
   last_updated?: string
 }

@@ -156,4 +156,22 @@ export const dashboardAPI = {
     const response = await apiRoot.get(`/tasks/${taskId}`)
     return response.data
   },
+
+  /**
+   * Update session preferences for a symbol
+   */
+  updateSessionPreferences: async (symbol: string, enabledSessions: string[]) => {
+    const response = await apiRoot.post(`/symbols/${symbol}/sessions`, { 
+      enabled_sessions: enabledSessions 
+    })
+    return response.data
+  },
+
+  /**
+   * Get session preferences for a symbol
+   */
+  getSessionPreferences: async (symbol: string) => {
+    const response = await apiRoot.get(`/symbols/${symbol}/sessions`)
+    return response.data
+  },
 }

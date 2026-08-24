@@ -35,6 +35,7 @@ export default function SymbolOnboarding() {
   const [tasks, setTasks] = useState<OnboardingTask[]>([])
   const [newSymbol, setNewSymbol] = useState('')
   const [selectedSymbol, setSelectedSymbol] = useState<string | null>(null)
+  const [sessionPreferences, setSessionPreferences] = useState<Record<string, string[]>>({})
 
   // Load symbols on mount
   useEffect(() => {
@@ -136,6 +137,29 @@ export default function SymbolOnboarding() {
       alert(`Error adding ${newSymbol}: ${error}`)
     } finally {
       setRefreshing(false)
+    }
+  }
+
+  const handleToggleSession = async (symbol: string, session: string) => {
+    try {
+      const current = sessionPreferences[symbol] || []
+      const updated = current.includes(session)
+        ? current.filter(s => s !== session)
+        : [...current, session]
+      
+      // Save to backend
+      await dashboardAPI.updateSessionPreferences(symbol, updated)
+      
+      // Update local state
+      setSessionPreferences({
+        ...sessionPreferences,
+        [symbol]: updated,
+      })
+      
+      console.log(`Session ${session} for ${symbol}: ${updated.includes(session) ? 'enabled' : 'disabled'}`)
+    } catch (error) {
+      console.error(`Failed to toggle session ${session}:`, error)
+      alert(`Error updating session preferences: ${error}`)
     }
   }
 
@@ -298,31 +322,55 @@ export default function SymbolOnboarding() {
                         {/* Session Breakdown */}
                         {sym.sessions && Object.keys(sym.sessions).length > 0 && (
                           <div>
-                            <p className="text-xs text-slate-400 mb-2">📊 Per-Session Results</p>
-                            <div className="space-y-2 max-h-60 overflow-y-auto">
-                              {Object.entries(sym.sessions).map(([sessionName, session]) => (
-                                <div key={sessionName} className="bg-slate-600/30 p-3 rounded border border-slate-600">
-                                  <div className="flex items-center justify-between mb-2">
-                                    <p className="font-semibold text-slate-200">{sessionName}</p>
-                                    <span className={`text-xs px-2 py-1 rounded ${
-                                      session.profit_factor >= 1.5 ? 'bg-green-500/20 text-green-400' :
-                                      session.profit_factor >= 1.0 ? 'bg-blue-500/20 text-blue-400' :
-                                      'bg-yellow-500/20 text-yellow-400'
-                                    }`}>
-                                      PF {session.profit_factor.toFixed(2)}
-                                    </span>
-                                  </div>
-                                  <div className="grid grid-cols-3 gap-2 text-xs">
-                                    <div>
-                                      <p className="text-slate-500">Strategy</p>
-                                      <p className="text-slate-300">{session.best_strategy}</p>
+                            <div className="flex items-center justify-between mb-2">
+                              <p className="text-xs text-slate-400">📊 Per-Session Results & Trading Control</p>
+                              <p className="text-xs text-slate-500">
+                                {(sessionPreferences[sym.symbol] || Object.keys(sym.sessions)).length}/{Object.keys(sym.sessions).length} enabled
+                              </p>
+                            </div>
+                            <div className="space-y-2 max-h-80 overflow-y-auto">
+                              {Object.entries(sym.sessions).map(([sessionName, session]) => {
+                                const isEnabled = (sessionPreferences[sym.symbol] || Object.keys(sym.sessions)).includes(sessionName)
+                                return (
+                                  <div
+                                    key={sessionName}
+                                    className={`bg-slate-600/30 p-3 rounded border-2 transition-colors cursor-pointer ${
+                                      isEnabled ? 'border-blue-500/50' : 'border-slate-600/50'
+                                    }`}
+                                    onClick={() => handleToggleSession(sym.symbol, sessionName)}
+                                  >
+                                    <div className="flex items-start justify-between mb-2">
+                                      <div className="flex items-center gap-2 flex-1">
+                                        <input
+                                          type="checkbox"
+                                          checked={isEnabled}
+                                          onChange={() => handleToggleSession(sym.symbol, sessionName)}
+                                          onClick={(e) => e.stopPropagation()}
+                                          className="w-4 h-4 rounded accent-blue-500 cursor-pointer"
+                                        />
+                                        <p className={`font-semibold ${isEnabled ? 'text-slate-100' : 'text-slate-400'}`}>
+                                          {sessionName}
+                                        </p>
+                                      </div>
+                                      <span className={`text-xs px-2 py-1 rounded ${
+                                        session.profit_factor >= 1.5 ? 'bg-green-500/20 text-green-400' :
+                                        session.profit_factor >= 1.0 ? 'bg-blue-500/20 text-blue-400' :
+                                        'bg-yellow-500/20 text-yellow-400'
+                                      }`}>
+                                        PF {session.profit_factor.toFixed(2)}
+                                      </span>
                                     </div>
-                                    <div>
-                                      <p className="text-slate-500">WR / Sharpe</p>
-                                      <p className="text-slate-300">{(session.win_rate * 100).toFixed(0)}% / {session.sharpe_ratio.toFixed(1)}</p>
-                                    </div>
-                                    <div>
-                                      <p className="text-slate-500">SL/TP / Trades</p>
+                                    <div className="grid grid-cols-3 gap-2 text-xs">
+                                      <div>
+                                        <p className="text-slate-500">Strategy</p>
+                                        <p className="text-slate-300">{session.best_strategy}</p>
+                                      </div>
+                                      <div>
+                                        <p className="text-slate-500">WR / Sharpe</p>
+                                        <p className="text-slate-300">{(session.win_rate * 100).toFixed(0)}% / {session.sharpe_ratio.toFixed(1)}</p>
+                                      </div>
+                                      <div>
+                                        <p className="text-slate-500">SL/TP / Trades</p>
                                       <p className="text-slate-300">{session.sl_multiplier}x/{session.tp_ratio.toFixed(1)} • {session.total_trades}</p>
                                     </div>
                                   </div>
