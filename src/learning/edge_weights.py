@@ -146,15 +146,22 @@ def regime_edge_weight(symbol: str, strategy: str, regime: str) -> float:
 # NOT validated — its focused rules stay but the researcher auto-pause governs
 # it (quarantines if it bleeds live).
 FOCUSED_EDGE = {
-    # SOLE ENTRY = OsMA_Confluence (the proven GoldShark signal) for EVERY symbol,
-    # across ALL regimes. There is no ensemble fallback anymore — the OsMA cross +
-    # OsMA acceleration + Bulls/Bears power + EMA-slope confluence is the only way
-    # in. All regimes allowed because GoldShark does not regime-gate the entry; the
-    # signal's own hard gates + learned per-symbol strength thresholds do the
-    # filtering. Bollinger/Stochastic/RSI/CCI/EMA-follow are NOT entries.
-    "XAUUSD": [("OsMA_Confluence", {"trending", "volatile", "ranging", "quiet", "bullish", "bearish", "neutral"})],
-    "BTCUSD": [("OsMA_Confluence", {"trending", "volatile", "ranging", "quiet", "bullish", "bearish", "neutral"})],
-    "GER40":  [("OsMA_Confluence", {"trending", "volatile", "ranging", "quiet", "bullish", "bearish", "neutral"})],
+    # Entry strategies: Bollinger_OsMA (new late entry fix) tried first,
+    # falls back to OsMA_Confluence if needed. Both work across ALL regimes.
+    # Bollinger_OsMA has 4 guard filters to prevent late entries into extended moves.
+    # OsMA_Confluence remains as proven fallback for all regimes.
+    "XAUUSD": [
+        ("Bollinger_OsMA", {"trending", "volatile", "ranging", "quiet", "bullish", "bearish", "neutral"}),
+        ("OsMA_Confluence", {"trending", "volatile", "ranging", "quiet", "bullish", "bearish", "neutral"}),
+    ],
+    "BTCUSD": [
+        ("Bollinger_OsMA", {"trending", "volatile", "ranging", "quiet", "bullish", "bearish", "neutral"}),
+        ("OsMA_Confluence", {"trending", "volatile", "ranging", "quiet", "bullish", "bearish", "neutral"}),
+    ],
+    "GER40": [
+        ("Bollinger_OsMA", {"trending", "volatile", "ranging", "quiet", "bullish", "bearish", "neutral"}),
+        ("OsMA_Confluence", {"trending", "volatile", "ranging", "quiet", "bullish", "bearish", "neutral"}),
+    ],
 }
 
 
