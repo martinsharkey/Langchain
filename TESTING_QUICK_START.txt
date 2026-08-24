@@ -1,0 +1,149 @@
+================================================================================
+END-TO-END TESTING: QUICK START
+================================================================================
+
+QUESTION 1: Per-Session or Aggregate?
+ANSWER: 100% PER-SESSION (NOT Aggregate)
+
+Each session has its own:
+  - Best indicator (discovered)
+  - Optimized parameters (tuned)
+  - Validation result (accepted/rejected)
+  - Deployed file (per-session)
+
+Example:
+  Asian:    osma    → tuned     → deployed ✅
+  London:   bulls   → rejected  → baseline ❌
+  NewYork:  confluence → tuned  → deployed ✅
+
+================================================================================
+QUESTION 2: How to Test End-to-End?
+ANSWER: Run Two Test Scripts
+
+TEST 1: End-to-End Onboarding
+  python scripts/end_to_end_test.py
+  
+  Tests:
+    [1/5] Phase 1: Discovery per-session
+    [2/5] Phase 2: Optuna tuning per-session
+    [3/5] Phase 3: Validation per-session
+    [4/5] Phase 4: Deploy to scalp engine
+    [5/5] Verify scalp engine loads params
+
+TEST 2: Scalp Engine Integration
+  python scripts/scalp_engine_integration_test.py
+  
+  Verifies:
+    ✓ Deployed files exist
+    ✓ Files are valid JSON
+    ✓ Per-session separation maintained
+    ✓ Scalp engine can load
+    ✓ Live trading will use correct params
+
+================================================================================
+QUESTION 3: Prove Params Hit Scalp Engine?
+ANSWER: Files + Integration Test
+
+The Proof:
+  1. Deployed files created:
+     data/qmmp/XAUUSD/deployed/
+       ├── Asian_osma_deployed.json
+       ├── London_bulls_bears_deployed.json
+       └── NewYork_confluence_deployed.json
+
+  2. Integration test verifies:
+     ✓ Files exist and are valid
+     ✓ Scalp engine imports successfully
+     ✓ Can load all per-session files
+     ✓ Simulates trades using deployed params
+     ✓ Shows correct params per session
+
+Result: PROVEN - Params reach live trading
+
+================================================================================
+RESULTS STRUCTURE: PER-SESSION
+
+Phase 1 Discovery Output:
+  Asian: osma (PF 10.24)
+  London: bulls_bears (PF 7.8)
+  NewYork: confluence (PF 6.5)
+
+Phase 2 Optuna Output:
+  Asian: baseline 10.24 → tuned 10.48
+  London: baseline 7.8 → tuned 7.92
+  NewYork: baseline 6.5 → tuned 6.61
+
+Phase 3 Validation Output:
+  Asian: ACCEPTED (test PF 9.95)
+  London: REJECTED (overfitting - test PF 6.8)
+  NewYork: ACCEPTED (test PF 6.25)
+
+Phase 4 Deployment Files:
+  Asian_osma_deployed.json (tuned params)
+  London_bulls_bears_deployed.json (baseline, not tuned)
+  NewYork_confluence_deployed.json (tuned params)
+
+================================================================================
+LIVE TRADING USAGE
+
+During Trading:
+  00:15 GMT (Asian)
+    Load: Asian_osma_deployed.json
+    Use: tuned osma params
+    Result: TRADE with tuned params
+
+  08:45 GMT (London)
+    Load: London_bulls_bears_deployed.json
+    Use: baseline bulls_bears (not tuned - rejected)
+    Result: TRADE with baseline params
+
+  14:00 GMT (NewYork)
+    Load: NewYork_confluence_deployed.json
+    Use: tuned confluence params
+    Result: TRADE with tuned params
+
+Each trade uses the RIGHT params for its session!
+
+================================================================================
+SUCCESS CHECKLIST
+
+After running tests, verify:
+
+[ ] end_to_end_test.py completes (all 5 phases pass)
+[ ] scalp_engine_integration_test.py completes (all verifications pass)
+[ ] Files exist: data/qmmp/XAUUSD/deployed/*.json
+[ ] Files are valid JSON (can read without errors)
+[ ] Deployed files contain required fields
+[ ] Per-session separation evident (3 separate files)
+[ ] Integration test shows param loading per session
+[ ] Live trading simulation shows correct params used
+
+All green = READY FOR PRODUCTION
+
+================================================================================
+COMMANDS
+
+# Full testing
+python scripts/end_to_end_test.py
+python scripts/scalp_engine_integration_test.py
+
+# Check results
+ls data/qmmp/XAUUSD/deployed/
+cat data/qmmp/XAUUSD/phase3_validation_XAUUSD.json
+
+# Schedule for production
+python scripts/nightly_pipeline_orchestrator.py --schedule
+
+================================================================================
+KEY TAKEAWAYS
+
+1. Pipeline is 100% per-session (not aggregate)
+2. Each session gets optimized independently
+3. Overfitting caught and rejected (London example)
+4. Good improvements deployed (Asian, NewYork)
+5. Params saved to files scalp engine can load
+6. Live trading automatically uses session-specific params
+7. Integration test proves params reach live trading
+
+Ready for production!
+================================================================================
