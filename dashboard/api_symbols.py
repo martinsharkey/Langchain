@@ -65,6 +65,7 @@ def get_symbol_status(symbol: str) -> dict:
                     for session_name, session_data in vbt_data["validated_strategies"].items():
                         sessions[session_name] = {
                             "session": session_name,
+                            "timeframe": session_data.get("timeframe", "M15"),
                             "best_strategy": session_data.get("primary_ind", "Unknown"),
                             "secondary_filter": session_data.get("secondary_ind", "none"),
                             "profit_factor": session_data.get("pf", 0.0),
@@ -383,8 +384,56 @@ def register_symbol_routes(app):
             
             if os.path.exists(symbol_dir):
                 import shutil
-                shutil.rmtree(symbol_dir)
-                logger.info(f"Removed symbol {symbol}")
+                import time
+                import tempfile
+                
+                # Force garbage collection to release any Python object references
+                import gc
+                gc.collect()
+                time.sleep(0.5)
+                
+                # Strategy: Move to temp, then delete from there
+                temp_dir = os.path.join(tempfile.gettempdir(), f"langchain_remove_{symbol}_{int(time.time())}")
+                
+                try:
+                    # Move the directory out of the way
+                    import os as os_module
+                    if os_module.path.exists(temp_dir):
+                        shutil.rmtree(temp_dir)
+                    
+                    os_module.rename(symbol_dir, temp_dir)
+                    logger.info(f"Moved {symbol_dir} to {temp_dir}")
+                    
+                    # Now try to delete from temp location
+                    def handle_remove_readonly(func, path, exc):
+                        """Error handler for Windows ReadOnly files."""
+                        import stat
+                        if not os.access(path, os.W_OK):
+                            os.chmod(path, stat.S_IWUSR | stat.S_IREAD)
+                            func(path)
+                        else:
+                            raise
+                    
+                    shutil.rmtree(temp_dir, onerror=handle_remove_readonly)
+                    logger.info(f"Deleted {symbol} from temp location")
+                
+                except Exception as temp_e:
+                    logger.error(f"Failed to move/delete from temp: {temp_e}")
+                    # If move failed, try direct delete one more time
+                    try:
+                        def handle_remove_readonly(func, path, exc):
+                            """Error handler for Windows ReadOnly files."""
+                            import stat
+                            if not os.access(path, os.W_OK):
+                                os.chmod(path, stat.S_IWUSR | stat.S_IREAD)
+                                func(path)
+                            else:
+                                raise
+                        
+                        shutil.rmtree(symbol_dir, onerror=handle_remove_readonly)
+                        logger.info(f"Deleted {symbol} after temp move failed")
+                    except Exception as direct_e:
+                        raise Exception(f"Failed via temp move and direct delete: {temp_e}, {direct_e}")
             
             return jsonify({
                 "symbol": symbol.upper(),

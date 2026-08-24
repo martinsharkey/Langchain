@@ -68,44 +68,66 @@ class VectorbtOnboarder:
             self.sessions = sessions
         
         try:
-            # Stage 1: Load data
-            print("[Stage 1] Loading data...")
-            ohlcv = self._load_data()
-            if ohlcv is None or len(ohlcv) < 1000:
-                print(f"[ERROR] Insufficient data for {self.symbol}")
+            # Stage 1: Load data for all timeframes
+            print("[Stage 1] Loading data for all timeframes...")
+            all_timeframe_data = self._load_all_timeframes()
+            if not all_timeframe_data or not all_timeframe_data.values():
+                print(f"[ERROR] No valid data loaded for {self.symbol}")
                 return False
             
-            # Stage 2: Session-filtered optimization
-            print(f"[Stage 2] Session-filtered optimization ({len(self.sessions)} sessions, {len(self.timeframes)} timeframes)...\n")
+            print(f"  Successfully loaded data for {len(all_timeframe_data)} timeframes")
+            for tf, data in all_timeframe_data.items():
+                print(f"    {tf}: {len(data)} bars")
+            
+            # Stage 2: Session-filtered optimization for each timeframe
+            print(f"\n[Stage 2] Session-filtered optimization ({len(self.sessions)} sessions, {len(self.timeframes)} timeframes)...\n")
             optimizer = SessionFilterOptimizer()
             
-            for session in self.sessions:
-                print(f"\n{session.upper()}")
-                session_data = optimizer.filter_by_session(ohlcv, session)
-                
-                if len(session_data) < 100:
-                    print(f"  [SKIP] Insufficient data ({len(session_data)} bars)")
+            # Store results per timeframe
+            all_results = {}
+            
+            for timeframe in self.timeframes:
+                if timeframe not in all_timeframe_data:
+                    print(f"\n[SKIP] {timeframe} - insufficient data")
                     continue
                 
-                print(f"  Bars: {len(session_data)} | Testing combinations...")
+                ohlcv = all_timeframe_data[timeframe]
+                print(f"\n{'='*80}")
+                print(f"TESTING TIMEFRAME: {timeframe} ({len(ohlcv)} bars)")
+                print(f"{'='*80}")
                 
-                indicators = optimizer.calculate_indicators_for_session(session_data)
-                if not indicators:
-                    print(f"  [SKIP] Failed to calculate indicators")
-                    continue
+                all_results[timeframe] = {}
                 
-                # Test strategy combinations
-                session_results = self._test_combinations(session_data, indicators, session)
-                
-                if session_results:
-                    self.results[session] = session_results
-                    best = max(session_results, key=lambda x: x['pf'])
-                    print(f"  [BEST] {best['primary_ind']} + {best['secondary_ind']}: PF={best['pf']:.2f}, WR={best['wr']*100:.1f}%, Trades={best['trades']}")
+                for session in self.sessions:
+                    print(f"\n  {session.upper()}")
+                    session_data = optimizer.filter_by_session(ohlcv, session)
+                    
+                    if len(session_data) < 100:
+                        print(f"    [SKIP] Insufficient data ({len(session_data)} bars)")
+                        continue
+                    
+                    print(f"    Bars: {len(session_data)} | Testing combinations...")
+                    
+                    indicators = optimizer.calculate_indicators_for_session(session_data)
+                    if not indicators:
+                        print(f"    [SKIP] Failed to calculate indicators")
+                        continue
+                    
+                    # Test strategy combinations
+                    session_results = self._test_combinations(session_data, indicators, session, timeframe)
+                    
+                    if session_results:
+                        all_results[timeframe][session] = session_results
+                        best = max(session_results, key=lambda x: x['pf'])
+                        print(f"    [BEST] {best['primary_ind']} + {best['secondary_ind']}: PF={best['pf']:.2f}, WR={best['wr']*100:.1f}%, Trades={best['trades']}")
+            
+            # Store all results
+            self.results = all_results
             
             # Stage 3: Walk-forward validation
             print(f"\n[Stage 3] Walk-forward validation...")
             validated = self._validate_walk_forward()
-            print(f"  Validated strategies: {len(validated)}/{len(self.best_strategies)}")
+            print(f"  Validated strategies: {len(validated)}")
             
             # Stage 4: Floor discovery
             print(f"\n[Stage 4] Floor discovery...")
@@ -133,7 +155,7 @@ class VectorbtOnboarder:
             return False
     
     def _load_data(self) -> pd.DataFrame:
-        """Load OHLCV data for symbol."""
+        """Load OHLCV data for symbol at M15 timeframe (legacy method)."""
         try:
             print(f"  Loading {self.symbol} data...")
             bars = self.dm.get_rates(self.symbol, "M15", count=12000)
@@ -148,7 +170,30 @@ class VectorbtOnboarder:
             print(f"  [ERROR] Failed to load data: {e}")
             return None
     
-    def _test_combinations(self, session_data: pd.DataFrame, indicators: dict, session: str) -> list:
+    def _load_all_timeframes(self) -> dict:
+        """Load OHLCV data for symbol across all timeframes."""
+        all_data = {}
+        for timeframe in self.timeframes:
+            try:
+                print(f"  Loading {self.symbol} at {timeframe}...")
+                bars = self.dm.get_rates(self.symbol, timeframe, count=12000)
+                if not bars or len(bars) < 1000:
+                    print(f"    [SKIP] {timeframe}: insufficient data ({len(bars) if bars else 0} bars)")
+                    continue
+                
+                df = pd.DataFrame(bars)
+                ohlcv = df[['open', 'high', 'low', 'close', 'volume']].copy()
+                ohlcv.index = pd.to_datetime(df['time'], unit='s', utc=True)
+                
+                print(f"    Loaded: {len(ohlcv)} bars ({ohlcv.index[0]} to {ohlcv.index[-1]})")
+                all_data[timeframe] = ohlcv
+            except Exception as e:
+                print(f"    [ERROR] Failed to load {timeframe}: {e}")
+                continue
+        
+        return all_data
+    
+    def _test_combinations(self, session_data: pd.DataFrame, indicators: dict, session: str, timeframe: str = "M15") -> list:
         """Test all strategy combinations for this session."""
         primary_indicators = ['rsi_14', 'rsi_21', 'bb_20_2.0', 'bb_20_2.5', 'osma']
         secondary_filters = ['none', 'adx', 'stdev_20']
@@ -170,6 +215,7 @@ class VectorbtOnboarder:
                             if result and result['pf'] >= self.min_valid_pf * 0.5:  # Keep for later filtering
                                 results.append({
                                     'session': session,
+                                    'timeframe': timeframe,
                                     'primary_ind': primary,
                                     'secondary_ind': secondary,
                                     'sl_mult': sl_m,
@@ -188,8 +234,10 @@ class VectorbtOnboarder:
         # Sort by PF and keep top 10
         results_sorted = sorted(results, key=lambda x: x['pf'], reverse=True)[:10]
         
-        if session not in self.best_strategies:
-            self.best_strategies[session] = results_sorted[0] if results_sorted else None
+        # Track best strategy for this session+timeframe combination
+        session_tf_key = f"{session}_{timeframe}"
+        if session_tf_key not in self.best_strategies:
+            self.best_strategies[session_tf_key] = results_sorted[0] if results_sorted else None
         
         return results_sorted
     
@@ -309,9 +357,23 @@ class VectorbtOnboarder:
         """Validate top strategies with walk-forward testing."""
         validated = {}
         
-        for session, strategy in self.best_strategies.items():
-            if strategy and strategy['pf'] >= self.min_valid_pf:
-                validated[session] = strategy
+        # Group best strategies by session (take best across all timeframes)
+        session_results = {}
+        for session_tf_key, strategy in self.best_strategies.items():
+            if not strategy:
+                continue
+            
+            session = strategy['session']
+            if session not in session_results:
+                session_results[session] = []
+            session_results[session].append(strategy)
+        
+        # For each session, take the best strategy across timeframes
+        for session, strategies in session_results.items():
+            if strategies:
+                best_strategy = max(strategies, key=lambda x: x['pf'])
+                if best_strategy['pf'] >= self.min_valid_pf:
+                    validated[session] = best_strategy
         
         return validated
     
@@ -406,8 +468,9 @@ Generated: {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}
 """
         
         for session, strategy in validated.items():
+            timeframe = strategy.get('timeframe', 'M15')
             report += f"""
-#### {session.upper()}
+#### {session.upper()} (Timeframe: {timeframe})
 - Primary Indicator: {strategy['primary_ind']}
 - Secondary Filter: {strategy['secondary_ind']}
 - Stop Loss: {strategy['sl_mult']}× ATR
@@ -422,7 +485,9 @@ Generated: {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}
         report += f"""
 ## Summary
 
-- Total Sessions Optimized: {len(self.results)}
+- Total Timeframes Tested: {len(self.results)}
+- Tested Timeframes: {', '.join(sorted(self.results.keys()))}
+- Total Sessions Optimized: {sum(len(v) for v in self.results.values())}
 - Validated Strategies: {len(validated)}
 - Status: [READY FOR DEPLOYMENT]
 
