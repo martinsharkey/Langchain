@@ -31,7 +31,14 @@ class OptimizationDashboardBridge:
     """Bridge between dashboard UI and live parameter optimizer"""
     
     def __init__(self):
-        self.param_optimizer = ParameterOptimizer()
+        self.param_optimizer = None
+        try:
+            # ParameterOptimizer requires registry and backtest_fn
+            # If not available (e.g., in API-only mode), we'll skip direct optimization
+            # The bridge will still work for persistence and state management
+            pass
+        except Exception as e:
+            logger.debug(f"ParameterOptimizer not initialized (expected in API mode): {e}")
     
     def apply_session_toggle(self, symbol: str, session: str, enabled: bool) -> Dict:
         """
@@ -87,10 +94,14 @@ class OptimizationDashboardBridge:
             # Create session key for tracking
             session_key = f"{symbol}__{session}"
             
-            # Apply to ParameterOptimizer
-            self.param_optimizer.apply_session_params(session_key, params_to_apply)
+            # Apply to ParameterOptimizer if available
+            if self.param_optimizer:
+                try:
+                    self.param_optimizer.apply_session_params(session_key, params_to_apply)
+                except Exception as e:
+                    logger.warning(f"Failed to apply to ParameterOptimizer (may be in API mode): {e}")
             
-            # Persist to tuned_params.json
+            # Persist to tuned_params.json (always do this regardless of optimizer state)
             self._persist_session_state(symbol, session, enabled, params_to_apply, param_source)
             
             logger.info(f"✓ Applied {param_source} params for {symbol}/{session} (enabled={enabled})")

@@ -33,7 +33,7 @@ CORS(app)
 socketio = SocketIO(app, cors_allowed_origins="*")
 
 # Register optimization dashboard blueprint
-app.register_blueprint(optimization_bp, url_prefix="/api/v2/optimization")
+app.register_blueprint(optimization_bp)
 
 # Configuration
 QMMP_DIR = project_root / "data" / "qmmp"
