@@ -170,7 +170,6 @@ def run_onboarding(symbol):
             'progress': 5,
             'message': 'Initializing onboarding...'
         }
-        socketio.emit('onboarding_update', onboarding_jobs[symbol], broadcast=True)
         
         # Run vectorbt onboarding
         cmd = [sys.executable, '-m', 'scripts.qmmp.vectorbt_onboard', symbol, '--min-pf=1.2']
@@ -180,7 +179,6 @@ def run_onboarding(symbol):
             'progress': 15,
             'message': 'Loading data...'
         }
-        socketio.emit('onboarding_update', onboarding_jobs[symbol], broadcast=True)
         
         process = subprocess.Popen(
             cmd,
@@ -237,8 +235,6 @@ def run_onboarding(symbol):
                     'progress': 100,
                     'message': 'Onboarding complete!'
                 }
-            
-            socketio.emit('onboarding_update', onboarding_jobs[symbol], broadcast=True)
         
         # Wait for completion
         returncode = process.wait()
@@ -256,8 +252,6 @@ def run_onboarding(symbol):
                 'progress': 0,
                 'message': f'Onboarding failed: {stderr[:200]}'
             }
-        
-        socketio.emit('onboarding_update', onboarding_jobs[symbol], broadcast=True)
     
     except Exception as e:
         onboarding_jobs[symbol] = {
@@ -265,7 +259,6 @@ def run_onboarding(symbol):
             'progress': 0,
             'message': f'Error: {str(e)[:200]}'
         }
-        socketio.emit('onboarding_update', onboarding_jobs[symbol], broadcast=True)
 
 # REST API Routes
 
