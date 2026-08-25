@@ -265,6 +265,75 @@ def run_onboarding(symbol):
 
 # REST API Routes
 
+@app.route('/api/symbols', methods=['GET'])
+def api_list_symbols():
+    """Get list of available and onboarded symbols with status."""
+    try:
+        available = get_available_symbols()
+        onboarded = get_onboarded_symbols()
+        
+        symbols = []
+        
+        # Add onboarded symbols with status
+        for symbol in onboarded:
+            status = get_symbol_status(symbol)
+            symbols.append(status)
+        
+        # Add available but not onboarded symbols
+        for symbol in available:
+            if symbol not in onboarded:
+                symbols.append({
+                    'symbol': symbol,
+                    'status': 'not_onboarded',
+                    'progress': 0,
+                    'message': 'Not onboarded',
+                    'result': None
+                })
+        
+        return jsonify({
+            'status': 'ok',
+            'symbols': symbols,
+            'total': len(symbols)
+        })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/symbols', methods=['POST'])
+def api_add_symbol():
+    """Add a symbol for onboarding.
+    
+    Request: {
+      "symbol": "XAUUSD"
+    }
+    """
+    try:
+        data = request.get_json() or {}
+        symbol = data.get('symbol', '').upper().strip()
+        
+        if not symbol:
+            return jsonify({'error': 'Symbol is required'}), 400
+        
+        # Start onboarding
+        return api_onboard_symbol(symbol)
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/symbols/<symbol>/status', methods=['GET'])
+def api_get_symbol_status(symbol):
+    """Get detailed status of a symbol."""
+    return jsonify({'status': 'ok', 'data': get_symbol_status(symbol)})
+
+@app.route('/api/symbols/<symbol>', methods=['DELETE'])
+def api_delete_symbol(symbol):
+    """Delete/remove a symbol."""
+    return api_remove_symbol(symbol)
+
+@app.route('/api/symbols/<symbol>/onboard', methods=['POST'])
+def api_onboard_symbol_v2(symbol):
+    """Start onboarding for a symbol."""
+    return api_onboard_symbol(symbol)
+
+# Legacy endpoints (kept for backward compatibility)
 @app.route('/api/symbols/available', methods=['GET'])
 def api_available_symbols():
     """Get list of available symbols."""
@@ -417,12 +486,26 @@ def api_stats():
 @app.route('/')
 def index():
     """Serve the React frontend."""
-    return send_from_directory(str(project_root / 'src' / 'ui' / 'dist'), 'index.html')
+    # Try to serve from dashboard-frontend build first, then fallback
+    try:
+        return send_from_directory(str(project_root / 'dashboard' / 'public'), 'index.html')
+    except:
+        try:
+            return send_from_directory(str(project_root / 'src' / 'ui' / 'dist'), 'index.html')
+        except:
+            return jsonify({"error": "Frontend not built"}), 500
 
 @app.route('/<path:filename>')
 def serve_static(filename):
     """Serve static files."""
-    return send_from_directory(str(project_root / 'src' / 'ui' / 'dist'), filename)
+    # Try to serve from dashboard-frontend build first
+    try:
+        return send_from_directory(str(project_root / 'dashboard' / 'public'), filename)
+    except:
+        try:
+            return send_from_directory(str(project_root / 'src' / 'ui' / 'dist'), filename)
+        except:
+            return jsonify({"error": f"File {filename} not found"}), 404
 
 if __name__ == '__main__':
     socketio.run(app, host='0.0.0.0', port=5000, debug=False)

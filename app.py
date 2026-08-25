@@ -34,7 +34,7 @@ if len(sys.argv) > 1 and sys.argv[1].upper() in ("OBSERVE", "PAPER", "LIVE_MICRO
 
 from src import config
 from src.utils.logger import get_logger, console
-from dashboard.app import app as flask_app
+from src.ui.backend import app as flask_app
 
 logger = get_logger("app")
 
