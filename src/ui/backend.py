@@ -501,7 +501,11 @@ def index():
 
 @app.route('/<path:filename>')
 def serve_static(filename):
-    """Serve static files."""
+    """Serve static files - but NOT api routes."""
+    # Don't serve files that look like API routes
+    if filename.startswith('api/'):
+        return jsonify({"error": f"API endpoint not found"}), 404
+    
     # Try to serve from dashboard-frontend build first
     try:
         return send_from_directory(str(project_root / 'dashboard' / 'public'), filename)
@@ -509,6 +513,7 @@ def serve_static(filename):
         try:
             return send_from_directory(str(project_root / 'src' / 'ui' / 'dist'), filename)
         except:
+            # If no file found, return 404 (don't try to serve as HTML)
             return jsonify({"error": f"File {filename} not found"}), 404
 
 if __name__ == '__main__':
