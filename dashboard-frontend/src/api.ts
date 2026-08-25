@@ -98,7 +98,7 @@ export const dashboardAPI = {
    */
   getSymbolStatuses: async () => {
     const response = await apiRoot.get('/symbols')
-    return response.data
+    return response.data.symbols || []
   },
 
   /**

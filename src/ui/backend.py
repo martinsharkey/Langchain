@@ -457,6 +457,11 @@ def api_download_ea(symbol):
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
+@app.route('/api/tasks', methods=['GET'])
+def api_tasks():
+    """Get list of onboarding tasks."""
+    return jsonify(list(onboarding_jobs.values()))
+
 @app.route('/api/stats', methods=['GET'])
 def api_stats():
     """Get overall statistics."""
