@@ -31,6 +31,10 @@ app = Flask(__name__)
 CORS(app)
 socketio = SocketIO(app, cors_allowed_origins="*")
 
+# Register all dashboard API blueprints
+from src.dashboard.routes_v2 import register_routes as register_v2_routes
+register_v2_routes(app)
+
 # Configuration
 QMMP_DIR = project_root / "data" / "qmmp"
 QMMP_DIR.mkdir(parents=True, exist_ok=True)
