@@ -1,0 +1,105 @@
+# Prometheus Alert Rules for StrategyOps
+
+groups:
+  - name: strategyops_alerts
+    interval: 30s
+    rules:
+      # Service health alerts
+      - alert: ServiceDown
+        expr: up{job=~".*-service"} == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Service {{ $labels.job }} is down"
+          description: "{{ $labels.job }} has been unreachable for more than 2 minutes."
+
+      # High error rate
+      - alert: HighErrorRate
+        expr: rate(http_requests_total{status=~"5.."}[5m]) > 0.05
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High error rate on {{ $labels.job }}"
+          description: "Error rate is {{ $value | humanizePercentage }} over the last 5 minutes."
+
+      # High response time
+      - alert: HighResponseTime
+        expr: histogram_quantile(0.95, http_request_duration_seconds_bucket) > 1
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High response time on {{ $labels.job }}"
+          description: "95th percentile response time is {{ $value }}s."
+
+      # Database connection pool exhausted
+      - alert: DBConnectionPoolExhausted
+        expr: db_connections_active / db_connections_max > 0.8
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Database connection pool running low"
+          description: "Connection pool usage is {{ $value | humanizePercentage }}."
+
+      # Trade execution failures
+      - alert: TradeExecutionFailures
+        expr: rate(trades_failed_total[5m]) > 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Trade execution failures detected"
+          description: "{{ $value }} trades failed in the last 5 minutes."
+
+      # Workflow job failures
+      - alert: WorkflowJobFailures
+        expr: rate(workflow_jobs_failed_total[10m]) > 0.1
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High workflow job failure rate"
+          description: "{{ $value | humanizePercentage }} of workflow jobs are failing."
+
+      # Strategies with high loss streaks
+      - alert: HighConsecutiveLosses
+        expr: strategy_consecutive_losses > 10
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Strategy {{ $labels.strategy_id }} has {{ $value }} consecutive losses"
+          description: "Strategy may need pausing or tuning."
+
+      # Low disk space
+      - alert: LowDiskSpace
+        expr: node_filesystem_avail_bytes / node_filesystem_size_bytes < 0.1
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Low disk space on {{ $labels.device }}"
+          description: "{{ $value | humanizePercentage }} of disk space remaining."
+
+      # High memory usage
+      - alert: HighMemoryUsage
+        expr: (1 - (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes)) > 0.9
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High memory usage detected"
+          description: "Memory usage is {{ $value | humanizePercentage }}."
+
+      # Certificate expiration warning
+      - alert: CertificateExpiringSoon
+        expr: certbot_expiry_days < 30
+        for: 1h
+        labels:
+          severity: warning
+        annotations:
+          summary: "Certificate expiring in {{ $value }} days"
+          description: "SSL certificate will expire soon. Please renew."

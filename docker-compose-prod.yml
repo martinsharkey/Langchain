@@ -1,0 +1,259 @@
+version: '3.8'
+
+services:
+  # ============ DATABASE ============
+  postgres:
+    image: postgres:15-alpine
+    container_name: postgres-db
+    environment:
+      POSTGRES_USER: strategyops
+      POSTGRES_PASSWORD: secure_password_change_me
+      POSTGRES_DB: strategyops
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./init-db.sql:/docker-entrypoint-initdb.d/init.sql
+    ports:
+      - "5432:5432"
+    networks:
+      - strategyops
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U strategyops"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  # ============ SERVICES (6 core) ============
+  
+  discovery-service:
+    build:
+      context: ./services/discovery-service
+      dockerfile: Dockerfile
+    container_name: discovery-service
+    environment:
+      - LOG_LEVEL=INFO
+      - SERVICE_PORT=8001
+      - DATABASE_URL=postgresql://strategyops:secure_password_change_me@postgres:5432/strategyops
+    ports:
+      - "8001:8001"
+    networks:
+      - strategyops
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8001/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
+    restart: unless-stopped
+
+  optimization-service:
+    build:
+      context: ./services/optimization-service
+      dockerfile: Dockerfile
+    container_name: optimization-service
+    environment:
+      - LOG_LEVEL=INFO
+      - SERVICE_PORT=8002
+      - DATABASE_URL=postgresql://strategyops:secure_password_change_me@postgres:5432/strategyops
+    ports:
+      - "8002:8002"
+    networks:
+      - strategyops
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8002/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
+    restart: unless-stopped
+
+  validation-service:
+    build:
+      context: ./services/validation-service
+      dockerfile: Dockerfile
+    container_name: validation-service
+    environment:
+      - LOG_LEVEL=INFO
+      - SERVICE_PORT=8003
+      - DATABASE_URL=postgresql://strategyops:secure_password_change_me@postgres:5432/strategyops
+    ports:
+      - "8003:8003"
+    networks:
+      - strategyops
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8003/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
+    restart: unless-stopped
+
+  deployment-service:
+    build:
+      context: ./services/deployment-service
+      dockerfile: Dockerfile
+    container_name: deployment-service
+    environment:
+      - LOG_LEVEL=INFO
+      - SERVICE_PORT=8004
+      - DATABASE_URL=postgresql://strategyops:secure_password_change_me@postgres:5432/strategyops
+    ports:
+      - "8004:8004"
+    networks:
+      - strategyops
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8004/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
+    restart: unless-stopped
+
+  orchestration-service:
+    build:
+      context: ./services/orchestration-service
+      dockerfile: Dockerfile
+    container_name: orchestration-service
+    environment:
+      - LOG_LEVEL=INFO
+      - SERVICE_PORT=8005
+      - DATABASE_URL=postgresql://strategyops:secure_password_change_me@postgres:5432/strategyops
+    ports:
+      - "8005:8005"
+    networks:
+      - strategyops
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8005/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
+    restart: unless-stopped
+
+  execution-service:
+    build:
+      context: ./services/execution-service
+      dockerfile: Dockerfile
+    container_name: execution-service
+    environment:
+      - LOG_LEVEL=INFO
+      - SERVICE_PORT=8006
+      - DATABASE_URL=postgresql://strategyops:secure_password_change_me@postgres:5432/strategyops
+    ports:
+      - "8006:8006"
+    networks:
+      - strategyops
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8006/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
+    restart: unless-stopped
+
+  # ============ AUTH SERVICE ============
+  
+  auth-service:
+    build:
+      context: ./services/auth-service
+      dockerfile: Dockerfile
+    container_name: auth-service
+    environment:
+      - LOG_LEVEL=INFO
+      - SERVICE_PORT=8007
+      - DATABASE_URL=postgresql://strategyops:secure_password_change_me@postgres:5432/strategyops
+      - JWT_SECRET_KEY=your-secret-key-change-in-production
+    ports:
+      - "8007:8007"
+    networks:
+      - strategyops
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8007/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
+    restart: unless-stopped
+
+  # ============ API GATEWAY ============
+  
+  api-gateway:
+    image: nginx:alpine
+    container_name: api-gateway
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+    networks:
+      - strategyops
+    depends_on:
+      - discovery-service
+      - optimization-service
+      - validation-service
+      - deployment-service
+      - orchestration-service
+      - execution-service
+      - auth-service
+    restart: unless-stopped
+
+  # ============ MONITORING ============
+  
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: prometheus
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml
+      - prometheus-data:/prometheus
+    ports:
+      - "9090:9090"
+    networks:
+      - strategyops
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+    restart: unless-stopped
+
+  grafana:
+    image: grafana/grafana:latest
+    container_name: grafana
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_USERS_ALLOW_SIGN_UP=false
+    volumes:
+      - grafana-data:/var/lib/grafana
+    ports:
+      - "3000:3000"
+    networks:
+      - strategyops
+    depends_on:
+      - prometheus
+    restart: unless-stopped
+
+networks:
+  strategyops:
+    driver: bridge
+
+volumes:
+  postgres-data:
+  prometheus-data:
+  grafana-data:

@@ -1,0 +1,169 @@
+version: '3.8'
+
+services:
+  # Discovery Service
+  discovery-service:
+    build:
+      context: ./services/discovery-service
+      dockerfile: Dockerfile
+    container_name: discovery-service
+    environment:
+      - LOG_LEVEL=INFO
+      - SERVICE_PORT=8001
+    ports:
+      - "8001:8001"
+    networks:
+      - strategyops
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8001/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
+    restart: unless-stopped
+
+  # Optimization Service
+  optimization-service:
+    build:
+      context: ./services/optimization-service
+      dockerfile: Dockerfile
+    container_name: optimization-service
+    environment:
+      - LOG_LEVEL=INFO
+      - SERVICE_PORT=8002
+    ports:
+      - "8002:8002"
+    networks:
+      - strategyops
+    depends_on:
+      - discovery-service
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8002/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
+    restart: unless-stopped
+
+  # Validation Service
+  validation-service:
+    build:
+      context: ./services/validation-service
+      dockerfile: Dockerfile
+    container_name: validation-service
+    environment:
+      - LOG_LEVEL=INFO
+      - SERVICE_PORT=8003
+    ports:
+      - "8003:8003"
+    networks:
+      - strategyops
+    depends_on:
+      - optimization-service
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8003/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
+    restart: unless-stopped
+
+  # Deployment Service
+  deployment-service:
+    build:
+      context: ./services/deployment-service
+      dockerfile: Dockerfile
+    container_name: deployment-service
+    environment:
+      - LOG_LEVEL=INFO
+      - SERVICE_PORT=8004
+    ports:
+      - "8004:8004"
+    networks:
+      - strategyops
+    depends_on:
+      - validation-service
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8004/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
+    restart: unless-stopped
+
+  # Orchestration Service
+  orchestration-service:
+    build:
+      context: ./services/orchestration-service
+      dockerfile: Dockerfile
+    container_name: orchestration-service
+    environment:
+      - LOG_LEVEL=INFO
+      - SERVICE_PORT=8005
+    ports:
+      - "8005:8005"
+    networks:
+      - strategyops
+    depends_on:
+      - deployment-service
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8005/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
+    restart: unless-stopped
+
+  # Execution Service
+  execution-service:
+    build:
+      context: ./services/execution-service
+      dockerfile: Dockerfile
+    container_name: execution-service
+    environment:
+      - LOG_LEVEL=INFO
+      - SERVICE_PORT=8006
+    ports:
+      - "8006:8006"
+    networks:
+      - strategyops
+    depends_on:
+      - orchestration-service
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8006/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
+    restart: unless-stopped
+
+  # API Gateway
+  api-gateway:
+    image: nginx:latest
+    container_name: api-gateway
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+    networks:
+      - strategyops
+    depends_on:
+      - discovery-service
+      - optimization-service
+      - validation-service
+      - deployment-service
+      - orchestration-service
+      - execution-service
+    restart: unless-stopped
+
+networks:
+  strategyops:
+    driver: bridge
+
+volumes:
+  discovery-db:
+  optimization-db:
+  validation-db:
+  deployment-db:
+  orchestration-db:
+  execution-db:

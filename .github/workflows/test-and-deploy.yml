@@ -1,0 +1,207 @@
+name: Test & Deploy
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main, develop ]
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+
+jobs:
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    
+    services:
+      postgres:
+        image: postgres:15-alpine
+        env:
+          POSTGRES_USER: strategyops
+          POSTGRES_PASSWORD: testpass
+          POSTGRES_DB: strategyops_test
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+
+    steps:
+      - uses: actions/checkout@v3
+      
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+      
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install pytest pytest-asyncio requests pytest-cov
+          pip install -r services/discovery-service/requirements.txt
+          pip install -r services/optimization-service/requirements.txt
+          pip install -r services/validation-service/requirements.txt
+          pip install -r services/deployment-service/requirements.txt
+          pip install -r services/orchestration-service/requirements.txt
+          pip install -r services/execution-service/requirements.txt
+          pip install -r services/auth-service/requirements.txt
+      
+      - name: Run linting
+        run: |
+          pip install flake8 black isort
+          flake8 services/ --max-line-length=100
+          black --check services/
+          isort --check-only services/
+        continue-on-error: true
+      
+      - name: Run unit tests
+        run: |
+          pytest services/ -v --cov=services --cov-report=xml
+        env:
+          DATABASE_URL: postgresql://strategyops:testpass@localhost:5432/strategyops_test
+      
+      - name: Upload coverage
+        uses: codecov/codecov-action@v3
+        with:
+          files: ./coverage.xml
+
+  build:
+    name: Build & Push Docker Images
+    needs: test
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push'
+    
+    permissions:
+      contents: read
+      packages: write
+    
+    strategy:
+      matrix:
+        service:
+          - discovery-service
+          - optimization-service
+          - validation-service
+          - deployment-service
+          - orchestration-service
+          - execution-service
+          - auth-service
+
+    steps:
+      - uses: actions/checkout@v3
+      
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v2
+      
+      - name: Log in to Container Registry
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@v2
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v4
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}/${{ matrix.service }}
+          tags: |
+            type=ref,event=branch
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=sha
+      
+      - name: Build and push
+        uses: docker/build-push-action@v4
+        with:
+          context: ./services/${{ matrix.service }}
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+
+  integration-test:
+    name: Integration Tests
+    needs: build
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    
+    steps:
+      - uses: actions/checkout@v3
+      
+      - name: Set up Docker Compose
+        run: |
+          docker-compose version
+      
+      - name: Start services
+        run: |
+          docker-compose -f docker-compose-prod.yml up -d
+          sleep 30
+      
+      - name: Run integration tests
+        run: |
+          pip install pytest requests
+          pytest tests/test_integration.py -v
+      
+      - name: Check service health
+        run: |
+          curl -f http://localhost:8000/health || true
+          curl -f http://localhost:8001/health || true
+          curl -f http://localhost:8002/health || true
+        continue-on-error: true
+      
+      - name: Clean up
+        if: always()
+        run: |
+          docker-compose -f docker-compose-prod.yml down
+
+  deploy:
+    name: Deploy to Production
+    needs: integration-test
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    
+    steps:
+      - uses: actions/checkout@v3
+      
+      - name: Configure kubectl
+        env:
+          KUBE_CONFIG: ${{ secrets.KUBE_CONFIG }}
+        run: |
+          mkdir -p $HOME/.kube
+          echo "$KUBE_CONFIG" | base64 -d > $HOME/.kube/config
+          chmod 600 $HOME/.kube/config
+      
+      - name: Deploy to Kubernetes
+        run: |
+          kubectl apply -f k8s/deployment.yaml
+          kubectl rollout status deployment -n strategyops --timeout=5m
+      
+      - name: Verify deployment
+        run: |
+          kubectl get pods -n strategyops
+          kubectl get svc -n strategyops
+      
+      - name: Notify Slack
+        if: success()
+        uses: slackapi/slack-github-action@v1
+        with:
+          payload: |
+            {
+              "text": "StrategyOps V2.0 deployment successful",
+              "blocks": [
+                {
+                  "type": "section",
+                  "text": {
+                    "type": "mrkdwn",
+                    "text": "Deployment successful to production\n*Repository*: ${{ github.repository }}\n*Branch*: ${{ github.ref_name }}\n*Commit*: ${{ github.sha }}"
+                  }
+                }
+              ]
+            }
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+          SLACK_WEBHOOK_TYPE: INCOMING_WEBHOOK

@@ -1,0 +1,80 @@
+# Prometheus Configuration for StrategyOps
+
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+  external_labels:
+    cluster: 'strategyops-v2'
+    environment: 'production'
+
+# Alertmanager configuration
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets: []
+
+# Load rules once and periodically evaluate them
+rule_files:
+  - 'alerts.yml'
+
+# Scrape configurations
+scrape_configs:
+  # Prometheus itself
+  - job_name: 'prometheus'
+    static_configs:
+      - targets: ['localhost:9090']
+
+  # Discovery Service
+  - job_name: 'discovery-service'
+    static_configs:
+      - targets: ['discovery-service:8001']
+    metrics_path: '/metrics'
+    scrape_interval: 10s
+
+  # Optimization Service
+  - job_name: 'optimization-service'
+    static_configs:
+      - targets: ['optimization-service:8002']
+    metrics_path: '/metrics'
+    scrape_interval: 10s
+
+  # Validation Service
+  - job_name: 'validation-service'
+    static_configs:
+      - targets: ['validation-service:8003']
+    metrics_path: '/metrics'
+    scrape_interval: 10s
+
+  # Deployment Service
+  - job_name: 'deployment-service'
+    static_configs:
+      - targets: ['deployment-service:8004']
+    metrics_path: '/metrics'
+    scrape_interval: 10s
+
+  # Orchestration Service
+  - job_name: 'orchestration-service'
+    static_configs:
+      - targets: ['orchestration-service:8005']
+    metrics_path: '/metrics'
+    scrape_interval: 10s
+
+  # Execution Service
+  - job_name: 'execution-service'
+    static_configs:
+      - targets: ['execution-service:8006']
+    metrics_path: '/metrics'
+    scrape_interval: 10s
+
+  # Auth Service
+  - job_name: 'auth-service'
+    static_configs:
+      - targets: ['auth-service:8007']
+    metrics_path: '/metrics'
+    scrape_interval: 10s
+
+  # PostgreSQL (if using postgres_exporter)
+  - job_name: 'postgres'
+    static_configs:
+      - targets: ['postgres:5432']
+    scrape_interval: 15s

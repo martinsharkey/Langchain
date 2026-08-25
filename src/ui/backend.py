@@ -93,7 +93,7 @@ def get_symbol_status(symbol):
             'status': onboarding_jobs[symbol]['status'],
             'progress': onboarding_jobs[symbol].get('progress', 0),
             'message': onboarding_jobs[symbol].get('message', ''),
-            'result': None
+            'error': onboarding_jobs[symbol].get('error') if onboarding_jobs[symbol].get('status') == 'error' else None
         }
     
     if symbol_dir.exists():
@@ -103,27 +103,64 @@ def get_symbol_status(symbol):
                 with open(results_file) as f:
                     results = json.load(f)
                 
-                report_file = symbol_dir / f"{symbol}_onboarding_report.md"
-                report = None
-                if report_file.exists():
-                    with open(report_file) as f:
-                        report = f.read()
+                validated = results.get('validated_strategies', {})
+                date_range = results.get('date_range', {})
+                
+                # Build per-session data structure for dashboard
+                sessions = {}
+                for session_name, strategy in validated.items():
+                    sessions[session_name] = {
+                        'timeframe': strategy.get('timeframe', 'N/A'),
+                        'profit_factor': round(strategy.get('pf', 0), 2),
+                        'win_rate': round(strategy.get('wr', 0), 4),
+                        'sharpe_ratio': round(strategy.get('sharpe', 0), 2),
+                        'best_strategy': strategy.get('primary_ind', 'N/A'),
+                        'sl_multiplier': round(strategy.get('sl_mult', 0), 1),
+                        'tp_ratio': round(strategy.get('tp_ratio', 0), 1),
+                        'total_trades': strategy.get('trades', 0),
+                        'floor_config': {
+                            'strategy': strategy.get('primary_ind'),
+                            'sl': strategy.get('sl_mult'),
+                            'tp': strategy.get('tp_ratio')
+                        }
+                    }
+                
+                # Calculate best overall results
+                best_pf = max([s.get('pf', 0) for s in validated.values()], default=0)
+                best_session = max(validated.items(), key=lambda x: x[1].get('pf', 0))[0] if validated else 'N/A'
+                avg_wr = sum([s.get('wr', 0) for s in validated.values()]) / len(validated) if validated else 0
+                total_trades = sum([s.get('trades', 0) for s in validated.values()])
+                
+                # Build date range string
+                duration_str = 'N/A'
+                if date_range and date_range.get('duration_days'):
+                    days = date_range['duration_days']
+                    duration_str = f"{days} days (~{days/7:.1f}w, ~{days/30:.1f}m)"
                 
                 return {
                     'symbol': symbol,
                     'status': 'onboarded',
                     'progress': 100,
                     'message': 'Onboarding complete',
-                    'result': {
-                        'symbol': symbol,
-                        'timestamp': results.get('timestamp'),
-                        'validated_strategies': len(results.get('validated_strategies', {})),
-                        'top_strategies': _get_top_strategies(results),
-                        'report': report
-                    }
+                    'last_updated': results.get('timestamp'),
+                    'results': {
+                        'best_strategy': validated.get(best_session, {}).get('primary_ind', 'N/A') if validated else 'N/A',
+                        'best_session': best_session,
+                        'profit_factor': round(best_pf, 2),
+                        'win_rate': round(avg_wr, 4),
+                        'sharpe_ratio': round(max([s.get('sharpe', 0) for s in validated.values()], default=0), 2),
+                        'total_trades': total_trades,
+                        'validated': True
+                    },
+                    'date_range': {
+                        'start_date': date_range.get('start_date'),
+                        'end_date': date_range.get('end_date'),
+                        'duration_str': duration_str
+                    },
+                    'sessions': sessions
                 }
-            except:
-                pass
+            except Exception as e:
+                print(f"Error reading {results_file}: {e}")
     
     return {
         'symbol': symbol,
