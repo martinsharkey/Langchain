@@ -80,18 +80,18 @@ SESSION_DEFINITIONS: Dict[str, Session] = {
     ),
     # Post-market-open micro-sessions: highly volatile 15/30/60-minute windows
     # after the weekday open (Mon-Thu).
-    "post_market_open_15": Session(
-        key="post_market_open_15", name="Post-Market Open (15m)", days=[0, 1, 2, 3],
+    "market_open_15": Session(
+        key="market_open_15", name="Post-Market Open (15m)", days=[0, 1, 2, 3],
         start_hour=22, start_minute=0, end_hour=22, end_minute=15, kind="micro",
         description="Mon-Thu first 15 min after open (22:00-22:15 UTC)",
     ),
-    "post_market_open_30": Session(
-        key="post_market_open_30", name="Post-Market Open (30m)", days=[0, 1, 2, 3],
+    "market_open_30": Session(
+        key="market_open_30", name="Post-Market Open (30m)", days=[0, 1, 2, 3],
         start_hour=22, start_minute=0, end_hour=22, end_minute=30, kind="micro",
         description="Mon-Thu first 30 min after open (22:00-22:30 UTC)",
     ),
-    "post_market_open_60": Session(
-        key="post_market_open_60", name="Post-Market Open (60m)", days=[0, 1, 2, 3],
+    "market_open_60": Session(
+        key="market_open_60", name="Post-Market Open (60m)", days=[0, 1, 2, 3],
         start_hour=22, start_minute=0, end_hour=23, end_minute=0, kind="micro",
         description="Mon-Thu first 60 min after open (22:00-23:00 UTC)",
     ),
@@ -129,9 +129,9 @@ SESSION_ORDER: List[str] = [
     "newyork",
     "overlap_asia_london",
     "overlap_london_ny",
-    "post_market_open_15",
-    "post_market_open_30",
-    "post_market_open_60",
+    "market_open_15",
+    "market_open_30",
+    "market_open_60",
     "weekly_close",
     "sunday_open",
     "friday_close",
