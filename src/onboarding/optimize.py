@@ -18,7 +18,7 @@ from src.onboarding.backtest import run_backtest
 from src.onboarding.data import load_ohlcv
 from src.onboarding.indicators import run_indicator, wrap
 from src.onboarding.metrics import ScoredResult, composite_score
-from src.onboarding.sessions import filter_session
+from src.onboarding.sessions import load_session_ohlcv
 from src.onboarding.signals import generate_signals
 from src.onboarding.timeframes import timeframe_minutes
 
@@ -82,8 +82,8 @@ class Optimizer:
                 continue
 
             ind = wrap(cand.indicator, cand.library)
-            df = self._load_session_data(cand)
-            if df is None or len(df) < 100:
+            ohlcv = self._load_session_data(cand)
+            if ohlcv is None or "close" not in ohlcv or ohlcv["close"].shape[1] == 0:
                 continue
 
             param_names = list(getattr(ind.cls, "param_names", ()) or ())
@@ -104,24 +104,51 @@ class Optimizer:
                 load_if_exists=True,
             )
 
-            def objective(trial, _ind=ind, _df=df, _cand=cand, _param_names=param_names):
+            def objective(trial, _ind=ind, _ohlcv=ohlcv, _cand=cand, _param_names=param_names):
                 params = _suggest_params(trial, _param_names)
                 try:
-                    run = run_indicator(
-                        _ind, _df["close"], _df["high"], _df["low"],
-                        _df["open"], _df["volume"], **params,
-                    )
-                    entries, exits = generate_signals(run, _ind.library, _ind.name)
-                    if entries.sum() < 2:
+                    # Native VectorBT run per session occurrence.
+                    close_cols = _ohlcv["close"]
+                    n_cols = close_cols.shape[1]
+                    all_trades: List[int] = []
+                    all_win_rates: List[float] = []
+                    all_pf: List[float] = []
+                    all_returns: List[float] = []
+
+                    for col_idx in range(n_cols):
+                        col_data = {k: v.iloc[:, col_idx].dropna() for k, v in _ohlcv.items()}
+                        if len(col_data.get("close", [])) < 50:
+                            continue
+                        inputs = {k: col_data[k] for k in _ind.cls.input_names if k in col_data}
+                        run = _ind.cls.run(**inputs, **params)
+                        entries, exits = generate_signals(run, _ind.library, _ind.name)
+                        if entries.sum() < 2:
+                            continue
+                        import vectorbt as vbt
+                        pf = vbt.Portfolio.from_signals(
+                            col_data["close"], entries, exits,
+                            init_cash=self.init_cash,
+                            freq=f"{timeframe_minutes(_cand.timeframe)}min",
+                        )
+                        if pf.trades.count() < 1:
+                            continue
+                        all_trades.append(int(pf.trades.count()))
+                        all_win_rates.append(float(pf.trades.win_rate() or 0.0))
+                        pf_val = pf.trades.profit_factor()
+                        all_pf.append(float(pf_val) if np.isfinite(pf_val) else 0.0)
+                        all_returns.append(float(pf.total_return() or 0.0))
+
+                    if not all_trades:
                         return 0.0
-                    res = run_backtest(
-                        _df["close"], entries, exits,
-                        init_cash=self.init_cash,
-                        freq=f"{timeframe_minutes(_cand.timeframe)}min",
-                    )
-                    if res is None:
-                        return 0.0
-                    return composite_score(res)
+                    # Score using aggregated native stats.
+                    import numpy as np
+                    result_trades = int(np.sum(all_trades))
+                    result_win_rate = float(np.mean(all_win_rates))
+                    result_pf = float(np.mean(all_pf))
+                    result_return = float(np.mean(all_returns))
+                    # Composite score components.
+                    score = result_pf * 0.35 + (1 + min(0, result_return)) * 0.30 + result_win_rate * 0.15
+                    return max(0.0, score)
                 except Exception:  # noqa: BLE001
                     return 0.0
 
@@ -173,13 +200,8 @@ class Optimizer:
             "study_db": None,
         }
 
-    def _load_session_data(self, cand: ScoredResult) -> Optional[pd.DataFrame]:
-        try:
-            df = load_ohlcv(self.symbol, cand.timeframe, count=5000)
-        except Exception as e:  # noqa: BLE001
-            logger.warning(f"load failed for {cand.timeframe}: {e}")
-            return None
-        return filter_session(df, cand.session)
+    def _load_session_data(self, cand: ScoredResult) -> Optional[dict]:
+        return load_session_ohlcv(self.symbol, cand.timeframe, cand.session, count=5000)
 
 
 __all__ = ["Optimizer"]

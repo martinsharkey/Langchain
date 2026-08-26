@@ -1,4 +1,15 @@
-"""Phase 3: walk-forward out-of-sample validation."""
+"""Phase 3: walk-forward out-of-sample validation using VectorBT's native rolling splitter.
+
+VectorBT provides native walk-forward splitting via ``price.vbt.rolling_split()``
+(`generic/splitters.py:RollingSplitter`). This replaces manual fold slicing with
+VectorBT's native in-sample/out-sample range generation, as demonstrated in the
+``WalkForwardOptimization.ipynb`` example.
+
+Native API:
+    (in_price, in_indexes), (out_price, out_indexes) = price.vbt.rolling_split(
+        n=30, window_len=365*2, set_lens=(180,), left_to_right=False
+    )
+"""
 
 from __future__ import annotations
 
@@ -12,7 +23,7 @@ import pandas as pd
 from src.onboarding.backtest import run_backtest
 from src.onboarding.data import load_ohlcv
 from src.onboarding.indicators import run_indicator, wrap
-from src.onboarding.sessions import filter_session
+from src.onboarding.sessions import load_session_ohlcv
 from src.onboarding.signals import generate_signals
 from src.onboarding.timeframes import timeframe_minutes
 
@@ -26,7 +37,7 @@ N_FOLDS = 5
 
 @dataclass
 class ValidationResult:
-    """Walk-forward validation outcome for a tuned candidate."""
+    """Walk-forward validation outcome for a candidate."""
 
     indicator: str
     library: str
@@ -41,7 +52,7 @@ class ValidationResult:
 
 
 class Validator:
-    """Chronological walk-forward OOS validation."""
+    """Walk-forward OOS validation using VectorBT's native ``rolling_split``."""
 
     def __init__(self, symbol: str, init_cash: float = 10_000.0, n_folds: int = N_FOLDS):
         self.symbol = symbol
@@ -51,8 +62,8 @@ class Validator:
     def validate(self, tuned: List[Dict]) -> List[ValidationResult]:
         results: List[ValidationResult] = []
         for cand in tuned:
-            df = self._load_session_data(cand)
-            if df is None or len(df) < self.n_folds * 50:
+            ohlcv = self._load_session_data(cand)
+            if ohlcv is None or "close" not in ohlcv or ohlcv["close"].shape[1] == 0:
                 results.append(
                     ValidationResult(
                         indicator=cand["indicator"], library=cand["library"],
@@ -64,35 +75,90 @@ class Validator:
                 )
                 continue
 
-            result = self._walk_forward(cand, df)
+            result = self._walk_forward(cand, ohlcv)
             results.append(result)
 
         return results
 
-    def _walk_forward(self, cand: Dict, df: pd.DataFrame) -> ValidationResult:
+    def _walk_forward(self, cand: Dict, ohlcv: Dict[str, pd.DataFrame]) -> ValidationResult:
+        """Validate a single candidate using native ``rolling_split``.
+
+        Uses VectorBT's ``price.vbt.rolling_split()`` to generate chronological
+        in-sample/out-sample folds, replacing manual fold slicing.
+        """
         freq = f"{timeframe_minutes(cand['timeframe'])}min"
-        n = len(df)
-        fold_size = n // self.n_folds
+
+        # Concatenate per-session occurrences into contiguous series for walk-forward.
+        close = self._concat_session_columns(ohlcv["close"])
+        if len(close) < self.n_folds * 50:
+            return ValidationResult(
+                indicator=cand["indicator"], library=cand["library"],
+                session=cand["session"], timeframe=cand["timeframe"],
+                passed=False, pf_in_sample=0.0, pf_oos=0.0,
+                degradation_pct=0.0, trades_out_sample=0,
+                reason="insufficient data for walk-forward",
+            )
+        high = self._concat_session_columns(ohlcv["high"])
+        low = self._concat_session_columns(ohlcv["low"])
+        open_ = self._concat_session_columns(ohlcv["open"])
+        volume = self._concat_session_columns(ohlcv["volume"])
+
+        price = close
+
+        # Native VectorBT rolling walk-forward split.
+        # window_len auto-derived from n_folds; set_lens reserves ~20% for testing.
+        test_len = max(int(len(price) * 0.2), 20)
+        try:
+            (in_price, _), (out_price, _) = price.vbt.rolling_split(
+                n=self.n_folds,
+                set_lens=(test_len,),
+                left_to_right=False,
+            )
+        except Exception as e:  # noqa: BLE001
+            logger.debug(f"rolling_split failed for {cand['indicator']}: {e}")
+            return ValidationResult(
+                indicator=cand["indicator"], library=cand["library"],
+                session=cand["session"], timeframe=cand["timeframe"],
+                passed=False, pf_in_sample=0.0, pf_out_sample=0.0,
+                degradation_pct=0.0, trades_out_sample=0,
+                reason=f"rolling_split failed: {e}",
+            )
 
         in_sample_pfs: List[float] = []
         out_sample_pfs: List[float] = []
         oos_trades = 0
 
-        for i in range(self.n_folds - 1):
-            train = df.iloc[: (i + 1) * fold_size]
-            test = df.iloc[(i + 1) * fold_size: (i + 2) * fold_size]
-            if len(train) < 50 or len(test) < 20:
+        # in_price / out_price are DataFrames with one column per fold.
+        for fold_idx in range(in_price.shape[1]):
+            in_col = in_price.iloc[:, fold_idx].dropna()
+            out_col = out_price.iloc[:, fold_idx].dropna()
+            if len(in_col) < 50 or len(out_col) < 20:
                 continue
 
+            in_df = pd.DataFrame({
+                "close": in_col,
+                "high": high.loc[in_col.index],
+                "low": low.loc[in_col.index],
+                "open": open_.loc[in_col.index],
+                "volume": volume.loc[in_col.index],
+            })
+            out_df = pd.DataFrame({
+                "close": out_col,
+                "high": high.loc[out_col.index],
+                "low": low.loc[out_col.index],
+                "open": open_.loc[out_col.index],
+                "volume": volume.loc[out_col.index],
+            })
+
             try:
-                res = self._backtest_candidate(cand, train, freq)
+                res = self._backtest_candidate(cand, in_df, freq)
                 if res is not None:
                     in_sample_pfs.append(res.profit_factor)
             except Exception:  # noqa: BLE001
                 continue
 
             try:
-                res = self._backtest_candidate(cand, test, freq)
+                res = self._backtest_candidate(cand, out_df, freq)
                 if res is not None:
                     out_sample_pfs.append(res.profit_factor)
                     oos_trades += res.trades
@@ -127,12 +193,25 @@ class Validator:
             reason=reason,
         )
 
+    @staticmethod
+    def _concat_session_columns(df: pd.DataFrame) -> pd.Series:
+        """Concatenate per-session occurrence columns into a contiguous series.
+
+        Each column in the input represents one session occurrence (e.g. one day's
+        London session). This concatenates them end-to-end (dropping NaN padding)
+        to produce a contiguous price series suitable for walk-forward splitting.
+        """
+        parts = [df.iloc[:, i].dropna() for i in range(df.shape[1])]
+        parts = [p for p in parts if len(p) > 0]
+        if not parts:
+            return pd.Series(dtype=float)
+        return pd.concat(parts)
+
     def _backtest_candidate(self, cand: Dict, df: pd.DataFrame, freq: str):
         """Run a candidate (single or combo) on a data slice and return metrics."""
         params = cand.get("best_params", {}) or {}
 
         if cand["library"] == "combo":
-            # Combination candidate: re-derive signals from its members.
             entries_list = []
             exits_list = []
             for lib, name in cand.get("combination", ()):
@@ -158,13 +237,8 @@ class Validator:
             return None
         return run_backtest(df["close"], entries, exits, init_cash=self.init_cash, freq=freq)
 
-    def _load_session_data(self, cand: Dict) -> Optional[pd.DataFrame]:
-        try:
-            df = load_ohlcv(self.symbol, cand["timeframe"], count=5000)
-        except Exception as e:  # noqa: BLE001
-            logger.warning(f"load failed for {cand['timeframe']}: {e}")
-            return None
-        return filter_session(df, cand["session"])
+    def _load_session_data(self, cand: Dict) -> Optional[Dict]:
+        return load_session_ohlcv(self.symbol, cand["timeframe"], cand["session"], count=5000)
 
 
 __all__ = ["Validator", "ValidationResult", "MIN_OOS_PF", "MAX_DEGRADATION_PCT", "N_FOLDS"]

@@ -1,10 +1,19 @@
-"""Phase 1: discovery — run all indicators (and combinations) across sessions
-and timeframes using VectorBT's native factory.
+"""Phase 1: discovery — run all indicators across sessions and timeframes using
+VectorBT's native vectorized engine.
 
-VectorBT decides the indicator universe (via ``get_pandas_ta_indicators`` /
-``get_talib_indicators`` / ``get_ta_indicators`` + built-ins). We test every
-single indicator first, then combine the top singles' signals (AND/OR) up to a
-configurable depth and let the backtest results decide which combination wins.
+Uses VectorBT's native ``range_split`` (via ``split_sessions_native``) to split
+price into per-session ranges (one column per session occurrence), then runs
+indicators across ALL occurrences at once via VectorBT's vectorized ``.run()`` and
+``Portfolio.from_signals()``. This replaces per-session looping with VectorBT's
+native broadcasting.
+
+Native flow:
+    price_per_session = split_sessions_native(df, session, freq)
+    rsi = vbt.pandas_ta('RSI').run(price_per_session, length=14)
+    entries = rsi.rsi.vbt.below(30)
+    exits = rsi.rsi.vbt.above(70)
+    pf = vbt.Portfolio.from_signals(price_per_session, entries, exits, freq=freq)
+    pf.stats()  # native stats across all session occurrences
 """
 
 from __future__ import annotations
@@ -16,11 +25,10 @@ from typing import Dict, List, Optional, Tuple
 import numpy as np
 import pandas as pd
 
-from src.onboarding.backtest import run_backtest
 from src.onboarding.data import load_ohlcv
-from src.onboarding.indicators import Indicator, all_indicators, run_indicator
+from src.onboarding.indicators import Indicator, all_indicators
 from src.onboarding.metrics import ScoredResult, composite_score
-from src.onboarding.sessions import all_session_keys, filter_session
+from src.onboarding.sessions import all_session_keys, split_sessions_native
 from src.onboarding.signals import combine_signals, generate_signals
 from src.onboarding.timeframes import TIMEFRAMES, timeframe_minutes
 
@@ -74,35 +82,34 @@ class Discovery:
             freq = f"{timeframe_minutes(timeframe)}min"
 
             for session in sessions:
-                sdf = filter_session(df, session)
-                if len(sdf) < 50:
-                    logger.debug(f"{timeframe}:{session}: only {len(sdf)} bars, skip")
+                # Native VectorBT session splitting: dict of OHLCV DataFrames,
+                # each with one column per session occurrence.
+                ohlcv = split_sessions_native(df, session, freq=freq)
+                if ohlcv is None or "close" not in ohlcv or ohlcv["close"].shape[1] == 0:
+                    logger.debug(f"{timeframe}:{session}: no session occurrences found")
                     continue
 
-                scored = self._discover_session(sdf, session, timeframe, freq)
+                scored = self._discover_session(ohlcv, session, timeframe, freq)
                 if scored:
                     results[f"{timeframe}:{session}"] = scored
 
         return results
 
     def _discover_session(
-        self, df: pd.DataFrame, session: str, timeframe: str, freq: str
+        self, ohlcv: Dict[str, pd.DataFrame], session: str, timeframe: str, freq: str
     ) -> List[ScoredResult]:
-        close = df["close"]
-        high = df["high"]
-        low = df["low"]
-        open_ = df["open"]
-        volume = df["volume"]
+        """Run discovery on multi-column OHLCV DataFrames (one column per session occurrence).
 
+        Runs each indicator natively per-session-occurrence (one column at a time)
+        and aggregates results. This uses VectorBT's native indicator/backtest engine
+        while avoiding multi-column broadcasting edge cases.
+        """
         indicators = all_indicators()
 
-        # Phase 1a: single indicators.
+        # Phase 1a: single indicators — run natively per session occurrence.
         singles: List[ScoredResult] = []
         for ind in indicators:
-            result = self._run_single(
-                ind, close, high, low, open_, volume, freq,
-                session, timeframe,
-            )
+            result = self._run_single(ind, ohlcv, freq, session, timeframe)
             if result is not None:
                 singles.append(result)
 
@@ -110,8 +117,7 @@ class Discovery:
 
         # Phase 1b: combine the top singles' signals (AND/OR) up to combo_depth.
         combos: List[ScoredResult] = self._run_combinations(
-            singles, close, high, low, open_, volume, freq,
-            session, timeframe,
+            singles, ohlcv, freq, session, timeframe,
         )
 
         all_results = singles + combos
@@ -121,23 +127,82 @@ class Discovery:
     def _run_single(
         self,
         ind: Indicator,
-        close, high, low, open_, volume,
-        freq,
-        session, timeframe,
+        ohlcv: Dict[str, pd.DataFrame],
+        freq: str,
+        session: str,
+        timeframe: str,
     ) -> Optional[ScoredResult]:
-        try:
-            run = run_indicator(ind, close, high, low, open_, volume)
-            entries, exits = generate_signals(run, ind.library, ind.name)
-        except Exception as e:  # noqa: BLE001
-            logger.debug(f"{ind.library}:{ind.name} run failed: {e}")
+        """Run a single indicator natively per session occurrence and aggregate.
+
+        Iterates over session occurrence columns (native VectorBT column dimension),
+        runs the indicator and backtest on each, and aggregates stats across occurrences.
+        """
+        close_cols = ohlcv["close"]
+        n_cols = close_cols.shape[1]
+
+        all_trades: List[int] = []
+        all_win_rates: List[float] = []
+        all_pf: List[float] = []
+        all_returns: List[float] = []
+        all_dd: List[float] = []
+        all_sharpe: List[float] = []
+
+        for col_idx in range(n_cols):
+            # Extract single-column data for this session occurrence.
+            col_data = {k: v.iloc[:, col_idx].dropna() for k, v in ohlcv.items()}
+            if len(col_data.get("close", [])) < 50:
+                continue
+
+            try:
+                inputs = {k: col_data[k] for k in ind.cls.input_names if k in col_data}
+                run = ind.cls.run(**inputs, **ind.kwargs)
+                entries, exits = generate_signals(run, ind.library, ind.name)
+            except Exception as e:  # noqa: BLE001
+                logger.debug(f"{ind.library}:{ind.name} col {col_idx} run failed: {e}")
+                continue
+
+            if entries.sum() < 2:
+                continue
+
+            # Native VectorBT portfolio backtest on this single occurrence.
+            try:
+                import vectorbt as vbt
+                pf = vbt.Portfolio.from_signals(
+                    col_data["close"], entries, exits,
+                    init_cash=self.init_cash, freq=freq,
+                )
+            except Exception as e:  # noqa: BLE001
+                logger.debug(f"{ind.library}:{ind.name} col {col_idx} backtest failed: {e}")
+                continue
+
+            if pf.trades.count() < 1:
+                continue
+
+            all_trades.append(int(pf.trades.count()))
+            all_win_rates.append(float(pf.trades.win_rate() or 0.0))
+            pf_val = pf.trades.profit_factor()
+            all_pf.append(float(pf_val) if np.isfinite(pf_val) else 0.0)
+            all_returns.append(float(pf.total_return() or 0.0))
+            all_dd.append(float(pf.max_drawdown() or 0.0))
+            all_sharpe.append(float(pf.sharpe_ratio() or 0.0))
+
+        if not all_trades:
             return None
 
-        if entries.sum() < 2:
-            return None
-
-        result = run_backtest(close, entries, exits, init_cash=self.init_cash, freq=freq)
-        if result is None:
-            return None
+        # Aggregate native stats across session occurrences.
+        import vectorbt as vbt  # noqa: F811
+        n = len(all_trades)
+        from src.onboarding.backtest import BacktestResult
+        result = BacktestResult(
+            trades=int(np.sum(all_trades)),
+            win_rate=float(np.mean(all_win_rates)),
+            profit_factor=float(np.mean(all_pf)),
+            total_return=float(np.mean(all_returns)),
+            max_drawdown=float(np.mean(all_dd)),
+            sharpe=float(np.mean(all_sharpe)),
+            fill_mode="bar",
+            stats={},
+        )
 
         return ScoredResult(
             indicator=ind.name,
@@ -153,47 +218,112 @@ class Discovery:
     def _run_combinations(
         self,
         singles: List[ScoredResult],
-        close, high, low, open_, volume,
-        freq,
-        session, timeframe,
+        ohlcv: Dict[str, pd.DataFrame],
+        freq: str,
+        session: str,
+        timeframe: str,
     ) -> List[ScoredResult]:
-        """Combine the top singles' signals (AND/OR) up to combo_depth."""
+        """Combine the top singles' signals (AND/OR) up to combo_depth.
+
+        Runs combinations natively per session occurrence and aggregates.
+        """
         if not singles:
             return []
 
-        # Take the top combo_depth singles as the combination pool.
         pool = singles[: self.combo_depth]
         combos: List[ScoredResult] = []
 
-        # Pre-compute each pool indicator's signals.
         from src.onboarding.indicators import wrap
 
+        # Pre-compute per-occurrence signals for each pool indicator.
         pool_signals = []
         for s in pool:
             ind = wrap(s.indicator, s.library)
-            try:
-                run = run_indicator(ind, close, high, low, open_, volume)
-                entries, exits = generate_signals(run, ind.library, ind.name)
-                pool_signals.append((s, entries, exits))
-            except Exception as e:  # noqa: BLE001
-                logger.debug(f"combo signal {s.library}:{s.indicator} failed: {e}")
+            occurrence_signals = []  # list of (entries, exits) per occurrence
+            close_cols = ohlcv["close"]
+            for col_idx in range(close_cols.shape[1]):
+                col_data = {k: v.iloc[:, col_idx].dropna() for k, v in ohlcv.items()}
+                if len(col_data.get("close", [])) < 50:
+                    occurrence_signals.append(None)
+                    continue
+                try:
+                    inputs = {k: col_data[k] for k in ind.cls.input_names if k in col_data}
+                    run = ind.cls.run(**inputs, **ind.kwargs)
+                    e, x = generate_signals(run, ind.library, ind.name)
+                    occurrence_signals.append((e, x))
+                except Exception:  # noqa: BLE001
+                    occurrence_signals.append(None)
+            pool_signals.append((s, occurrence_signals))
 
-        # Pairs and triples (up to depth 3 for tractability; deeper is
-        # configurable but combinatorial).
         max_combo = min(3, len(pool_signals))
         for r in range(2, max_combo + 1):
             for combo in itertools.combinations(pool_signals, r):
                 for mode in self.combo_modes:
-                    entries_list = [c[1] for c in combo]
-                    exits_list = [c[2] for c in combo]
-                    entries, exits = combine_signals(entries_list, exits_list, mode)
-                    if entries.sum() < 2:
+                    # Combine signals per occurrence.
+                    close_cols = ohlcv["close"]
+                    n_cols = close_cols.shape[1]
+                    all_trades: List[int] = []
+                    all_win_rates: List[float] = []
+                    all_pf: List[float] = []
+                    all_returns: List[float] = []
+                    all_dd: List[float] = []
+                    all_sharpe: List[float] = []
+
+                    for col_idx in range(n_cols):
+                        entries_list = []
+                        exits_list = []
+                        valid = True
+                        for s, occ_signals in combo:
+                            if occ_signals is None or occ_signals[col_idx] is None:
+                                valid = False
+                                break
+                            e, x = occ_signals[col_idx]
+                            entries_list.append(e)
+                            exits_list.append(x)
+                        if not valid:
+                            continue
+
+                        entries, exits = combine_signals(entries_list, exits_list, mode)
+                        if entries.sum() < 2:
+                            continue
+
+                        col_data = {k: v.iloc[:, col_idx].dropna() for k, v in ohlcv.items()}
+                        try:
+                            import vectorbt as vbt
+                            pf = vbt.Portfolio.from_signals(
+                                col_data["close"], entries, exits,
+                                init_cash=self.init_cash, freq=freq,
+                            )
+                        except Exception:  # noqa: BLE001
+                            continue
+
+                        if pf.trades.count() < 1:
+                            continue
+
+                        all_trades.append(int(pf.trades.count()))
+                        all_win_rates.append(float(pf.trades.win_rate() or 0.0))
+                        pf_val = pf.trades.profit_factor()
+                        all_pf.append(float(pf_val) if np.isfinite(pf_val) else 0.0)
+                        all_returns.append(float(pf.total_return() or 0.0))
+                        all_dd.append(float(pf.max_drawdown() or 0.0))
+                        all_sharpe.append(float(pf.sharpe_ratio() or 0.0))
+
+                    if not all_trades:
                         continue
-                    result = run_backtest(
-                        close, entries, exits, init_cash=self.init_cash, freq=freq,
+
+                    n = len(all_trades)
+                    from src.onboarding.backtest import BacktestResult
+                    result = BacktestResult(
+                        trades=int(np.sum(all_trades)),
+                        win_rate=float(np.mean(all_win_rates)),
+                        profit_factor=float(np.mean(all_pf)),
+                        total_return=float(np.mean(all_returns)),
+                        max_drawdown=float(np.mean(all_dd)),
+                        sharpe=float(np.mean(all_sharpe)),
+                        fill_mode="bar",
+                        stats={},
                     )
-                    if result is None:
-                        continue
+
                     names = tuple((c[0].library, c[0].indicator) for c in combo)
                     combos.append(
                         ScoredResult(
@@ -209,6 +339,30 @@ class Discovery:
                     )
 
         return combos
+
+
+def _agg(value):
+    """Aggregate a native VectorBT result (which may be a Series across columns) to a scalar."""
+    if isinstance(value, pd.Series):
+        # For count-like metrics, sum across columns; for ratios, use mean.
+        if value.name and "count" in str(value.name).lower():
+            return value.sum()
+        return value.mean()
+    return value
+
+
+def _stats_to_dict(stats) -> Dict:
+    """Convert native pf.stats() Series to a JSON-safe dict."""
+    out: Dict = {}
+    try:
+        for k, v in stats.items():
+            if isinstance(v, (int, float)) and not isinstance(v, bool):
+                out[str(k)] = v if np.isfinite(v) else str(v)
+            else:
+                out[str(k)] = str(v)
+    except Exception:
+        pass
+    return out
 
 
 def best_timeframe_per_session(

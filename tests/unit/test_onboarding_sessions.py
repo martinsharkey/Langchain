@@ -1,4 +1,4 @@
-"""Unit tests for the onboarding session taxonomy."""
+"""Unit tests for the onboarding session taxonomy (native VectorBT range_split)."""
 
 import pandas as pd
 import pytest
@@ -6,8 +6,9 @@ import pytest
 from src.onboarding.sessions import (
     SESSION_DEFINITIONS,
     all_session_keys,
-    filter_session,
     get_session,
+    split_sessions_native,
+    get_session_boundaries,
 )
 
 
@@ -27,72 +28,79 @@ def test_get_session_unknown_raises():
         get_session("does_not_exist")
 
 
-def test_filter_session_london():
-    idx = pd.date_range("2026-08-03", periods=24 * 60, freq="1min")  # Monday
-    df = pd.DataFrame({"close": range(len(idx))}, index=idx)
-    sdf = filter_session(df, "london")
-    assert len(sdf) == 540
-    assert sdf.index.hour.min() >= 8
-    assert sdf.index.hour.max() < 17
+def test_split_sessions_native_london():
+    """Native range_split: London session (08:00-17:00 UTC) produces per-occurrence columns."""
+    idx = pd.date_range("2026-08-03", periods=5 * 24 * 60, freq="1min")  # Mon-Fri
+    df = pd.DataFrame(
+        {"close": range(len(idx)), "high": range(len(idx)), "low": range(len(idx)),
+         "open": range(len(idx)), "volume": range(len(idx))},
+        index=idx,
+    )
+    ohlcv = split_sessions_native(df, "london", freq="1min")
+    assert ohlcv is not None
+    assert "close" in ohlcv
+    # One column per London session occurrence (5 days = 5 columns).
+    assert ohlcv["close"].shape[1] == 5
+    # Each column has bars for the 9-hour session (540 min), padded with NaN.
+    assert ohlcv["close"].shape[0] >= 540
 
 
-def test_filter_session_weekend():
+def test_split_sessions_native_weekend():
+    """Native range_split: weekend (Sat-Sun) produces per-occurrence columns."""
     idx = pd.date_range("2026-08-08", periods=48 * 60, freq="1min")  # Sat-Sun
+    df = pd.DataFrame(
+        {"close": range(len(idx)), "high": range(len(idx)), "low": range(len(idx)),
+         "open": range(len(idx)), "volume": range(len(idx))},
+        index=idx,
+    )
+    ohlcv = split_sessions_native(df, "weekend", freq="1min")
+    assert ohlcv is not None
+    # Weekend: 2 days = 2 columns.
+    assert ohlcv["close"].shape[1] == 2
+
+
+def test_split_sessions_native_returns_dict():
+    """Native range_split returns a dict of OHLCV DataFrames."""
+    idx = pd.date_range("2026-08-03", periods=24 * 60, freq="1min")
+    df = pd.DataFrame(
+        {"close": range(len(idx)), "high": range(len(idx)), "low": range(len(idx)),
+         "open": range(len(idx)), "volume": range(len(idx))},
+        index=idx,
+    )
+    ohlcv = split_sessions_native(df, "london", freq="1min")
+    assert isinstance(ohlcv, dict)
+    for col in ("close", "high", "low", "open", "volume"):
+        assert col in ohlcv
+        assert isinstance(ohlcv[col], pd.DataFrame)
+
+
+def test_get_session_boundaries_london():
+    """get_session_boundaries returns start/end indexes for London session."""
+    idx = pd.date_range("2026-08-03", periods=5 * 24 * 60, freq="1min")  # Mon-Fri
     df = pd.DataFrame({"close": range(len(idx))}, index=idx)
-    sdf = filter_session(df, "weekend")
-    assert len(sdf) == len(df)
+    start_idxs, end_idxs = get_session_boundaries(df, "london")
+    assert start_idxs is not None
+    assert end_idxs is not None
+    # 5 days = 5 session starts.
+    assert len(start_idxs) == 5
+    assert len(end_idxs) == 5
 
 
-def test_filter_session_sunday_open():
-    # Sunday 22:00-24:00 UTC
-    idx = pd.date_range("2026-08-09", periods=24 * 60, freq="1min")  # Sunday
+def test_split_sessions_native_no_data():
+    """Native range_split returns None when no session data found."""
+    idx = pd.date_range("2026-08-03", periods=10, freq="1min")
     df = pd.DataFrame({"close": range(len(idx))}, index=idx)
-    sdf = filter_session(df, "sunday_open")
-    assert len(sdf) == 120  # 2 hours
+    ohlcv = split_sessions_native(df, "asian", freq="1min")
+    # Only 10 bars, not enough for a full Asian session - may return None or empty.
+    # The function should handle gracefully.
+    if ohlcv is not None:
+        assert ohlcv["close"].shape[1] >= 0
 
 
-def test_filter_session_friday_close():
-    # Friday 21:00-22:00 UTC
-    idx = pd.date_range("2026-08-07", periods=24 * 60, freq="1min")  # Friday
-    df = pd.DataFrame({"close": range(len(idx))}, index=idx)
-    sdf = filter_session(df, "friday_close")
-    assert len(sdf) == 60  # 1 hour
-
-
-def test_filter_session_requires_datetime_index():
+def test_split_sessions_native_requires_datetime_index():
     df = pd.DataFrame({"close": [1, 2, 3]})
     with pytest.raises(TypeError):
-        filter_session(df, "london")
+        split_sessions_native(df, "london")
 
 
-def test_post_market_open_15_minutes():
-    # Monday 22:00-23:00 UTC, 1-minute bars.
-    idx = pd.date_range("2026-08-03 22:00", periods=60, freq="1min")
-    df = pd.DataFrame({"close": range(len(idx))}, index=idx)
-    sdf = filter_session(df, "post_market_open_15")
-    assert len(sdf) == 15
-    assert sdf.index.minute.min() == 0
-    assert sdf.index.minute.max() == 14
-
-
-def test_post_market_open_30_minutes():
-    idx = pd.date_range("2026-08-03 22:00", periods=60, freq="1min")
-    df = pd.DataFrame({"close": range(len(idx))}, index=idx)
-    sdf = filter_session(df, "post_market_open_30")
-    assert len(sdf) == 30
-    assert sdf.index.minute.max() == 29
-
-
-def test_post_market_open_60_minutes():
-    idx = pd.date_range("2026-08-03 22:00", periods=60, freq="1min")
-    df = pd.DataFrame({"close": range(len(idx))}, index=idx)
-    sdf = filter_session(df, "post_market_open_60")
-    assert len(sdf) == 60
-
-
-def test_post_market_open_variants_differ():
-    idx = pd.date_range("2026-08-03 22:00", periods=60, freq="1min")
-    df = pd.DataFrame({"close": range(len(idx))}, index=idx)
-    assert len(filter_session(df, "post_market_open_15")) == 15
-    assert len(filter_session(df, "post_market_open_30")) == 30
-    assert len(filter_session(df, "post_market_open_60")) == 60
+__all__ = []

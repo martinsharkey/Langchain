@@ -1,21 +1,30 @@
 """Trading session taxonomy for symbol onboarding.
 
 Defines the full set of testable sessions (macro, overlap, and micro) in UTC.
-Each session is a distinct market regime with its own liquidity, volume, and
-behaviour, so a symbol may perform best on any one of them with a different
-indicator set.
+Uses VectorBT's native ``range_split`` (`generic/splitters.py:RangeSplitter`) to
+split price data into per-session ranges, replacing hand-rolled pandas filtering.
 
-Times are UTC. Weekday is Python ``datetime.weekday()`` (Mon=0 .. Sun=6).
-Sessions carry minute-level precision so micro-sessions (e.g. the 15/30/60-minute
-post-market-open windows) can be expressed exactly.
+Native API (from ``TradingSessions.ipynb`` example):
+    session_price = filled_price.between_time('9:00', '17:00', include_end=False)
+    start_idxs = session_price.index[session_price.index.hour == 9]
+    end_idxs = session_price.index[session_price.index.hour == 16]
+    price_per_session, _ = session_price.vbt(freq='1H').range_split(
+        start_idxs=start_idxs, end_idxs=end_idxs
+    )
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Dict, List
+from typing import Dict, List, Optional, Tuple
 
+import numpy as np
 import pandas as pd
+import vectorbt as vbt
+
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -136,43 +145,127 @@ def _minutes_of_day(hour: int, minute: int) -> int:
     return hour * 60 + minute
 
 
-def filter_session(df: pd.DataFrame, session_key: str) -> pd.DataFrame:
-    """Filter a datetime-indexed DataFrame to a single session's bars.
+def get_session_boundaries(
+    df: pd.DataFrame, session_key: str,
+) -> Tuple[Optional[pd.DatetimeIndex], Optional[pd.DatetimeIndex]]:
+    """Get the start and end indices for each session occurrence using native conventions.
 
-    Args:
-        df: DataFrame with a tz-aware (or naive-UTC) DatetimeIndex.
-        session_key: Session key from SESSION_DEFINITIONS.
+    Finds ONE start index (first bar of the session window) and ONE end index
+    (last bar of the session window) per session occurrence (e.g. per day).
+    These indexes are suitable for feeding directly into VectorBT's native
+    ``range_split``.
 
     Returns:
-        A copy of ``df`` containing only bars within the session window.
+        (start_idxs, end_idxs) as pandas Indexes (one entry per session occurrence),
+        or (None, None) if no sessions found. Returned indexes preserve the original
+        index timezone.
     """
     session = get_session(session_key)
     idx = df.index
     if not isinstance(idx, pd.DatetimeIndex):
-        raise TypeError("filter_session requires a DatetimeIndex")
+        raise TypeError("get_session_boundaries requires a DatetimeIndex")
 
     # Normalise to UTC-naive for hour/minute/weekday comparison.
     if idx.tz is not None:
-        idx = idx.tz_convert("UTC").tz_localize(None)
+        idx_norm = idx.tz_convert("UTC").tz_localize(None)
+    else:
+        idx_norm = idx
 
-    weekday = idx.weekday
-    minutes = idx.hour * 60 + idx.minute
+    weekday = idx_norm.weekday
+    minutes = idx_norm.hour * 60 + idx_norm.minute
 
     day_mask = weekday.isin(session.days)
-
     start = _minutes_of_day(session.start_hour, session.start_minute)
     end = _minutes_of_day(session.end_hour, session.end_minute)
 
     if end == 24 * 60:
-        # Full-day session (e.g. weekend).
         time_mask = minutes >= start
     elif start < end:
         time_mask = (minutes >= start) & (minutes < end)
     else:
-        # Overnight wrap (e.g. 22:00 -> 02:00).
         time_mask = (minutes >= start) | (minutes < end)
 
-    return df[day_mask & time_mask].copy()
+    # Get the integer positions of session bars in the ORIGINAL index.
+    positions = np.where(day_mask & time_mask)[0]
+    if len(positions) == 0:
+        return None, None
+
+    # Map normalized times back to original index for grouping.
+    session_times = idx_norm[positions]
+    sessions_df = pd.DataFrame({"pos": positions, "time": session_times}, index=session_times)
+    sessions_df["date"] = sessions_df.index.date
+
+    start_positions = sessions_df.groupby("date")["pos"].first().values
+    end_positions = sessions_df.groupby("date")["pos"].last().values
+
+    if len(start_positions) == 0 or len(end_positions) == 0:
+        return None, None
+
+    # Return indexes from the ORIGINAL (possibly tz-aware) index.
+    start_idxs = pd.DatetimeIndex(idx[start_positions])
+    end_idxs = pd.DatetimeIndex(idx[end_positions])
+
+    return start_idxs, end_idxs
+
+
+def _range_split_series(
+    series: pd.Series, start_idxs: pd.DatetimeIndex, end_idxs: pd.DatetimeIndex, freq: str,
+) -> pd.DataFrame:
+    """Apply VectorBT's native range_split to a single Series."""
+    try:
+        per_session, _ = series.vbt(freq=freq).range_split(
+            start_idxs=start_idxs, end_idxs=end_idxs
+        )
+        return per_session
+    except Exception as e:  # noqa: BLE001
+        logger.debug(f"range_split failed for {series.name}: {e}")
+        return None
+
+
+def split_sessions_native(
+    df: pd.DataFrame, session_key: str, freq: str = "1min",
+) -> Optional[Dict[str, pd.DataFrame]]:
+    """Split OHLCV data into per-session ranges using VectorBT's native ``range_split``.
+
+    This is the native VectorBT approach (from ``TradingSessions.ipynb``): instead of
+    filtering to a single session's bars, it returns a dict of DataFrames (one per
+    OHLCV column) where each COLUMN is one occurrence of the session (e.g. one day's
+    London session). Indicators can then be run across all occurrences at once via
+    VectorBT's vectorized ``.run()``, passing the split columns as inputs.
+
+    Example (native flow):
+        ohlcv = split_sessions_native(df, "london", freq="1min")
+        rsi = vbt.pandas_ta('RSI').run(close=ohlcv["close"], length=14)
+        entries = rsi.rsi.vbt.below(30)
+        exits = rsi.rsi.vbt.above(70)
+        pf = vbt.Portfolio.from_signals(ohlcv["close"], entries, exits, freq="1min")
+
+    Args:
+        df: DataFrame with a tz-aware (or naive-UTC) DatetimeIndex and OHLCV columns.
+        session_key: Session key from SESSION_DEFINITIONS.
+        freq: Bar frequency string for the VectorBT wrapper (e.g. "1min", "1H").
+
+    Returns:
+        A dict {"close": df, "high": df, "low": df, "open": df, "volume": df}
+        where each DataFrame has one column per session occurrence, or None if no
+        sessions found. Shorter sessions are padded with NaN (VectorBT convention).
+    """
+    start_idxs, end_idxs = get_session_boundaries(df, session_key)
+    if start_idxs is None or end_idxs is None:
+        return None
+
+    result: Dict[str, pd.DataFrame] = {}
+    for col in ("close", "high", "low", "open", "volume"):
+        if col not in df.columns:
+            continue
+        split = _range_split_series(df[col], start_idxs, end_idxs, freq)
+        if split is None:
+            return None
+        result[col] = split
+
+    if not result:
+        return None
+    return result
 
 
 __all__ = [
@@ -181,5 +274,40 @@ __all__ = [
     "SESSION_ORDER",
     "get_session",
     "all_session_keys",
-    "filter_session",
+    "get_session_boundaries",
+    "split_sessions_native",
+    "load_session_ohlcv",
 ]
+
+
+def load_session_ohlcv(
+    symbol: str, timeframe: str, session_key: str, count: int = 5000,
+) -> Optional[Dict[str, pd.DataFrame]]:
+    """Load OHLCV and split into per-session ranges using native VectorBT.
+
+    This is the native replacement for ``filter_session``: instead of filtering
+    to a single session's bars, it returns a dict of DataFrames (one per OHLCV
+    column) where each COLUMN is one occurrence of the session. Indicators and
+    portfolio backtesting can then be run across all occurrences at once via
+    VectorBT's vectorized engine.
+
+    Args:
+        symbol: MT5 symbol.
+        timeframe: MT5 timeframe string.
+        session_key: Session key from SESSION_DEFINITIONS.
+        count: Number of OHLCV bars to load.
+
+    Returns:
+        A dict {"close": df, "high": df, "low": df, "open": df, "volume": df}
+        where each DataFrame has one column per session occurrence, or None if
+        no sessions found.
+    """
+    from src.onboarding.data import load_ohlcv
+
+    try:
+        df = load_ohlcv(symbol, timeframe, count=count)
+    except Exception:  # noqa: BLE001
+        return None
+    if len(df) < 50:
+        return None
+    return split_sessions_native(df, session_key)

@@ -17,7 +17,7 @@ Key VectorBT facilities used (see ``vectorbt.indicators.factory``):
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Set
 
 import numpy as np
@@ -93,6 +93,7 @@ class Indicator:
     name: str
     library: str  # "pandas_ta" | "talib" | "ta" | "builtin"
     cls: type  # the generated VectorBT indicator class
+    kwargs: Dict = field(default_factory=dict)  # default parameters for .run()
 
 
 def _import_ta():
@@ -155,7 +156,28 @@ def wrap(name: str, library: str) -> Indicator:
         cls = getattr(vbt, name)
     else:
         raise ValueError(f"Unknown library: {library}")
-    return Indicator(name=name, library=library, cls=cls)
+
+    # Provide default parameters for indicators that need them.
+    kwargs: Dict = {}
+    if library == "builtin":
+        kwargs = _BUILTIN_DEFAULTS.get(name, {})
+    elif library == "ta":
+        kwargs = _TA_DEFAULT_PARAMS.get(name, {})
+
+    return Indicator(name=name, library=library, cls=cls, kwargs=kwargs)
+
+
+# Default parameters for VectorBT built-in indicators.
+_BUILTIN_DEFAULTS = {
+    "ATR": {"window": 14},
+    "BBANDS": {"window": 20},
+    "MA": {"window": 20},
+    "MACD": {"fast": 12, "slow": 26},
+    "MSTD": {"window": 20},
+    "OBV": {},
+    "RSI": {"window": 14},
+    "STOCH": {},
+}
 
 
 def all_indicators() -> List[Indicator]:
