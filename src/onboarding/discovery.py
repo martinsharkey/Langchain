@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import itertools
 import logging
+from datetime import datetime
 from typing import Dict, List, Optional, Tuple
 
 import numpy as np
@@ -57,11 +58,18 @@ class Discovery:
         timeframes: Optional[List[str]] = None,
         sessions: Optional[List[str]] = None,
         bars: int = 5000,
+        start_date: Optional[datetime] = None,
+        end_date: Optional[datetime] = None,
+        preloaded: Optional[Dict[str, pd.DataFrame]] = None,
     ) -> Dict[str, List[ScoredResult]]:
         """Discover top indicators per (timeframe, session).
 
         Returns a dict keyed by ``f"{timeframe}:{session}"`` mapping to a list
         of ScoredResult ranked by composite score (descending), capped at top_n.
+
+        If ``preloaded`` is provided (dict mapping timeframe -> DataFrame), uses
+        that data instead of loading from MT5. This is the preferred path for
+        date-range queries.
         """
         timeframes = timeframes or TIMEFRAMES
         sessions = sessions or all_session_keys()
@@ -70,7 +78,10 @@ class Discovery:
 
         for timeframe in timeframes:
             try:
-                df = load_ohlcv(self.symbol, timeframe, count=bars)
+                if preloaded is not None and timeframe in preloaded:
+                    df = preloaded[timeframe]
+                else:
+                    df = load_ohlcv(self.symbol, timeframe, count=bars)
             except Exception as e:  # noqa: BLE001
                 logger.warning(f"{self.symbol} {timeframe}: data load failed: {e}")
                 continue
@@ -98,18 +109,27 @@ class Discovery:
     def _discover_session(
         self, ohlcv: Dict[str, pd.DataFrame], session: str, timeframe: str, freq: str
     ) -> List[ScoredResult]:
-        """Run discovery on multi-column OHLCV DataFrames (one column per session occurrence).
+        """Run discovery on session bars.
 
-        Runs each indicator natively per-session-occurrence (one column at a time)
-        and aggregates results. This uses VectorBT's native indicator/backtest engine
-        while avoiding multi-column broadcasting edge cases.
+        Concatenates all session-occurrence columns into a single continuous
+        series (dropping NaN padding) so indicators have enough bars to generate
+        signals. Runs each indicator natively on the concatenated series.
         """
         indicators = all_indicators()
 
-        # Phase 1a: single indicators — run natively per session occurrence.
+        # Concatenate all occurrence columns into a single continuous series.
+        close = self._concat_session_columns(ohlcv["close"])
+        if len(close) < 50:
+            return []
+        high = self._concat_session_columns(ohlcv["high"])
+        low = self._concat_session_columns(ohlcv["low"])
+        open_ = self._concat_session_columns(ohlcv["open"])
+        volume = self._concat_session_columns(ohlcv["volume"])
+
+        # Phase 1a: single indicators — run natively on concatenated series.
         singles: List[ScoredResult] = []
         for ind in indicators:
-            result = self._run_single(ind, ohlcv, freq, session, timeframe)
+            result = self._run_single(ind, close, high, low, open_, volume, freq, session, timeframe)
             if result is not None:
                 singles.append(result)
 
@@ -117,89 +137,84 @@ class Discovery:
 
         # Phase 1b: combine the top singles' signals (AND/OR) up to combo_depth.
         combos: List[ScoredResult] = self._run_combinations(
-            singles, ohlcv, freq, session, timeframe,
+            singles, close, high, low, open_, volume, freq, session, timeframe,
         )
 
         all_results = singles + combos
         all_results.sort(key=lambda r: r.score, reverse=True)
         return all_results[: self.top_n]
 
+    @staticmethod
+    def _concat_session_columns(df: pd.DataFrame) -> pd.Series:
+        """Concatenate per-session-occurrence columns into a contiguous series.
+
+        Each column in the input represents one session occurrence (e.g. one day's
+        London session). This concatenates them end-to-end (dropping NaN padding)
+        to produce a contiguous price series suitable for indicator computation.
+        """
+        parts = [df.iloc[:, i].dropna() for i in range(df.shape[1])]
+        parts = [p for p in parts if len(p) > 0]
+        if not parts:
+            return pd.Series(dtype=float)
+        return pd.concat(parts)
+
     def _run_single(
         self,
         ind: Indicator,
-        ohlcv: Dict[str, pd.DataFrame],
+        close: pd.Series,
+        high: pd.Series,
+        low: pd.Series,
+        open_: pd.Series,
+        volume: pd.Series,
         freq: str,
         session: str,
         timeframe: str,
     ) -> Optional[ScoredResult]:
-        """Run a single indicator natively per session occurrence and aggregate.
-
-        Iterates over session occurrence columns (native VectorBT column dimension),
-        runs the indicator and backtest on each, and aggregates stats across occurrences.
-        """
-        close_cols = ohlcv["close"]
-        n_cols = close_cols.shape[1]
-
-        all_trades: List[int] = []
-        all_win_rates: List[float] = []
-        all_pf: List[float] = []
-        all_returns: List[float] = []
-        all_dd: List[float] = []
-        all_sharpe: List[float] = []
-
-        for col_idx in range(n_cols):
-            # Extract single-column data for this session occurrence.
-            col_data = {k: v.iloc[:, col_idx].dropna() for k, v in ohlcv.items()}
-            if len(col_data.get("close", [])) < 50:
-                continue
-
-            try:
-                inputs = {k: col_data[k] for k in ind.cls.input_names if k in col_data}
-                run = ind.cls.run(**inputs, **ind.kwargs)
-                entries, exits = generate_signals(run, ind.library, ind.name)
-            except Exception as e:  # noqa: BLE001
-                logger.debug(f"{ind.library}:{ind.name} col {col_idx} run failed: {e}")
-                continue
-
-            if entries.sum() < 2:
-                continue
-
-            # Native VectorBT portfolio backtest on this single occurrence.
-            try:
-                import vectorbt as vbt
-                pf = vbt.Portfolio.from_signals(
-                    col_data["close"], entries, exits,
-                    init_cash=self.init_cash, freq=freq,
-                )
-            except Exception as e:  # noqa: BLE001
-                logger.debug(f"{ind.library}:{ind.name} col {col_idx} backtest failed: {e}")
-                continue
-
-            if pf.trades.count() < 1:
-                continue
-
-            all_trades.append(int(pf.trades.count()))
-            all_win_rates.append(float(pf.trades.win_rate() or 0.0))
-            pf_val = pf.trades.profit_factor()
-            all_pf.append(float(pf_val) if np.isfinite(pf_val) else 0.0)
-            all_returns.append(float(pf.total_return() or 0.0))
-            all_dd.append(float(pf.max_drawdown() or 0.0))
-            all_sharpe.append(float(pf.sharpe_ratio() or 0.0))
-
-        if not all_trades:
+        """Run a single indicator natively on the concatenated session series."""
+        try:
+            inputs = {}
+            for name in ind.cls.input_names:
+                if name == "close":
+                    inputs["close"] = close
+                elif name == "high":
+                    inputs["high"] = high
+                elif name == "low":
+                    inputs["low"] = low
+                elif name == "open":
+                    inputs["open"] = open_
+                elif name == "volume":
+                    inputs["volume"] = volume
+            run = ind.cls.run(**inputs, **ind.kwargs)
+            entries, exits = generate_signals(run, ind.library, ind.name)
+        except Exception as e:  # noqa: BLE001
+            logger.debug(f"{ind.library}:{ind.name} run failed: {e}")
             return None
 
-        # Aggregate native stats across session occurrences.
-        import vectorbt as vbt  # noqa: F811
-        n = len(all_trades)
+        if entries.sum() < 2:
+            return None
+
+        # Native VectorBT portfolio backtest on the concatenated series.
+        try:
+            import vectorbt as vbt
+            pf = vbt.Portfolio.from_signals(
+                close, entries, exits,
+                init_cash=self.init_cash, freq=freq,
+            )
+        except Exception as e:  # noqa: BLE001
+            logger.debug(f"{ind.library}:{ind.name} backtest failed: {e}")
+            return None
+
+        if pf.trades.count() < 1:
+            return None
+
         from src.onboarding.backtest import BacktestResult
         result = BacktestResult(
-            trades=int(np.sum(all_trades)),
-            win_rate=float(np.mean(all_win_rates)),
-            profit_factor=float(np.mean(all_pf)),
-            total_return=float(np.mean(all_returns)),
-            max_drawdown=float(np.mean(all_dd)),
-            sharpe=float(np.mean(all_sharpe)),
+            trades=int(pf.trades.count()),
+            win_rate=float(pf.trades.win_rate() or 0.0),
+            profit_factor=float(pf.trades.profit_factor() or 0.0),
+            total_return=float(pf.total_return() or 0.0),
+            max_drawdown=float(pf.max_drawdown() or 0.0),
+            sharpe=float(pf.sharpe_ratio() or 0.0),
             fill_mode="bar",
             stats={},
         )
@@ -218,19 +233,93 @@ class Discovery:
     def _run_combinations(
         self,
         singles: List[ScoredResult],
-        ohlcv: Dict[str, pd.DataFrame],
+        close: pd.Series,
+        high: pd.Series,
+        low: pd.Series,
+        open_: pd.Series,
+        volume: pd.Series,
         freq: str,
         session: str,
         timeframe: str,
     ) -> List[ScoredResult]:
-        """Combine the top singles' signals (AND/OR) up to combo_depth.
-
-        Runs combinations natively per session occurrence and aggregates.
-        """
+        """Combine the top singles' signals (AND/OR) up to combo_depth."""
         if not singles:
             return []
 
         pool = singles[: self.combo_depth]
+        combos: List[ScoredResult] = []
+
+        from src.onboarding.indicators import wrap
+
+        # Pre-compute signals for each pool indicator.
+        pool_signals = []
+        for s in pool:
+            ind = wrap(s.indicator, s.library)
+            try:
+                inputs = {}
+                for name in ind.cls.input_names:
+                    if name == "close":
+                        inputs["close"] = close
+                    elif name == "high":
+                        inputs["high"] = high
+                    elif name == "low":
+                        inputs["low"] = low
+                    elif name == "open":
+                        inputs["open"] = open_
+                    elif name == "volume":
+                        inputs["volume"] = volume
+                run = ind.cls.run(**inputs, **ind.kwargs)
+                e, x = generate_signals(run, ind.library, ind.name)
+                pool_signals.append((s, e, x))
+            except Exception as e:  # noqa: BLE001
+                logger.debug(f"combo signal {s.library}:{s.indicator} failed: {e}")
+
+        max_combo = min(3, len(pool_signals))
+        for r in range(2, max_combo + 1):
+            for combo in itertools.combinations(pool_signals, r):
+                for mode in self.combo_modes:
+                    entries_list = [c[1] for c in combo]
+                    exits_list = [c[2] for c in combo]
+                    entries, exits = combine_signals(entries_list, exits_list, mode)
+                    if entries.sum() < 2:
+                        continue
+                    try:
+                        import vectorbt as vbt
+                        pf = vbt.Portfolio.from_signals(
+                            close, entries, exits,
+                            init_cash=self.init_cash, freq=freq,
+                        )
+                    except Exception:  # noqa: BLE001
+                        continue
+                    if pf.trades.count() < 1:
+                        continue
+
+                    from src.onboarding.backtest import BacktestResult
+                    result = BacktestResult(
+                        trades=int(pf.trades.count()),
+                        win_rate=float(pf.trades.win_rate() or 0.0),
+                        profit_factor=float(pf.trades.profit_factor() or 0.0),
+                        total_return=float(pf.total_return() or 0.0),
+                        max_drawdown=float(pf.max_drawdown() or 0.0),
+                        sharpe=float(pf.sharpe_ratio() or 0.0),
+                        fill_mode="bar",
+                        stats={},
+                    )
+                    names = tuple((c[0].library, c[0].indicator) for c in combo)
+                    combos.append(
+                        ScoredResult(
+                            indicator="+".join(n[1] for n in names),
+                            library="combo",
+                            category=mode,
+                            session=session,
+                            timeframe=timeframe,
+                            result=result,
+                            score=composite_score(result),
+                            combination=names,
+                        )
+                    )
+
+        return combos
         combos: List[ScoredResult] = []
 
         from src.onboarding.indicators import wrap

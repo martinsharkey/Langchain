@@ -1,0 +1,17 @@
+{
+  "symbol": "BTCUSD",
+  "config": {
+    "sessions": [
+      "london"
+    ],
+    "timeframes": [
+      "H1"
+    ],
+    "start_date": "2026-07-01T00:00:00+00:00",
+    "end_date": "2026-08-01T00:00:00+00:00",
+    "init_cash": 100.0
+  },
+  "results": [],
+  "elapsed_seconds": 3.15,
+  "completed_at": "2026-08-27T00:17:09.685094"
+}

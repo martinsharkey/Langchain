@@ -121,13 +121,14 @@ class OnboardingOrchestrator:
                 try:
                     # Load OHLCV for the date range natively.
                     df = load_ohlcv_range(self.symbol, timeframe, self.start_date, self.end_date)
+                    preloaded = {timeframe: df}
 
                     # Run VectorBT discovery natively for this (timeframe, session).
                     discovery = Discovery(self.symbol, init_cash=INIT_CASH, top_n=self.top_n)
                     session_results = discovery.discover(
                         timeframes=[timeframe],
                         sessions=[session],
-                        bars=len(df),  # not used by range loader, but kept for API compat
+                        preloaded=preloaded,
                     )
 
                     # Collect results.

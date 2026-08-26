@@ -1,0 +1,20 @@
+{"type": "start", "symbol": "BTCUSD", "sessions": ["asian", "london"], "timeframes": ["H1"], "start_date": "2026-07-01T00:00:00+00:00", "end_date": "2026-08-01T00:00:00+00:00", "timestamp": "2026-08-27T00:12:40.322924"}
+{"type": "combination_start", "timeframe": "H1", "session": "asian", "timestamp": "2026-08-27T00:12:40.323930"}
+{"type": "combination_complete", "timeframe": "H1", "session": "asian", "combinations_completed": 1, "total_combinations": 2, "results_count": 0, "elapsed_seconds": 5.7, "timestamp": "2026-08-27T00:12:46.026809"}
+{"type": "combination_start", "timeframe": "H1", "session": "london", "timestamp": "2026-08-27T00:12:46.028166"}
+{"type": "combination_complete", "timeframe": "H1", "session": "london", "combinations_completed": 2, "total_combinations": 2, "results_count": 0, "elapsed_seconds": 2.84, "timestamp": "2026-08-27T00:12:48.866099"}
+{"type": "complete", "total_results": 0, "elapsed_seconds": 8.54, "raw_file": "tests\\onboarding\\BTCUSD\\BTCUSD_onboarding_20260827_001248.json", "timestamp": "2026-08-27T00:12:48.868098"}
+{"type": "start", "symbol": "BTCUSD", "sessions": ["london"], "timeframes": ["H1"], "start_date": "2026-07-01T00:00:00+00:00", "end_date": "2026-08-01T00:00:00+00:00", "timestamp": "2026-08-27T00:17:06.532485"}
+{"type": "combination_start", "timeframe": "H1", "session": "london", "timestamp": "2026-08-27T00:17:06.532485"}
+{"type": "combination_complete", "timeframe": "H1", "session": "london", "combinations_completed": 1, "total_combinations": 1, "results_count": 0, "elapsed_seconds": 3.15, "timestamp": "2026-08-27T00:17:09.684135"}
+{"type": "complete", "total_results": 0, "elapsed_seconds": 3.15, "raw_file": "tests\\onboarding\\BTCUSD\\BTCUSD_onboarding_20260827_001709.json", "timestamp": "2026-08-27T00:17:09.687081"}
+{"type": "start", "symbol": "BTCUSD", "sessions": ["london"], "timeframes": ["H1"], "start_date": "2026-07-01T00:00:00+00:00", "end_date": "2026-08-01T00:00:00+00:00", "timestamp": "2026-08-27T00:20:42.162207"}
+{"type": "combination_start", "timeframe": "H1", "session": "london", "timestamp": "2026-08-27T00:20:42.163222"}
+{"type": "combination_complete", "timeframe": "H1", "session": "london", "combinations_completed": 1, "total_combinations": 1, "results_count": 0, "elapsed_seconds": 5.18, "timestamp": "2026-08-27T00:20:47.339936"}
+{"type": "complete", "total_results": 0, "elapsed_seconds": 5.18, "raw_file": "tests\\onboarding\\BTCUSD\\BTCUSD_onboarding_20260827_002047.json", "timestamp": "2026-08-27T00:20:47.340842"}
+{"type": "start", "symbol": "BTCUSD", "sessions": ["london", "newyork"], "timeframes": ["M15"], "start_date": "2026-07-01T00:00:00+00:00", "end_date": "2026-07-15T00:00:00+00:00", "timestamp": "2026-08-27T00:28:48.229690"}
+{"type": "combination_start", "timeframe": "M15", "session": "london", "timestamp": "2026-08-27T00:28:48.230689"}
+{"type": "combination_complete", "timeframe": "M15", "session": "london", "combinations_completed": 1, "total_combinations": 2, "results_count": 5, "elapsed_seconds": 13.24, "timestamp": "2026-08-27T00:29:01.470265"}
+{"type": "combination_start", "timeframe": "M15", "session": "newyork", "timestamp": "2026-08-27T00:29:01.471203"}
+{"type": "combination_complete", "timeframe": "M15", "session": "newyork", "combinations_completed": 2, "total_combinations": 2, "results_count": 10, "elapsed_seconds": 8.36, "timestamp": "2026-08-27T00:29:09.827562"}
+{"type": "complete", "total_results": 10, "elapsed_seconds": 21.6, "raw_file": "tests\\onboarding\\BTCUSD\\BTCUSD_onboarding_20260827_002909.json", "timestamp": "2026-08-27T00:29:09.828566"}
