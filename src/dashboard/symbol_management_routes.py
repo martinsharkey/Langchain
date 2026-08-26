@@ -473,6 +473,187 @@ def get_task_status(task_id: str):
         return jsonify({"error": str(e)}), 500
 
 
+@bp.route("/symbols/live", methods=["GET"])
+def list_live_symbols():
+    """Get all tradeable MT5 symbols, sorted alphabetical (live from broker)."""
+    try:
+        from src.onboarding.data import get_mt5_symbols
+
+        symbols = get_mt5_symbols()
+        return jsonify({"status": "ok", "symbols": symbols}), 200
+    except Exception as e:
+        _log.error(f"Error listing MT5 symbols: {e}", exc_info=True)
+        return jsonify({"error": str(e)}), 500
+
+
+@bp.route("/symbols/<symbol>/onboard", methods=["POST"])
+def start_onboarding(symbol: str):
+    """Start onboarding process for a symbol with full wizard config.
+
+    Request body: {
+      "sessions": ["asian", "london"],
+      "timeframes": ["M1", "M5", "M15", "H1"],
+      "start_date": "2024-08-26",
+      "end_date": "2026-08-26",
+      "top_n": 10
+    }
+
+    Returns: {
+      "status": "ok",
+      "task_id": "btcusd_onboard_20260826_235500",
+      "symbol": "BTCUSD",
+      "estimated_seconds": 1234.5,
+      "message": "Onboarding started"
+    }
+    """
+    try:
+        symbol = symbol.upper()
+        data = request.get_json() or {}
+
+        sessions = data.get("sessions") or []
+        timeframes = data.get("timeframes") or []
+        start_date_str = data.get("start_date")
+        end_date_str = data.get("end_date")
+        top_n = data.get("top_n", 10)
+
+        if not sessions or not timeframes:
+            return jsonify({"error": "sessions and timeframes are required"}), 400
+
+        # Parse dates (UTC).
+        from datetime import datetime, timezone
+        if start_date_str:
+            start_date = datetime.strptime(start_date_str, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+        else:
+            start_date = datetime(2024, 8, 26, tzinfo=timezone.utc)
+        if end_date_str:
+            end_date = datetime.strptime(end_date_str, "%Y-%m-%d").replace(hour=23, minute=59, tzinfo=timezone.utc)
+        else:
+            end_date = datetime.now(timezone.utc)
+
+        # Check if already onboarding.
+        with _tasks_lock:
+            if symbol in _onboarding_tasks:
+                task = _onboarding_tasks[symbol]
+                if task["status"] == "running":
+                    return jsonify({
+                        "error": f"Onboarding already running for {symbol}",
+                        "task_id": task["task_id"]
+                    }), 409
+
+        task_id = f"{symbol.lower()}_onboard_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+        task_info = {
+            "task_id": task_id,
+            "symbol": symbol,
+            "status": "running",
+            "started_at": datetime.now().isoformat(),
+            "config": {
+                "sessions": sessions,
+                "timeframes": timeframes,
+                "start_date": start_date.isoformat(),
+                "end_date": end_date.isoformat(),
+            },
+            "process": None,
+        }
+
+        def run_onboarding():
+            try:
+                from src.onboarding.orchestrator import OnboardingOrchestrator
+
+                orch = OnboardingOrchestrator(
+                    symbol=symbol,
+                    sessions=sessions,
+                    timeframes=timeframes,
+                    start_date=start_date,
+                    end_date=end_date,
+                    top_n=top_n,
+                )
+                orch.run()
+                task_info["status"] = "completed"
+                task_info["completed_at"] = datetime.now().isoformat()
+                _log.info(f"Onboarding {symbol} completed")
+            except Exception as e:
+                task_info["status"] = "failed"
+                task_info["error"] = str(e)
+                task_info["completed_at"] = datetime.now().isoformat()
+                _log.error(f"Onboarding error for {symbol}: {e}", exc_info=True)
+
+        with _tasks_lock:
+            _onboarding_tasks[symbol] = task_info
+
+        from src.onboarding.orchestrator import OnboardingOrchestrator
+        orch = OnboardingOrchestrator(
+            symbol=symbol, sessions=sessions, timeframes=timeframes,
+            start_date=start_date, end_date=end_date, top_n=top_n,
+        )
+        estimated = orch.estimate_runtime_seconds()
+
+        thread = threading.Thread(target=run_onboarding, daemon=True, name=f"onboard_{symbol}")
+        thread.start()
+        task_info["process"] = thread.ident
+
+        _log.info(f"Started onboarding for {symbol} (est. {estimated:.0f}s)")
+
+        return jsonify({
+            "status": "ok",
+            "task_id": task_id,
+            "symbol": symbol,
+            "estimated_seconds": round(estimated, 1),
+            "message": f"Onboarding started for {symbol}",
+        }), 201
+
+    except Exception as e:
+        _log.error(f"Error starting onboarding: {e}", exc_info=True)
+        return jsonify({"error": str(e)}), 500
+
+
+@bp.route("/onboarding/<symbol>/progress", methods=["GET"])
+def get_onboarding_progress(symbol: str):
+    """Get real-time progress markers for a symbol's onboarding."""
+    try:
+        symbol = symbol.upper()
+        output_dir = PROJECT_ROOT / "tests" / "onboarding" / symbol
+        from src.onboarding.orchestrator import read_progress
+
+        markers = read_progress(output_dir)
+        return jsonify({"status": "ok", "symbol": symbol, "progress": markers}), 200
+    except Exception as e:
+        _log.error(f"Error reading progress for {symbol}: {e}", exc_info=True)
+        return jsonify({"error": str(e)}), 500
+
+
+@bp.route("/onboarding/<symbol>/results", methods=["GET"])
+def get_onboarding_results(symbol: str):
+    """Get live results rows for a symbol's onboarding."""
+    try:
+        symbol = symbol.upper()
+        output_dir = PROJECT_ROOT / "tests" / "onboarding" / symbol
+        from src.onboarding.orchestrator import read_live_results
+
+        results = read_live_results(output_dir)
+        return jsonify({"status": "ok", "symbol": symbol, "results": results}), 200
+    except Exception as e:
+        _log.error(f"Error reading results for {symbol}: {e}", exc_info=True)
+        return jsonify({"error": str(e)}), 500
+
+
+@bp.route("/onboarding/<symbol>/download", methods=["GET"])
+def download_onboarding(symbol: str):
+    """Download the raw onboarding JSON file."""
+    try:
+        from flask import send_file
+
+        symbol = symbol.upper()
+        output_dir = PROJECT_ROOT / "tests" / "onboarding" / symbol
+        # Find the most recent raw JSON file.
+        files = sorted(output_dir.glob(f"{symbol}_onboarding_*.json"), reverse=True)
+        if not files:
+            return jsonify({"error": f"No onboarding results for {symbol}"}), 404
+        return send_file(files[0], as_attachment=True, download_name=files[0].name)
+    except Exception as e:
+        _log.error(f"Error downloading for {symbol}: {e}", exc_info=True)
+        return jsonify({"error": str(e)}), 500
+
+
 def register_routes(app):
     """Register symbol management routes with Flask app."""
     app.register_blueprint(bp)

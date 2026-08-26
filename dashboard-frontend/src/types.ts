@@ -152,3 +152,61 @@ export interface ApiResponse<T> {
   data: T
   error?: string
 }
+
+// --- Onboarding Wizard types ---
+
+export interface LiveSymbol {
+  name: string
+  description: string
+  "tradeable:": boolean
+  path: string
+  currency_base: string
+  currency_profit: string
+  digits: number
+}
+
+export interface WizardSession {
+  key: string
+  name: string
+  window: string
+  days: string
+  description: string
+}
+
+export interface WizardTimeframe {
+  key: string
+  name: string
+  description: string
+}
+
+export interface OnboardingResult {
+  session: string
+  session_display: string
+  timeframe: string
+  indicator: string
+  library: string
+  category: string
+  score: number
+  trades: number
+  win_rate: number
+  profit_factor: number
+  total_return: number
+  max_drawdown: number
+  sharpe: number
+  start_balance: number
+  end_balance: number
+  stats: Record<string, unknown>
+}
+
+export interface ProgressMarker {
+  type: string
+  symbol?: string
+  timeframe?: string
+  session?: string
+  combinations_completed?: number
+  total_combinations?: number
+  results_count?: number
+  elapsed_seconds?: number
+  error?: string
+  timestamp?: string
+}

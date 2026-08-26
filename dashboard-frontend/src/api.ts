@@ -142,7 +142,45 @@ export const dashboardAPI = {
   },
 
   /**
-   * Get all onboarding tasks
+   * Get live MT5 symbols (alphabetical, tradeable status).
+   */
+  getLiveSymbols: async () => {
+    const response = await apiRoot.get('/symbols/live')
+    return response.data.symbols || []
+  },
+
+  /**
+   * Start onboarding with full wizard config.
+   */
+  startOnboarding: async (symbol: string, config: {
+    sessions: string[]
+    timeframes: string[]
+    start_date?: string
+    end_date?: string
+    top_n?: number
+  }) => {
+    const response = await apiRoot.post(`/symbols/${symbol}/onboard`, config)
+    return response.data
+  },
+
+  /**
+   * Get onboarding progress markers.
+   */
+  getOnboardingProgress: async (symbol: string) => {
+    const response = await apiRoot.get(`/onboarding/${symbol}/progress`)
+    return response.data.progress || []
+  },
+
+  /**
+   * Get live onboarding results.
+   */
+  getOnboardingResults: async (symbol: string) => {
+    const response = await apiRoot.get(`/onboarding/${symbol}/results`)
+    return response.data.results || []
+  },
+
+  /**
+   * Get onboarding tasks
    */
   getOnboardingTasks: async () => {
     const response = await apiRoot.get('/tasks')

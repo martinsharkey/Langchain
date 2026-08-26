@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { dashboardAPI } from '../api'
+import OnboardingWizard from '../components/OnboardingWizard'
 
 interface SymbolStatus {
   symbol: string
@@ -36,6 +37,7 @@ export default function SymbolOnboarding() {
   const [newSymbol, setNewSymbol] = useState('')
   const [selectedSymbol, setSelectedSymbol] = useState<string | null>(null)
   const [sessionPreferences, setSessionPreferences] = useState<Record<string, string[]>>({})
+  const [showWizard, setShowWizard] = useState(false)
 
   // Load symbols on mount
   useEffect(() => {
@@ -207,9 +209,9 @@ export default function SymbolOnboarding() {
       {/* Tab Navigation */}
       <div className="flex gap-4 border-b border-slate-700">
         <button
-          onClick={() => setActiveTab('manage')}
+          onClick={() => { setActiveTab('manage'); setShowWizard(false) }}
           className={`px-4 py-2 font-semibold transition-colors ${
-            activeTab === 'manage'
+            activeTab === 'manage' && !showWizard
               ? 'text-white border-b-2 border-white'
               : 'text-slate-400 hover:text-white'
           }`}
@@ -226,7 +228,25 @@ export default function SymbolOnboarding() {
         >
           Onboarding Tasks ({tasks.filter(t => t.status !== 'completed').length})
         </button>
+        <button
+          onClick={() => setShowWizard(true)}
+          className={`px-4 py-2 font-semibold transition-colors ${
+            showWizard
+              ? 'text-white border-b-2 border-green-500'
+              : 'text-green-400 hover:text-green-300'
+          }`}
+        >
+          + Onboard New Symbol
+        </button>
       </div>
+
+      {/* Wizard */}
+      {showWizard && (
+        <OnboardingWizard onComplete={() => {
+          setShowWizard(false)
+          loadSymbols()
+        }} />
+      )}
 
       {/* Manage Tab */}
       {activeTab === 'manage' && (
