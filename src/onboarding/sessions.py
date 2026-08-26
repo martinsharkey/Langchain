@@ -15,7 +15,7 @@ Native API (from ``TradingSessions.ipynb`` example):
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Tuple
 
 import numpy as np
@@ -40,6 +40,11 @@ class Session:
     end_minute: int          # exclusive, UTC
     kind: str                # "macro" | "overlap" | "micro"
     description: str = ""
+    # Optional per-day time windows (weekday -> (start_minutes, end_minutes)).
+    # When provided, overrides start_hour/start_minute/end_hour/end_minute for
+    # those specific days. Used for sessions like btcusd_weekend that have
+    # different hours on different days (Fri 22:00+, Sat all day, Sun <21:00).
+    day_windows: Dict[int, Tuple[int, int]] = field(default_factory=dict)
 
 
 # Full session taxonomy. Hours are UTC.
@@ -106,9 +111,14 @@ SESSION_DEFINITIONS: Dict[str, Session] = {
         description="Friday market close (21:00-22:00 UTC)",
     ),
     "weekend": Session(
-        key="weekend", name="Weekend (24/7)", days=[5, 6],
+        key="weekend", name="BTCUSD Weekend", days=[4, 5, 6],
         start_hour=0, start_minute=0, end_hour=24, end_minute=0, kind="micro",
-        description="Saturday-Sunday (BTCUSD trades 24/7)",
+        description="BTCUSD weekend: Fri 22:00 - Sun 21:00 UTC (crypto never sleeps)",
+        day_windows={
+            4: (22 * 60, 24 * 60),  # Friday: 22:00 - 24:00
+            5: (0, 24 * 60),          # Saturday: all day
+            6: (0, 21 * 60),          # Sunday: 00:00 - 21:00
+        },
     ),
 }
 
@@ -174,29 +184,56 @@ def get_session_boundaries(
     weekday = idx_norm.weekday
     minutes = idx_norm.hour * 60 + idx_norm.minute
 
-    day_mask = weekday.isin(session.days)
-    start = _minutes_of_day(session.start_hour, session.start_minute)
-    end = _minutes_of_day(session.end_hour, session.end_minute)
-
-    if end == 24 * 60:
-        time_mask = minutes >= start
-    elif start < end:
-        time_mask = (minutes >= start) & (minutes < end)
-    else:
-        time_mask = (minutes >= start) | (minutes < end)
+    # Build per-bar time mask, supporting per-day windows (e.g. btcusd_weekend).
+    time_mask = pd.Series(False, index=idx_norm)
+    for day_idx in session.days:
+        day_sel = weekday == day_idx
+        if day_idx in session.day_windows:
+            start_m, end_m = session.day_windows[day_idx]
+        else:
+            start_m = _minutes_of_day(session.start_hour, session.start_minute)
+            end_m = _minutes_of_day(session.end_hour, session.end_minute)
+        if end_m == 24 * 60:
+            time_mask = time_mask | (day_sel & (minutes >= start_m))
+        elif start_m < end_m:
+            time_mask = time_mask | (day_sel & (minutes >= start_m) & (minutes < end_m))
+        else:
+            time_mask = time_mask | (day_sel & ((minutes >= start_m) | (minutes < end_m)))
 
     # Get the integer positions of session bars in the ORIGINAL index.
-    positions = np.where(day_mask & time_mask)[0]
+    positions = np.where(time_mask)[0]
     if len(positions) == 0:
         return None, None
 
     # Map normalized times back to original index for grouping.
     session_times = idx_norm[positions]
     sessions_df = pd.DataFrame({"pos": positions, "time": session_times}, index=session_times)
-    sessions_df["date"] = sessions_df.index.date
 
-    start_positions = sessions_df.groupby("date")["pos"].first().values
-    end_positions = sessions_df.groupby("date")["pos"].last().values
+    # Group bars into session occurrences. For single-day sessions, group by date.
+    # For multi-day sessions (e.g. btcusd_weekend spanning Fri-Sun), group by
+    # occurrence: each occurrence starts at the first bar of the session's first day.
+    if len(session.days) == 1 or not session.day_windows:
+        # Single-day sessions: each date is one occurrence.
+        sessions_df["occurrence"] = sessions_df.index.date
+    else:
+        # Multi-day sessions: identify occurrence starts (first day of the session).
+        first_day = min(session.days)
+        # A new occurrence starts on each date that has bars on the first day.
+        first_day_dates = set(
+            sessions_df.index[sessions_df.index.weekday == first_day].date
+        )
+        # Assign each bar to the most recent occurrence start (backward fill).
+        sessions_df["occurrence"] = None
+        current_occurrence = None
+        for ts in sessions_df.index:
+            if ts.date() in first_day_dates and ts.weekday() == first_day:
+                current_occurrence = ts.date()
+            sessions_df.loc[ts, "occurrence"] = current_occurrence
+        # Drop bars before the first occurrence start (shouldn't happen, but safety).
+        sessions_df = sessions_df.dropna(subset=["occurrence"])
+
+    start_positions = sessions_df.groupby("occurrence")["pos"].first().values
+    end_positions = sessions_df.groupby("occurrence")["pos"].last().values
 
     if len(start_positions) == 0 or len(end_positions) == 0:
         return None, None

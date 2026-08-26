@@ -81,6 +81,11 @@ class Optimizer:
                 tuned.append(self._combo_entry(cand))
                 continue
 
+            # Skip combination candidates (cannot be tuned as single indicators).
+            if cand.library == "combo":
+                tuned.append(self._baseline_entry(cand))
+                continue
+
             ind = wrap(cand.indicator, cand.library)
             ohlcv = self._load_session_data(cand)
             if ohlcv is None or "close" not in ohlcv or ohlcv["close"].shape[1] == 0:

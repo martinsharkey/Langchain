@@ -46,8 +46,9 @@ def test_split_sessions_native_london():
 
 
 def test_split_sessions_native_weekend():
-    """Native range_split: weekend (Sat-Sun) produces per-occurrence columns."""
-    idx = pd.date_range("2026-08-08", periods=48 * 60, freq="1min")  # Sat-Sun
+    """Native range_split: btcusd_weekend (Fri 22:00 - Sun 21:00) produces per-occurrence columns."""
+    # Friday 20:00 through Sunday 22:00 to capture a full weekend occurrence.
+    idx = pd.date_range("2026-08-07 20:00", periods=3 * 24 * 60, freq="1min", tz="UTC")  # Fri-Sun
     df = pd.DataFrame(
         {"close": range(len(idx)), "high": range(len(idx)), "low": range(len(idx)),
          "open": range(len(idx)), "volume": range(len(idx))},
@@ -55,8 +56,9 @@ def test_split_sessions_native_weekend():
     )
     ohlcv = split_sessions_native(df, "weekend", freq="1min")
     assert ohlcv is not None
-    # Weekend: 2 days = 2 columns.
-    assert ohlcv["close"].shape[1] == 2
+    # Weekend spans Fri 22:00 - Sun 20:59 = 47 hours = 2820 min = 1 occurrence.
+    assert ohlcv["close"].shape[1] == 1
+    assert ohlcv["close"].shape[0] == 2820
 
 
 def test_split_sessions_native_returns_dict():

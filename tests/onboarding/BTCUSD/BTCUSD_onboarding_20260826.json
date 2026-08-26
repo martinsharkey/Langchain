@@ -1,6 +1,6 @@
 {
   "symbol": "BTCUSD",
-  "generated_at": "2026-08-26T21:33:34.432778",
+  "generated_at": "2026-08-26T21:48:28.917961",
   "best_timeframe_per_session": {
     "asian": {
       "timeframe": "M1",
@@ -24,24 +24,6 @@
           "stats": {}
         },
         {
-          "indicator": "CDLXSIDEGAP3METHODS+MAX+KAMA",
-          "library": "combo",
-          "category": "or",
-          "session": "asian",
-          "timeframe": "M1",
-          "score": 0.8704,
-          "stats": {}
-        },
-        {
-          "indicator": "CDLXSIDEGAP3METHODS+KAMA",
-          "library": "combo",
-          "category": "or",
-          "session": "asian",
-          "timeframe": "M1",
-          "score": 0.868,
-          "stats": {}
-        },
-        {
           "indicator": "CDLXSIDEGAP3METHODS+CDLSTALLEDPATTERN+MAX",
           "library": "combo",
           "category": "or",
@@ -57,15 +39,6 @@
           "session": "asian",
           "timeframe": "M1",
           "score": 0.8609,
-          "stats": {}
-        },
-        {
-          "indicator": "CDLXSIDEGAP3METHODS+CDLSTALLEDPATTERN+KAMA",
-          "library": "combo",
-          "category": "or",
-          "session": "asian",
-          "timeframe": "M1",
-          "score": 0.8598,
           "stats": {}
         },
         {
@@ -93,6 +66,33 @@
           "session": "asian",
           "timeframe": "M1",
           "score": 0.8444,
+          "stats": {}
+        },
+        {
+          "indicator": "VARIANCE",
+          "library": "pandas_ta",
+          "category": "single",
+          "session": "asian",
+          "timeframe": "M1",
+          "score": 0.8438,
+          "stats": {}
+        },
+        {
+          "indicator": "CDLDOJISTAR",
+          "library": "talib",
+          "category": "single",
+          "session": "asian",
+          "timeframe": "M1",
+          "score": 0.8424,
+          "stats": {}
+        },
+        {
+          "indicator": "CDLSTALLEDPATTERN",
+          "library": "talib",
+          "category": "single",
+          "session": "asian",
+          "timeframe": "M1",
+          "score": 0.8405,
           "stats": {}
         }
       ]
@@ -974,24 +974,6 @@
         "stats": {}
       },
       {
-        "indicator": "CDLXSIDEGAP3METHODS+MAX+KAMA",
-        "library": "combo",
-        "category": "or",
-        "session": "asian",
-        "timeframe": "M1",
-        "score": 0.8704,
-        "stats": {}
-      },
-      {
-        "indicator": "CDLXSIDEGAP3METHODS+KAMA",
-        "library": "combo",
-        "category": "or",
-        "session": "asian",
-        "timeframe": "M1",
-        "score": 0.868,
-        "stats": {}
-      },
-      {
         "indicator": "CDLXSIDEGAP3METHODS+CDLSTALLEDPATTERN+MAX",
         "library": "combo",
         "category": "or",
@@ -1007,15 +989,6 @@
         "session": "asian",
         "timeframe": "M1",
         "score": 0.8609,
-        "stats": {}
-      },
-      {
-        "indicator": "CDLXSIDEGAP3METHODS+CDLSTALLEDPATTERN+KAMA",
-        "library": "combo",
-        "category": "or",
-        "session": "asian",
-        "timeframe": "M1",
-        "score": 0.8598,
         "stats": {}
       },
       {
@@ -1043,6 +1016,33 @@
         "session": "asian",
         "timeframe": "M1",
         "score": 0.8444,
+        "stats": {}
+      },
+      {
+        "indicator": "VARIANCE",
+        "library": "pandas_ta",
+        "category": "single",
+        "session": "asian",
+        "timeframe": "M1",
+        "score": 0.8438,
+        "stats": {}
+      },
+      {
+        "indicator": "CDLDOJISTAR",
+        "library": "talib",
+        "category": "single",
+        "session": "asian",
+        "timeframe": "M1",
+        "score": 0.8424,
+        "stats": {}
+      },
+      {
+        "indicator": "CDLSTALLEDPATTERN",
+        "library": "talib",
+        "category": "single",
+        "session": "asian",
+        "timeframe": "M1",
+        "score": 0.8405,
         "stats": {}
       }
     ],
