@@ -66,6 +66,9 @@ data/
 htmlcov/
 test-output/
 
+# Third-party reference docs (local clone of vectorbt source, not our code)
+docs/vectorbt-docs/
+
 # session DB backups (never commit)
 *.backup_*.db
 

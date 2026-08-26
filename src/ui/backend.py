@@ -200,96 +200,25 @@ def _get_top_strategies(results):
         return []
 
 def run_onboarding(symbol):
-    """Run onboarding in background thread."""
+    """Run onboarding in background thread using the src.onboarding pipeline."""
     try:
         onboarding_jobs[symbol] = {
-            'status': 'starting',
-            'progress': 5,
-            'message': 'Initializing onboarding...'
-        }
-        
-        # Run vectorbt onboarding
-        cmd = [sys.executable, '-m', 'scripts.qmmp.vectorbt_onboard', symbol, '--min-pf=1.2']
-        
-        onboarding_jobs[symbol] = {
             'status': 'running',
-            'progress': 15,
-            'message': 'Loading data...'
+            'progress': 10,
+            'message': 'Discovering indicators (VectorBT + ta-lib + pandas_ta)...'
         }
-        
-        process = subprocess.Popen(
-            cmd,
-            cwd=str(project_root),
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True
-        )
-        
-        # Track progress
-        lines_processed = 0
-        for line in process.stdout:
-            lines_processed += 1
-            
-            if 'Stage 1' in line:
-                onboarding_jobs[symbol] = {
-                    'status': 'running',
-                    'progress': 20,
-                    'message': 'Loading data...'
-                }
-            elif 'Stage 2' in line:
-                onboarding_jobs[symbol] = {
-                    'status': 'running',
-                    'progress': 35,
-                    'message': 'Testing indicator combinations...'
-                }
-            elif 'Stage 3' in line:
-                onboarding_jobs[symbol] = {
-                    'status': 'running',
-                    'progress': 60,
-                    'message': 'Walk-forward validation...'
-                }
-            elif 'Stage 4' in line:
-                onboarding_jobs[symbol] = {
-                    'status': 'running',
-                    'progress': 75,
-                    'message': 'Discovering entry floors...'
-                }
-            elif 'Stage 5' in line:
-                onboarding_jobs[symbol] = {
-                    'status': 'running',
-                    'progress': 85,
-                    'message': 'Generating EA...'
-                }
-            elif 'Stage 6' in line:
-                onboarding_jobs[symbol] = {
-                    'status': 'running',
-                    'progress': 95,
-                    'message': 'Generating report...'
-                }
-            elif 'ONBOARDING COMPLETE' in line:
-                onboarding_jobs[symbol] = {
-                    'status': 'completed',
-                    'progress': 100,
-                    'message': 'Onboarding complete!'
-                }
-        
-        # Wait for completion
-        returncode = process.wait()
-        
-        if returncode == 0:
-            onboarding_jobs[symbol] = {
-                'status': 'completed',
-                'progress': 100,
-                'message': 'Onboarding complete!'
-            }
-        else:
-            stderr = process.stderr.read() if process.stderr else ""
-            onboarding_jobs[symbol] = {
-                'status': 'error',
-                'progress': 0,
-                'message': f'Onboarding failed: {stderr[:200]}'
-            }
-    
+
+        from src.onboarding import onboard
+
+        result = onboard(symbol)
+
+        onboarding_jobs[symbol] = {
+            'status': 'completed',
+            'progress': 100,
+            'message': 'Onboarding complete!',
+            'result': result,
+        }
+
     except Exception as e:
         onboarding_jobs[symbol] = {
             'status': 'error',

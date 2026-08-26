@@ -324,15 +324,6 @@ def start_onboarding(symbol: str):
                         "task_id": task["task_id"]
                     }), 409
         
-        # Build command
-        cmd = ["python", "-m", "scripts.qmmp.vectorbt_onboard", symbol]
-        
-        if data.get("min_pf"):
-            cmd.extend(["--min-pf", str(data["min_pf"])])
-        
-        if data.get("sessions"):
-            cmd.extend(["--sessions", ",".join(data["sessions"])])
-        
         # Create task
         task_id = f"{symbol.lower()}_onboard_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
         
@@ -341,32 +332,23 @@ def start_onboarding(symbol: str):
             "symbol": symbol,
             "status": "running",
             "started_at": datetime.now().isoformat(),
-            "command": " ".join(cmd),
+            "command": f"onboard({symbol})",
             "process": None
         }
         
-        # Start process in background thread
+        # Start onboarding in background thread using the src.onboarding pipeline.
         def run_onboarding():
             try:
-                result = subprocess.run(
-                    cmd,
-                    cwd=str(PROJECT_ROOT),
-                    capture_output=True,
-                    text=True,
-                    timeout=3600  # 1 hour timeout
-                )
-                
-                task_info["status"] = "completed" if result.returncode == 0 else "failed"
+                from src.onboarding import onboard
+
+                sessions = data.get("sessions") or None
+                timeframes = data.get("timeframes") or None
+                result = onboard(symbol, timeframes=timeframes, sessions=sessions)
+                task_info["result"] = result
+                task_info["status"] = "completed"
                 task_info["completed_at"] = datetime.now().isoformat()
-                task_info["stdout"] = result.stdout[-1000:] if result.stdout else ""  # Last 1000 chars
-                task_info["stderr"] = result.stderr[-1000:] if result.stderr else ""
-                task_info["returncode"] = result.returncode
                 
                 _log.info(f"Onboarding {symbol} {task_info['status']}")
-            
-            except subprocess.TimeoutExpired:
-                task_info["status"] = "timeout"
-                task_info["completed_at"] = datetime.now().isoformat()
             
             except Exception as e:
                 task_info["status"] = "failed"

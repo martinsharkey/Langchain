@@ -1,13 +1,11 @@
-"""QMMP ingest: multi-timeframe bar (+ optional tick) data -> Parquet.
+"""QMMP ingest: multi-timeframe bar data -> Parquet.
 
-Source priority: MT5 for HTF (deep: M15~400d, H1~900d, H4~1500d) and M1 (~45d);
-Dukascopy for DEEP M1 + ticks when --deep is set (BTCUSD ticks reach >=6mo back, but
-tick fetch is slow so it runs as an explicit deep job). All TFs stored aligned to UTC.
+Source: MT5 (VTMarkets) for all timeframes (M1~45d, M5~120d, M15~400d, M30~700d,
+H1~900d, H4~1500d). All TFs stored aligned to UTC.
 
-Output: data/qmmp/<symbol>/<TF>.parquet  and (deep) ticks.parquet
+Output: data/qmmp/<symbol>/<TF>.parquet
 Usage:
     python -m scripts.qmmp.ingest BTCUSD                 # MT5 all TFs
-    python -m scripts.qmmp.ingest BTCUSD --deep --months 6   # Dukascopy deep M1+ticks
 """
 from __future__ import annotations
 import argparse, os, sys
@@ -89,45 +87,9 @@ def ingest_mt5(symbol: str):
     return resolved, summary
 
 
-def ingest_deep_dukascopy(symbol: str, months: int):
-    """Deep M1 bars from Dukascopy ticks (aggregated). Slow — run explicitly."""
-    from src.data_sources.dukascopy import fetch_ticks
-    start = (datetime.now(timezone.utc) - timedelta(days=30 * months)).replace(minute=0, second=0, microsecond=0)
-    end = datetime.now(timezone.utc)
-    outsym = os.path.join(OUTDIR, symbol.upper())
-    os.makedirs(outsym, exist_ok=True)
-    print(f"Dukascopy deep fetch {symbol} {start.date()}..{end.date()} (this is slow)...")
-    ticks = fetch_ticks(symbol, start, end, workers=8,
-                        progress_cb=lambda d, t: print(f"  {d}/{t} hours", flush=True) if d % 240 == 0 else None)
-    if not ticks:
-        print("no ticks returned"); return
-    tdf = pl.DataFrame({
-        "time": [datetime.fromtimestamp(t[0], timezone.utc) for t in ticks],
-        "bid": [t[1] for t in ticks], "ask": [t[2] for t in ticks],
-    })
-    tdf.write_parquet(os.path.join(outsym, "ticks.parquet"))
-    # aggregate to M1 bars from mid price
-    tdf = tdf.with_columns(((pl.col("bid") + pl.col("ask")) / 2).alias("mid"))
-    m1 = (tdf.group_by_dynamic("time", every="1m")
-          .agg([pl.col("mid").first().alias("open"), pl.col("mid").max().alias("high"),
-                pl.col("mid").min().alias("low"), pl.col("mid").last().alias("close"),
-                pl.len().alias("volume")]).sort("time"))
-    h = m1["time"].dt.hour(); wd = m1["time"].dt.weekday()
-    m1 = m1.with_columns([
-        ((h >= 0) & (h < 9)).alias("session_asia"),
-        ((h >= 7) & (h < 16)).alias("session_london"),
-        ((h >= 12) & (h < 21)).alias("session_ny"),
-        (wd <= 5).alias("weekday"),
-    ])
-    m1.write_parquet(os.path.join(outsym, "M1_deep.parquet"))
-    print(f"deep: {len(ticks)} ticks -> {len(m1)} M1 bars ({m1['time'][0]}..{m1['time'][-1]})")
-
-
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("symbol")
-    ap.add_argument("--deep", action="store_true", help="Dukascopy deep M1+ticks")
-    ap.add_argument("--months", type=int, default=6)
     args = ap.parse_args()
     if not mt5.initialize():
         print("MT5 init failed:", mt5.last_error()); return
@@ -135,8 +97,6 @@ def main():
     print(f"MT5 ingest {args.symbol} (resolved {resolved}):")
     for tf, n in summary.items():
         print(f"  {tf}: {n} bars")
-    if args.deep:
-        ingest_deep_dukascopy(args.symbol, args.months)
     mt5.shutdown()
     print(f"\nParquet in {os.path.join(OUTDIR, args.symbol.upper())}")
 
