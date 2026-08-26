@@ -1,0 +1,19 @@
+{
+  "timestamp": "2026-08-26T10:01:39.261540",
+  "symbol": "BTCUSD",
+  "timeframe": "H1",
+  "sessions": {
+    "London": {
+      "total_viable": 0,
+      "indicators": []
+    },
+    "Tokyo": {
+      "total_viable": 0,
+      "indicators": []
+    },
+    "New York": {
+      "total_viable": 0,
+      "indicators": []
+    }
+  }
+}
