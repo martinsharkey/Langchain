@@ -1,0 +1,54 @@
+{
+  "symbol": "BTCUSD",
+  "timeframe": "H1",
+  "timestamp": "2026-08-25T17:23:58.553345",
+  "discovery": [
+    {
+      "indicator": "BBANDS",
+      "trades": 13,
+      "win_rate": 0.6153846153846154,
+      "profit_factor": 2.053992307763109,
+      "return_pct": 4.616283534960003,
+      "sharpe": 2.202176208120969,
+      "status": "viable"
+    },
+    {
+      "indicator": "OBV",
+      "trades": 119,
+      "win_rate": 0.25210084033613445,
+      "profit_factor": 1.4877435107090624,
+      "return_pct": 10.3090431740629,
+      "sharpe": 3.1598706960795333,
+      "status": "viable"
+    },
+    {
+      "indicator": "MACD",
+      "trades": 35,
+      "win_rate": 0.5142857142857142,
+      "profit_factor": 1.2028916686413407,
+      "return_pct": 2.5919554058297942,
+      "sharpe": 1.0184715931977333,
+      "status": "viable"
+    },
+    {
+      "indicator": "STOCH",
+      "trades": 22,
+      "win_rate": 0.6363636363636364,
+      "profit_factor": 0.9325008727551887,
+      "return_pct": -0.6400704588192275,
+      "sharpe": -0.21960144969115433,
+      "status": "not_viable"
+    }
+  ],
+  "optimization": [
+    {
+      "indicator": "BBANDS",
+      "best_score": Infinity,
+      "best_params": {
+        "period": 17,
+        "alpha": 2.9260714596148745
+      },
+      "n_trials": 20
+    }
+  ]
+}

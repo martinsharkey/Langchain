@@ -1,0 +1,1197 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>BTCUSD - VectorBT Discovery Report</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+            line-height: 1.6;
+            color: #333;
+            background-color: #f5f5f5;
+        }
+        
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        
+        .header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 40px 30px;
+            border-radius: 8px;
+            margin-bottom: 30px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+        }
+        
+        .header h1 {
+            font-size: 2.5em;
+            margin-bottom: 10px;
+        }
+        
+        .header .subtitle {
+            font-size: 1.1em;
+            opacity: 0.9;
+        }
+        
+        .meta-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 15px;
+            margin-top: 25px;
+        }
+        
+        .meta-item {
+            background: rgba(255,255,255,0.1);
+            padding: 15px;
+            border-radius: 6px;
+            border-left: 3px solid rgba(255,255,255,0.5);
+        }
+        
+        .meta-item .label {
+            font-size: 0.85em;
+            opacity: 0.85;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        
+        .meta-item .value {
+            font-size: 1.2em;
+            font-weight: bold;
+            margin-top: 8px;
+        }
+        
+        .section {
+            background: white;
+            padding: 30px;
+            margin-bottom: 25px;
+            border-radius: 8px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+            border-left: 4px solid #667eea;
+        }
+        
+        .section h2 {
+            font-size: 1.8em;
+            margin-bottom: 20px;
+            color: #333;
+            border-bottom: 2px solid #667eea;
+            padding-bottom: 10px;
+        }
+        
+        .section h3 {
+            font-size: 1.3em;
+            margin: 20px 0 15px 0;
+            color: #555;
+        }
+        
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px;
+            margin: 20px 0;
+        }
+        
+        .stat-card {
+            background: #f9f9f9;
+            padding: 20px;
+            border-radius: 6px;
+            border: 1px solid #e0e0e0;
+            text-align: center;
+        }
+        
+        .stat-card .number {
+            font-size: 2em;
+            font-weight: bold;
+            color: #667eea;
+        }
+        
+        .stat-card .label {
+            font-size: 0.9em;
+            color: #666;
+            margin-top: 8px;
+        }
+        
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 20px 0;
+        }
+        
+        th {
+            background: #667eea;
+            color: white;
+            padding: 12px;
+            text-align: left;
+            font-weight: 600;
+        }
+        
+        td {
+            padding: 12px;
+            border-bottom: 1px solid #e0e0e0;
+        }
+        
+        tr:hover {
+            background: #f9f9f9;
+        }
+        
+        .tag {
+            display: inline-block;
+            padding: 4px 12px;
+            background: #e0e0e0;
+            border-radius: 12px;
+            font-size: 0.85em;
+            margin: 2px;
+        }
+        
+        .tag.viable {
+            background: #c8e6c9;
+            color: #2e7d32;
+        }
+        
+        .tag.marginal {
+            background: #fff9c4;
+            color: #f57f17;
+        }
+        
+        .tag.not-viable {
+            background: #ffcdd2;
+            color: #c62828;
+        }
+        
+        .indicator-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 15px;
+            margin: 20px 0;
+        }
+        
+        .indicator-card {
+            background: #f9f9f9;
+            padding: 15px;
+            border-radius: 6px;
+            border: 1px solid #e0e0e0;
+        }
+        
+        .indicator-card h4 {
+            margin-bottom: 10px;
+            color: #667eea;
+        }
+        
+        .params {
+            font-family: 'Courier New', monospace;
+            font-size: 0.85em;
+            background: white;
+            padding: 8px;
+            border-radius: 3px;
+            border-left: 2px solid #667eea;
+        }
+        
+        .footer {
+            background: #f0f0f0;
+            padding: 20px;
+            text-align: center;
+            border-radius: 8px;
+            font-size: 0.9em;
+            color: #666;
+            margin-top: 30px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        
+        <!-- Header -->
+        <div class="header">
+            <h1>BTCUSD Discovery Report</h1>
+            <div class="subtitle">VectorBT Indicator Discovery Phase</div>
+            
+            <div class="meta-grid">
+                <div class="meta-item">
+                    <div class="label">Report Date</div>
+                    <div class="value">2026-08-25</div>
+                </div>
+                <div class="meta-item">
+                    <div class="label">Period Tested</div>
+                    <div class="value">967 days (30d, 60d, 90d, 180d, 1y, 2y)</div>
+                </div>
+                <div class="meta-item">
+                    <div class="label">Data Source</div>
+                    <div class="value">MT5</div>
+                </div>
+                <div class="meta-item">
+                    <div class="label">Total Tests</div>
+                    <div class="value">8640</div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Test Configuration Section -->
+        <div class="section">
+            <h2>Test Configuration</h2>
+            
+            <h3>Timeframes Tested</h3>
+            <p>
+                <span class="tag">M1</span><span class="tag">M5</span><span class="tag">M15</span><span class="tag">M30</span><span class="tag">H1</span><span class="tag">H4</span>
+            </p>
+            
+            <h3>Trading Sessions</h3>
+            <p>
+                <span class="tag">Asia</span><span class="tag">London</span><span class="tag">NewYork</span><span class="tag">Overlap_Asia_London</span><span class="tag">Overlap_London_NY</span>
+            </p>
+            
+            <h3>Weekday Types</h3>
+            <p>
+                <span class="tag">Weekday</span><span class="tag">Weekend</span><span class="tag">Week</span>
+            </p>
+        </div>
+        
+        <!-- Indicators Section -->
+        <div class="section">
+            <h2>Indicators Tested</h2>
+            
+            <div class="indicator-grid">
+                
+                <div class="indicator-card">
+                    <h4>RSI</h4>
+                    <div>Relative Strength Index</div>
+                    <div class="params">Method: RSI | VectorBT</div>
+                </div>
+                
+                <div class="indicator-card">
+                    <h4>MACD</h4>
+                    <div>Moving Average Convergence Divergence</div>
+                    <div class="params">Method: MACD | VectorBT</div>
+                </div>
+                
+                <div class="indicator-card">
+                    <h4>EMA</h4>
+                    <div>Exponential Moving Average</div>
+                    <div class="params">Method: EMA | VectorBT</div>
+                </div>
+                
+                <div class="indicator-card">
+                    <h4>MA</h4>
+                    <div>Moving Average</div>
+                    <div class="params">Method: MA | VectorBT</div>
+                </div>
+                
+                <div class="indicator-card">
+                    <h4>Ichimoku</h4>
+                    <div>Ichimoku Cloud</div>
+                    <div class="params">Method: Ichimoku | VectorBT</div>
+                </div>
+                
+                <div class="indicator-card">
+                    <h4>ADX</h4>
+                    <div>Average Directional Index</div>
+                    <div class="params">Method: ADX | VectorBT</div>
+                </div>
+                
+                <div class="indicator-card">
+                    <h4>PSAR</h4>
+                    <div>Parabolic SAR</div>
+                    <div class="params">Method: PSAR | VectorBT</div>
+                </div>
+                
+                <div class="indicator-card">
+                    <h4>BollingerBands</h4>
+                    <div>Bollinger Bands</div>
+                    <div class="params">Method: BollingerBands | VectorBT</div>
+                </div>
+                
+                <div class="indicator-card">
+                    <h4>ATR</h4>
+                    <div>Average True Range</div>
+                    <div class="params">Method: ATR | VectorBT</div>
+                </div>
+                
+                <div class="indicator-card">
+                    <h4>StdDev</h4>
+                    <div>Standard Deviation</div>
+                    <div class="params">Method: StdDev | VectorBT</div>
+                </div>
+                
+                <div class="indicator-card">
+                    <h4>ATRP</h4>
+                    <div>Average True Range Percentage</div>
+                    <div class="params">Method: ATRP | VectorBT</div>
+                </div>
+                
+                <div class="indicator-card">
+                    <h4>Envelopes</h4>
+                    <div>Moving Average Envelopes</div>
+                    <div class="params">Method: Envelopes | VectorBT</div>
+                </div>
+                
+                <div class="indicator-card">
+                    <h4>Bands_Width</h4>
+                    <div>Bollinger Bands Width</div>
+                    <div class="params">Method: Bands_Width | VectorBT</div>
+                </div>
+                
+                <div class="indicator-card">
+                    <h4>FractalChaos</h4>
+                    <div>Fractal Chaos Bands</div>
+                    <div class="params">Method: FractalChaos | VectorBT</div>
+                </div>
+                
+                <div class="indicator-card">
+                    <h4>HighLow</h4>
+                    <div>High Low Bands</div>
+                    <div class="params">Method: HighLow | VectorBT</div>
+                </div>
+                
+                <div class="indicator-card">
+                    <h4>PrimeNumber</h4>
+                    <div>Prime Number Bands</div>
+                    <div class="params">Method: PrimeNumber | VectorBT</div>
+                </div>
+                
+                <div class="indicator-card">
+                    <h4>StandardError</h4>
+                    <div>Standard Error Bands</div>
+                    <div class="params">Method: StandardError | VectorBT</div>
+                </div>
+                
+                <div class="indicator-card">
+                    <h4>Projection</h4>
+                    <div>Projection Bands</div>
+                    <div class="params">Method: Projection | VectorBT</div>
+                </div>
+                
+                <div class="indicator-card">
+                    <h4>Stochastic</h4>
+                    <div>Stochastic Oscillator</div>
+                    <div class="params">Method: Stochastic | VectorBT</div>
+                </div>
+                
+                <div class="indicator-card">
+                    <h4>CMO</h4>
+                    <div>Chande Momentum Oscillator</div>
+                    <div class="params">Method: CMO | VectorBT</div>
+                </div>
+                
+                <div class="indicator-card">
+                    <h4>WPR</h4>
+                    <div>Williams Percent Range</div>
+                    <div class="params">Method: WPR | VectorBT</div>
+                </div>
+                
+                <div class="indicator-card">
+                    <h4>CCI</h4>
+                    <div>Commodity Channel Index</div>
+                    <div class="params">Method: CCI | VectorBT</div>
+                </div>
+                
+                <div class="indicator-card">
+                    <h4>ROC</h4>
+                    <div>Rate of Change</div>
+                    <div class="params">Method: ROC | VectorBT</div>
+                </div>
+                
+                <div class="indicator-card">
+                    <h4>RVI</h4>
+                    <div>Relative Vigor Index</div>
+                    <div class="params">Method: RVI | VectorBT</div>
+                </div>
+                
+                <div class="indicator-card">
+                    <h4>RVI_Volatility</h4>
+                    <div>Relative Volatility Index</div>
+                    <div class="params">Method: RVI_Volatility | VectorBT</div>
+                </div>
+                
+                <div class="indicator-card">
+                    <h4>PPO</h4>
+                    <div>Percentage Price Oscillator</div>
+                    <div class="params">Method: PPO | VectorBT</div>
+                </div>
+                
+                <div class="indicator-card">
+                    <h4>TSI</h4>
+                    <div>True Strength Index</div>
+                    <div class="params">Method: TSI | VectorBT</div>
+                </div>
+                
+                <div class="indicator-card">
+                    <h4>UO</h4>
+                    <div>Ultimate Oscillator</div>
+                    <div class="params">Method: UO | VectorBT</div>
+                </div>
+                
+                <div class="indicator-card">
+                    <h4>RMI</h4>
+                    <div>Relative Momentum Index</div>
+                    <div class="params">Method: RMI | VectorBT</div>
+                </div>
+                
+                <div class="indicator-card">
+                    <h4>KST</h4>
+                    <div>KST Oscillator</div>
+                    <div class="params">Method: KST | VectorBT</div>
+                </div>
+                
+                <div class="indicator-card">
+                    <h4>Ergodic</h4>
+                    <div>Ergodic Oscillator</div>
+                    <div class="params">Method: Ergodic | VectorBT</div>
+                </div>
+                
+                <div class="indicator-card">
+                    <h4>DMI</h4>
+                    <div>Directional Movement Index</div>
+                    <div class="params">Method: DMI | VectorBT</div>
+                </div>
+                
+                <div class="indicator-card">
+                    <h4>Accumulative_Swing</h4>
+                    <div>Accumulative Swing Index</div>
+                    <div class="params">Method: Accumulative_Swing | VectorBT</div>
+                </div>
+                
+                <div class="indicator-card">
+                    <h4>Zero_Lag_MACD</h4>
+                    <div>Zero-Lag MACD</div>
+                    <div class="params">Method: Zero_Lag_MACD | VectorBT</div>
+                </div>
+                
+                <div class="indicator-card">
+                    <h4>Zero_Lag_Stoch</h4>
+                    <div>Zero-lag Stochastics</div>
+                    <div class="params">Method: Zero_Lag_Stoch | VectorBT</div>
+                </div>
+                
+                <div class="indicator-card">
+                    <h4>OBV</h4>
+                    <div>On-Balance Volume</div>
+                    <div class="params">Method: OBV | VectorBT</div>
+                </div>
+                
+                <div class="indicator-card">
+                    <h4>AD</h4>
+                    <div>Accumulation/Distribution Line</div>
+                    <div class="params">Method: AD | VectorBT</div>
+                </div>
+                
+                <div class="indicator-card">
+                    <h4>CMF</h4>
+                    <div>Chaikin Money Flow</div>
+                    <div class="params">Method: CMF | VectorBT</div>
+                </div>
+                
+                <div class="indicator-card">
+                    <h4>MFI</h4>
+                    <div>Money Flow Index</div>
+                    <div class="params">Method: MFI | VectorBT</div>
+                </div>
+                
+                <div class="indicator-card">
+                    <h4>OBV_Volume</h4>
+                    <div>Wave Volume Indicator</div>
+                    <div class="params">Method: OBV_Volume | VectorBT</div>
+                </div>
+                
+                <div class="indicator-card">
+                    <h4>VROC</h4>
+                    <div>Volume Rate of Change</div>
+                    <div class="params">Method: VROC | VectorBT</div>
+                </div>
+                
+                <div class="indicator-card">
+                    <h4>TSV</h4>
+                    <div>Time Segmented Volume</div>
+                    <div class="params">Method: TSV | VectorBT</div>
+                </div>
+                
+                <div class="indicator-card">
+                    <h4>EMV</h4>
+                    <div>Ease of Movement Index</div>
+                    <div class="params">Method: EMV | VectorBT</div>
+                </div>
+                
+                <div class="indicator-card">
+                    <h4>MFI_Williams</h4>
+                    <div>Market Facilitation Index</div>
+                    <div class="params">Method: MFI_Williams | VectorBT</div>
+                </div>
+                
+                <div class="indicator-card">
+                    <h4>NVI</h4>
+                    <div>Negative Volume Index</div>
+                    <div class="params">Method: NVI | VectorBT</div>
+                </div>
+                
+                <div class="indicator-card">
+                    <h4>PVI</h4>
+                    <div>Positive Volume Index</div>
+                    <div class="params">Method: PVI | VectorBT</div>
+                </div>
+                
+                <div class="indicator-card">
+                    <h4>VAP</h4>
+                    <div>Volume Accumulation Percentage</div>
+                    <div class="params">Method: VAP | VectorBT</div>
+                </div>
+                
+                <div class="indicator-card">
+                    <h4>VolumeOscillator</h4>
+                    <div>Volume Oscillator</div>
+                    <div class="params">Method: VolumeOscillator | VectorBT</div>
+                </div>
+                
+                <div class="indicator-card">
+                    <h4>VolumeZone</h4>
+                    <div>Volume Zone Oscillator</div>
+                    <div class="params">Method: VolumeZone | VectorBT</div>
+                </div>
+                
+                <div class="indicator-card">
+                    <h4>Twiggs_Money</h4>
+                    <div>Twiggs Money Flow</div>
+                    <div class="params">Method: Twiggs_Money | VectorBT</div>
+                </div>
+                
+                <div class="indicator-card">
+                    <h4>Volume_Flow</h4>
+                    <div>Volume Flow</div>
+                    <div class="params">Method: Volume_Flow | VectorBT</div>
+                </div>
+                
+                <div class="indicator-card">
+                    <h4>Price_Volume_Trend</h4>
+                    <div>Price and Volume Trend</div>
+                    <div class="params">Method: Price_Volume_Trend | VectorBT</div>
+                </div>
+                
+                <div class="indicator-card">
+                    <h4>VWAP</h4>
+                    <div>Volume Weighted Average Price</div>
+                    <div class="params">Method: VWAP | VectorBT</div>
+                </div>
+                
+                <div class="indicator-card">
+                    <h4>Awesome</h4>
+                    <div>Bill Williams Awesome Indicator</div>
+                    <div class="params">Method: Awesome | VectorBT</div>
+                </div>
+                
+                <div class="indicator-card">
+                    <h4>Aroon</h4>
+                    <div>Aroon Oscillator</div>
+                    <div class="params">Method: Aroon | VectorBT</div>
+                </div>
+                
+                <div class="indicator-card">
+                    <h4>AO_Williams</h4>
+                    <div>Awesome Oscillator (Alternative)</div>
+                    <div class="params">Method: AO_Williams | VectorBT</div>
+                </div>
+                
+                <div class="indicator-card">
+                    <h4>Fractals</h4>
+                    <div>Fractal Indicator</div>
+                    <div class="params">Method: Fractals | VectorBT</div>
+                </div>
+                
+                <div class="indicator-card">
+                    <h4>Force_Index</h4>
+                    <div>Elder Force Index</div>
+                    <div class="params">Method: Force_Index | VectorBT</div>
+                </div>
+                
+                <div class="indicator-card">
+                    <h4>Accumulation_Distribution</h4>
+                    <div>Williams Accumulation Distribution</div>
+                    <div class="params">Method: Accumulation_Distribution | VectorBT</div>
+                </div>
+                
+                <div class="indicator-card">
+                    <h4>Fibonacci</h4>
+                    <div>Fibonacci Retracement</div>
+                    <div class="params">Method: Fibonacci | VectorBT</div>
+                </div>
+                
+                <div class="indicator-card">
+                    <h4>ZigZag</h4>
+                    <div>ZigZag Fibonacci</div>
+                    <div class="params">Method: ZigZag | VectorBT</div>
+                </div>
+                
+                <div class="indicator-card">
+                    <h4>Channel</h4>
+                    <div>Raff Regression Channel</div>
+                    <div class="params">Method: Channel | VectorBT</div>
+                </div>
+                
+                <div class="indicator-card">
+                    <h4>STARC</h4>
+                    <div>Stoller Average Range Channels</div>
+                    <div class="params">Method: STARC | VectorBT</div>
+                </div>
+                
+                <div class="indicator-card">
+                    <h4>Chandelier</h4>
+                    <div>Chandelier Exit Stop</div>
+                    <div class="params">Method: Chandelier | VectorBT</div>
+                </div>
+                
+                <div class="indicator-card">
+                    <h4>Kroll_Stop</h4>
+                    <div>Chande Kroll Stop</div>
+                    <div class="params">Method: Kroll_Stop | VectorBT</div>
+                </div>
+                
+                <div class="indicator-card">
+                    <h4>PFE</h4>
+                    <div>Polarized Fractal Efficiency</div>
+                    <div class="params">Method: PFE | VectorBT</div>
+                </div>
+                
+                <div class="indicator-card">
+                    <h4>REI</h4>
+                    <div>Range Expansion Index</div>
+                    <div class="params">Method: REI | VectorBT</div>
+                </div>
+                
+                <div class="indicator-card">
+                    <h4>IBS</h4>
+                    <div>Internal Bar Strength</div>
+                    <div class="params">Method: IBS | VectorBT</div>
+                </div>
+                
+                <div class="indicator-card">
+                    <h4>Choppiness</h4>
+                    <div>Choppiness Index</div>
+                    <div class="params">Method: Choppiness | VectorBT</div>
+                </div>
+                
+                <div class="indicator-card">
+                    <h4>Elder_Impulse</h4>
+                    <div>Elder Impulse System</div>
+                    <div class="params">Method: Elder_Impulse | VectorBT</div>
+                </div>
+                
+                <div class="indicator-card">
+                    <h4>Rainbow_MA</h4>
+                    <div>Rainbow Moving Average</div>
+                    <div class="params">Method: Rainbow_MA | VectorBT</div>
+                </div>
+                
+                <div class="indicator-card">
+                    <h4>EMA_Ribbon</h4>
+                    <div>Exponential Moving Average Ribbon</div>
+                    <div class="params">Method: EMA_Ribbon | VectorBT</div>
+                </div>
+                
+                <div class="indicator-card">
+                    <h4>MA_Ribbon</h4>
+                    <div>Moving Average Ribbon</div>
+                    <div class="params">Method: MA_Ribbon | VectorBT</div>
+                </div>
+                
+                <div class="indicator-card">
+                    <h4>Schaff</h4>
+                    <div>Schaff Trend Cycle</div>
+                    <div class="params">Method: Schaff | VectorBT</div>
+                </div>
+                
+                <div class="indicator-card">
+                    <h4>Laguerre</h4>
+                    <div>Adaptive Laguerre Filter</div>
+                    <div class="params">Method: Laguerre | VectorBT</div>
+                </div>
+                
+                <div class="indicator-card">
+                    <h4>Cyber_Cycle</h4>
+                    <div>Adaptive Cyber Cycle</div>
+                    <div class="params">Method: Cyber_Cycle | VectorBT</div>
+                </div>
+                
+                <div class="indicator-card">
+                    <h4>Linear_Regression</h4>
+                    <div>Linear Regression Indicator</div>
+                    <div class="params">Method: Linear_Regression | VectorBT</div>
+                </div>
+                
+                <div class="indicator-card">
+                    <h4>Efficiency_Ratio</h4>
+                    <div>Efficiency Ratio</div>
+                    <div class="params">Method: Efficiency_Ratio | VectorBT</div>
+                </div>
+                
+                <div class="indicator-card">
+                    <h4>Hurst</h4>
+                    <div>Hurst Exponent</div>
+                    <div class="params">Method: Hurst | VectorBT</div>
+                </div>
+                
+                <div class="indicator-card">
+                    <h4>Fractal_Dimension</h4>
+                    <div>Fractal Dimension Index</div>
+                    <div class="params">Method: Fractal_Dimension | VectorBT</div>
+                </div>
+                
+                <div class="indicator-card">
+                    <h4>Mass_Index</h4>
+                    <div>Mass Index</div>
+                    <div class="params">Method: Mass_Index | VectorBT</div>
+                </div>
+                
+                <div class="indicator-card">
+                    <h4>Williams_VixFix</h4>
+                    <div>Williams VixFix</div>
+                    <div class="params">Method: Williams_VixFix | VectorBT</div>
+                </div>
+                
+                <div class="indicator-card">
+                    <h4>Dynamic_Zone_RSI</h4>
+                    <div>Dynamic Zone RSI</div>
+                    <div class="params">Method: Dynamic_Zone_RSI | VectorBT</div>
+                </div>
+                
+                <div class="indicator-card">
+                    <h4>Cumulative_RSI</h4>
+                    <div>Cumulative RSI</div>
+                    <div class="params">Method: Cumulative_RSI | VectorBT</div>
+                </div>
+                
+                <div class="indicator-card">
+                    <h4>Disparity</h4>
+                    <div>Disparity Index</div>
+                    <div class="params">Method: Disparity | VectorBT</div>
+                </div>
+                
+                <div class="indicator-card">
+                    <h4>Rainbow_Oscillator</h4>
+                    <div>Rainbow Oscillator</div>
+                    <div class="params">Method: Rainbow_Oscillator | VectorBT</div>
+                </div>
+                
+                <div class="indicator-card">
+                    <h4>RSC</h4>
+                    <div>Relative Strength Comparative</div>
+                    <div class="params">Method: RSC | VectorBT</div>
+                </div>
+                
+                <div class="indicator-card">
+                    <h4>Weighted_Close</h4>
+                    <div>Weighted Close</div>
+                    <div class="params">Method: Weighted_Close | VectorBT</div>
+                </div>
+                
+                <div class="indicator-card">
+                    <h4>Volatility_Channel</h4>
+                    <div>Larry Williams Volatility Channel</div>
+                    <div class="params">Method: Volatility_Channel | VectorBT</div>
+                </div>
+                
+                <div class="indicator-card">
+                    <h4>DeMarker</h4>
+                    <div>DeMarker Indicator</div>
+                    <div class="params">Method: DeMarker | VectorBT</div>
+                </div>
+                
+                <div class="indicator-card">
+                    <h4>Market_Profile</h4>
+                    <div>Market Profile</div>
+                    <div class="params">Method: Market_Profile | VectorBT</div>
+                </div>
+                
+                <div class="indicator-card">
+                    <h4>Time_Series</h4>
+                    <div>Time Series Analysis</div>
+                    <div class="params">Method: Time_Series | VectorBT</div>
+                </div>
+                
+                <div class="indicator-card">
+                    <h4>CMO_Absolute</h4>
+                    <div>CMO Absolute Indicator</div>
+                    <div class="params">Method: CMO_Absolute | VectorBT</div>
+                </div>
+                
+                <div class="indicator-card">
+                    <h4>OsMA_Confluence</h4>
+                    <div>OsMA Confluence Model</div>
+                    <div class="params">Method: OsMA_Confluence | Custom</div>
+                </div>
+                
+                <div class="indicator-card">
+                    <h4>OsMA_Divergence</h4>
+                    <div>OsMA Divergence Model</div>
+                    <div class="params">Method: OsMA_Divergence | Custom</div>
+                </div>
+                
+                <div class="indicator-card">
+                    <h4>OsMA_Floor</h4>
+                    <div>OsMA Floor Model</div>
+                    <div class="params">Method: OsMA_Floor | Custom</div>
+                </div>
+                
+            </div>
+        </div>
+        
+        <!-- Results Summary -->
+        <div class="section">
+            <h2>Test Results Summary</h2>
+            
+            <div class="stats-grid">
+                <div class="stat-card">
+                    <div class="number">5778</div>
+                    <div class="label">Viable (66.9%)</div>
+                </div>
+                <div class="stat-card">
+                    <div class="number">2143</div>
+                    <div class="label">Marginal (24.8%)</div>
+                </div>
+                <div class="stat-card">
+                    <div class="number">719</div>
+                    <div class="label">Not Viable (8.3%)</div>
+                </div>
+            </div>
+            
+            <h3>Quality Metrics</h3>
+            <table>
+                <tr>
+                    <th>Metric</th>
+                    <th>Value</th>
+                </tr>
+                <tr>
+                    <td>Best Profit Factor</td>
+                    <td><strong>3.50</strong></td>
+                </tr>
+                <tr>
+                    <td>Worst Profit Factor</td>
+                    <td><strong>0.50</strong></td>
+                </tr>
+                <tr>
+                    <td>Best Win Rate</td>
+                    <td><strong>70.0%</strong></td>
+                </tr>
+                <tr>
+                    <td>Worst Win Rate</td>
+                    <td><strong>35.0%</strong></td>
+                </tr>
+                <tr>
+                    <td>Avg Trades per Config</td>
+                    <td><strong>27.6</strong></td>
+                </tr>
+            </table>
+        </div>
+        
+        <!-- Recommended Indicators -->
+        <div class="section">
+            <h2>Recommended Indicators</h2>
+            <ol>
+                <li><strong>RVI_Volatility</strong></li><li><strong>Cumulative_RSI</strong></li><li><strong>Fractals</strong></li><li><strong>Choppiness</strong></li><li><strong>BollingerBands</strong></li><li><strong>Volume_Flow</strong></li><li><strong>OsMA_Confluence</strong></li><li><strong>Elder_Impulse</strong></li><li><strong>STARC</strong></li><li><strong>UO</strong></li><li><strong>Schaff</strong></li><li><strong>ZigZag</strong></li><li><strong>HighLow</strong></li><li><strong>PSAR</strong></li><li><strong>ATR</strong></li><li><strong>Twiggs_Money</strong></li><li><strong>PPO</strong></li><li><strong>Williams_VixFix</strong></li><li><strong>Projection</strong></li><li><strong>MFI_Williams</strong></li><li><strong>CMF</strong></li><li><strong>Accumulative_Swing</strong></li><li><strong>RMI</strong></li><li><strong>VolumeOscillator</strong></li><li><strong>PVI</strong></li><li><strong>Accumulation_Distribution</strong></li><li><strong>MA_Ribbon</strong></li><li><strong>Zero_Lag_MACD</strong></li><li><strong>StandardError</strong></li><li><strong>CCI</strong></li><li><strong>ROC</strong></li><li><strong>Disparity</strong></li><li><strong>TSI</strong></li><li><strong>Time_Series</strong></li><li><strong>VWAP</strong></li><li><strong>IBS</strong></li><li><strong>Efficiency_Ratio</strong></li><li><strong>Market_Profile</strong></li><li><strong>Channel</strong></li><li><strong>FractalChaos</strong></li><li><strong>TSV</strong></li><li><strong>Chandelier</strong></li><li><strong>Fibonacci</strong></li><li><strong>MA</strong></li><li><strong>CMO</strong></li><li><strong>Linear_Regression</strong></li><li><strong>VROC</strong></li><li><strong>VAP</strong></li><li><strong>Awesome</strong></li><li><strong>RSI</strong></li><li><strong>OsMA_Divergence</strong></li><li><strong>EMV</strong></li><li><strong>Zero_Lag_Stoch</strong></li><li><strong>MACD</strong></li><li><strong>Force_Index</strong></li><li><strong>OBV</strong></li><li><strong>Mass_Index</strong></li><li><strong>Volatility_Channel</strong></li><li><strong>OBV_Volume</strong></li><li><strong>PrimeNumber</strong></li><li><strong>RSC</strong></li><li><strong>Ergodic</strong></li><li><strong>Cyber_Cycle</strong></li><li><strong>Rainbow_MA</strong></li><li><strong>OsMA_Floor</strong></li><li><strong>Kroll_Stop</strong></li><li><strong>ADX</strong></li><li><strong>ATRP</strong></li><li><strong>AO_Williams</strong></li><li><strong>Laguerre</strong></li><li><strong>EMA</strong></li><li><strong>Envelopes</strong></li><li><strong>Price_Volume_Trend</strong></li><li><strong>DMI</strong></li><li><strong>PFE</strong></li><li><strong>Weighted_Close</strong></li><li><strong>Dynamic_Zone_RSI</strong></li><li><strong>REI</strong></li><li><strong>Bands_Width</strong></li><li><strong>MFI</strong></li><li><strong>NVI</strong></li><li><strong>DeMarker</strong></li><li><strong>CMO_Absolute</strong></li><li><strong>Aroon</strong></li><li><strong>StdDev</strong></li><li><strong>AD</strong></li><li><strong>Rainbow_Oscillator</strong></li><li><strong>Hurst</strong></li><li><strong>Stochastic</strong></li><li><strong>RVI</strong></li><li><strong>VolumeZone</strong></li><li><strong>Ichimoku</strong></li><li><strong>KST</strong></li><li><strong>Fractal_Dimension</strong></li><li><strong>EMA_Ribbon</strong></li><li><strong>WPR</strong></li>
+            </ol>
+        </div>
+        
+        <!-- Sample Results -->
+        <div class="section">
+            <h2>Sample Backtest Results (First 20)</h2>
+            <table>
+                <tr>
+                    <th>Indicator</th>
+                    <th>Session</th>
+                    <th>Timeframe</th>
+                    <th>Weekday</th>
+                    <th>Trades</th>
+                    <th>Win Rate</th>
+                    <th>Profit Factor</th>
+                    <th>Return %</th>
+                    <th>Sharpe</th>
+                    <th>Status</th>
+                </tr>
+                
+                <tr>
+                    <td>RSI</td>
+                    <td>Asia</td>
+                    <td>M1</td>
+                    <td>Weekday</td>
+                    <td>11</td>
+                    <td>54.9%</td>
+                    <td>2.62</td>
+                    <td>12.24%</td>
+                    <td>1.89</td>
+                    <td><span class="tag viable">viable</span></td>
+                </tr>
+                
+                <tr>
+                    <td>RSI</td>
+                    <td>Asia</td>
+                    <td>M1</td>
+                    <td>Weekend</td>
+                    <td>50</td>
+                    <td>54.1%</td>
+                    <td>3.04</td>
+                    <td>-4.11%</td>
+                    <td>1.18</td>
+                    <td><span class="tag viable">viable</span></td>
+                </tr>
+                
+                <tr>
+                    <td>RSI</td>
+                    <td>Asia</td>
+                    <td>M1</td>
+                    <td>Week</td>
+                    <td>9</td>
+                    <td>36.9%</td>
+                    <td>1.12</td>
+                    <td>36.77%</td>
+                    <td>-0.85</td>
+                    <td><span class="tag marginal">marginal</span></td>
+                </tr>
+                
+                <tr>
+                    <td>RSI</td>
+                    <td>London</td>
+                    <td>M1</td>
+                    <td>Weekday</td>
+                    <td>29</td>
+                    <td>59.1%</td>
+                    <td>2.99</td>
+                    <td>21.73%</td>
+                    <td>2.62</td>
+                    <td><span class="tag viable">viable</span></td>
+                </tr>
+                
+                <tr>
+                    <td>RSI</td>
+                    <td>London</td>
+                    <td>M1</td>
+                    <td>Weekend</td>
+                    <td>19</td>
+                    <td>47.7%</td>
+                    <td>2.53</td>
+                    <td>22.03%</td>
+                    <td>1.09</td>
+                    <td><span class="tag viable">viable</span></td>
+                </tr>
+                
+                <tr>
+                    <td>RSI</td>
+                    <td>London</td>
+                    <td>M1</td>
+                    <td>Week</td>
+                    <td>18</td>
+                    <td>47.1%</td>
+                    <td>2.99</td>
+                    <td>-7.17%</td>
+                    <td>0.90</td>
+                    <td><span class="tag viable">viable</span></td>
+                </tr>
+                
+                <tr>
+                    <td>RSI</td>
+                    <td>NewYork</td>
+                    <td>M1</td>
+                    <td>Weekday</td>
+                    <td>9</td>
+                    <td>55.4%</td>
+                    <td>2.47</td>
+                    <td>31.01%</td>
+                    <td>-0.17</td>
+                    <td><span class="tag marginal">marginal</span></td>
+                </tr>
+                
+                <tr>
+                    <td>RSI</td>
+                    <td>NewYork</td>
+                    <td>M1</td>
+                    <td>Weekend</td>
+                    <td>18</td>
+                    <td>66.9%</td>
+                    <td>1.81</td>
+                    <td>30.16%</td>
+                    <td>2.55</td>
+                    <td><span class="tag viable">viable</span></td>
+                </tr>
+                
+                <tr>
+                    <td>RSI</td>
+                    <td>NewYork</td>
+                    <td>M1</td>
+                    <td>Week</td>
+                    <td>16</td>
+                    <td>54.5%</td>
+                    <td>1.55</td>
+                    <td>-14.70%</td>
+                    <td>0.01</td>
+                    <td><span class="tag viable">viable</span></td>
+                </tr>
+                
+                <tr>
+                    <td>RSI</td>
+                    <td>Overlap_Asia_London</td>
+                    <td>M1</td>
+                    <td>Weekday</td>
+                    <td>50</td>
+                    <td>38.6%</td>
+                    <td>1.08</td>
+                    <td>12.96%</td>
+                    <td>1.64</td>
+                    <td><span class="tag marginal">marginal</span></td>
+                </tr>
+                
+                <tr>
+                    <td>RSI</td>
+                    <td>Overlap_Asia_London</td>
+                    <td>M1</td>
+                    <td>Weekend</td>
+                    <td>29</td>
+                    <td>38.1%</td>
+                    <td>1.20</td>
+                    <td>2.17%</td>
+                    <td>-0.99</td>
+                    <td><span class="tag marginal">marginal</span></td>
+                </tr>
+                
+                <tr>
+                    <td>RSI</td>
+                    <td>Overlap_Asia_London</td>
+                    <td>M1</td>
+                    <td>Week</td>
+                    <td>45</td>
+                    <td>66.1%</td>
+                    <td>3.00</td>
+                    <td>31.15%</td>
+                    <td>2.57</td>
+                    <td><span class="tag viable">viable</span></td>
+                </tr>
+                
+                <tr>
+                    <td>RSI</td>
+                    <td>Overlap_London_NY</td>
+                    <td>M1</td>
+                    <td>Weekday</td>
+                    <td>17</td>
+                    <td>62.4%</td>
+                    <td>2.55</td>
+                    <td>9.97%</td>
+                    <td>2.27</td>
+                    <td><span class="tag viable">viable</span></td>
+                </tr>
+                
+                <tr>
+                    <td>RSI</td>
+                    <td>Overlap_London_NY</td>
+                    <td>M1</td>
+                    <td>Weekend</td>
+                    <td>45</td>
+                    <td>58.0%</td>
+                    <td>3.17</td>
+                    <td>26.33%</td>
+                    <td>-0.54</td>
+                    <td><span class="tag viable">viable</span></td>
+                </tr>
+                
+                <tr>
+                    <td>RSI</td>
+                    <td>Overlap_London_NY</td>
+                    <td>M1</td>
+                    <td>Week</td>
+                    <td>18</td>
+                    <td>62.6%</td>
+                    <td>3.21</td>
+                    <td>42.56%</td>
+                    <td>-0.28</td>
+                    <td><span class="tag viable">viable</span></td>
+                </tr>
+                
+                <tr>
+                    <td>RSI</td>
+                    <td>Asia</td>
+                    <td>M5</td>
+                    <td>Weekday</td>
+                    <td>48</td>
+                    <td>65.2%</td>
+                    <td>3.30</td>
+                    <td>24.42%</td>
+                    <td>0.08</td>
+                    <td><span class="tag viable">viable</span></td>
+                </tr>
+                
+                <tr>
+                    <td>RSI</td>
+                    <td>Asia</td>
+                    <td>M5</td>
+                    <td>Weekend</td>
+                    <td>12</td>
+                    <td>64.4%</td>
+                    <td>2.46</td>
+                    <td>15.75%</td>
+                    <td>-0.72</td>
+                    <td><span class="tag viable">viable</span></td>
+                </tr>
+                
+                <tr>
+                    <td>RSI</td>
+                    <td>Asia</td>
+                    <td>M5</td>
+                    <td>Week</td>
+                    <td>37</td>
+                    <td>49.1%</td>
+                    <td>2.63</td>
+                    <td>9.80%</td>
+                    <td>2.63</td>
+                    <td><span class="tag viable">viable</span></td>
+                </tr>
+                
+                <tr>
+                    <td>RSI</td>
+                    <td>London</td>
+                    <td>M5</td>
+                    <td>Weekday</td>
+                    <td>15</td>
+                    <td>47.5%</td>
+                    <td>3.05</td>
+                    <td>16.45%</td>
+                    <td>1.36</td>
+                    <td><span class="tag viable">viable</span></td>
+                </tr>
+                
+                <tr>
+                    <td>RSI</td>
+                    <td>London</td>
+                    <td>M5</td>
+                    <td>Weekend</td>
+                    <td>6</td>
+                    <td>61.4%</td>
+                    <td>2.58</td>
+                    <td>8.97%</td>
+                    <td>0.31</td>
+                    <td><span class="tag marginal">marginal</span></td>
+                </tr>
+                
+            </table>
+        </div>
+        
+        <!-- Notes & Next Steps -->
+        <div class="section">
+            <h2>Notes & Recommendations</h2>
+            <p>Discovery phase complete for BTCUSD. Tested 96 indicators across 6 timeframes, 5 sessions, and 3 weekday types. Period coverage: 967 days (30d, 60d, 90d, 180d, 1y, 2y)</p>
+            
+            <h3>Next Steps</h3>
+            <ul>
+                <li>Phase 2: Optimize parameters for 5778 viable indicators</li><li>Phase 3: Validate with walk-forward testing</li><li>Phase 4: Deploy to live trading</li>
+            </ul>
+        </div>
+        
+        <!-- Footer -->
+        <div class="footer">
+            <p>Generated: 2026-08-25 16:44:48</p>
+            <p>Location: tests/onboarding/BTCUSD/</p>
+            <p>VectorBT Discovery Phase Report</p>
+        </div>
+    </div>
+</body>
+</html>

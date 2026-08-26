@@ -1,0 +1,109 @@
+# All 98 Trading Indicators from QuantifiedStrategies.com
+# Plus our 3 custom OsMA models = 101 total indicators
+
+1. Relative Strength Index (RSI)
+2. Bollinger Bands Indicators
+3. Money Flow Index (MFI)
+4. Parabolic SAR indicator (PSAR)
+5. Chande Momentum Oscillator (CMO)
+6. Moving Average Envelopes
+7. Williams Percent Range (%R)
+8. Moving Average Convergence Divergence (MACD)
+9. On-Balance Volume Indicator (OBV)
+10. Exponential Moving Average Indicator (EMA)
+11. Volume Weighted Average Price (VWAP)
+12. Fibonacci Retracement Indicators
+13. Average True Range (ATR)
+14. Internal Bar Strength (IBS)
+15. Percentage Price Oscillator indicator (PPO)
+16. Chaikin Money Flow (CMF)
+17. Stochastic Oscillator Indicator
+18. Average Directional Index (ADX)
+19. Ichimoku cloud indicator
+20. Standard Deviation Indicator
+21. Aroon Oscillator (AO)
+22. Accumulation/Distribution Line Indicator (A/D)
+23. Commodity Channel Index (CCI)
+24. Relative Vigor Index (RVI)
+25. Rate of Change (ROC)
+26. Moving Average Indicator (MA)
+27. Polarized Fractal Efficiency (PFE)
+28. Range Expansion Index (REI)
+29. Relative Volatility Index (RVI - Volatility)
+30. Volume Rate of Change (VROC)
+31. True Strength Index (TSI)
+32. Choppiness Index
+33. Ease of Movement Index (EMV)
+34. Market Facilitation Index (MFI - Bill Williams)
+35. Time Series Analysis
+36. Bill Williams Awesome Indicator
+37. Ultimate Oscillator
+38. Rainbow Oscillator
+39. Negative Volume Index (NVI)
+40. Positive Volume Index (PVI)
+41. Moving Average Envelope
+42. Fisher Transform
+43. CMO Absolute Indicator
+44. Bollinger Bands Width
+45. Fractal Chaos Bands
+46. Schaff Trend Cycle
+47. Cumulative RSI Indicator
+48. Stoller Average Range Channels (STARC)
+49. Time Segmented Volume (TSV)
+50. ZigZag Fibonacci
+51. High Low Bands
+52. Prime Number Bands
+53. Adaptive Laguerre Filter
+54. Disparity Index
+55. KST Oscillator
+56. Linear Regression Indicator
+57. Volume Oscillator Indicator
+58. Weighted Close
+59. Twiggs Money Flow
+60. Ergodic Oscillator
+61. Wave Volume Indicator
+62. Williams VixFix
+63. Zero-Lag MACD
+64. Zero-lag Stochastics
+65. Elder Impulse System
+66. Exponential Moving Average Ribbon
+67. Elder Force Index
+68. Average True Range Percentage (ATRP)
+69. Ichimoku Kinko Hyo
+70. Moving Average Ribbon
+71. Rainbow Moving Average
+72. Accumulation/Distribution Line
+73. Percentage Price Oscillator (PPO)
+74. Efficiency Ratio
+75. Market Profile
+76. Fractal Dimension Index (FDI)
+77. Relative Strength Comparative (RSC)
+78. Standard Error Bands
+79. Swing Index (Accumulative Swing Index)
+80. Williams Accumulation Distribution
+81. Volume Flow
+82. Accumulation Swing Index
+83. Chandelier Exit Stop
+84. Chande Kroll Stop
+85. Dynamic Zone RSI
+86. Hurst Exponent
+87. Price and Volume Trend
+88. Projection Bands
+89. Raff Regression Channel
+90. Relative Momentum Index (RMI)
+91. Volume Accumulation Percentage (VAP)
+92. Volume Zone Oscillator
+93. Larry Williams Volatility Channel
+94. DeMarker Indicator
+95. Fractal Indicator
+96. Mass Index
+97. Adaptive Cyber Cycle
+98. Directional Movement (DMI)
+
+CUSTOM MODELS (3):
+99. OsMA_Confluence
+100. OsMA_Divergence
+101. OsMA_Floor
+
+TOTAL: 101 indicators to test
+Test Matrix: 101 × 6 timeframes × 5 sessions × 3 weekday types = 9,090 test configurations

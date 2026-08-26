@@ -53,7 +53,6 @@ async def start_discovery(request: DiscoveryRequest) -> DiscoveryResponse:
         status=JobStatus.RUNNING,
         symbol=request.symbol,
         session=request.session,
-        discovered_strategies=[],
     )
     
     # Store job

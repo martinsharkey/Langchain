@@ -54,9 +54,9 @@ async def start_optimization(request: OptimizationRequest) -> OptimizationRespon
         job_id=job_id,
         status=JobStatus.RUNNING,
         symbol=request.symbol,
-        strategy_name=request.strategy_name,
-        best_floor=None,
-        trials=[],
+        session=request.session,
+        tuned_params={},
+        improvement_pct=0.0
     )
     
     job_store[job_id] = {

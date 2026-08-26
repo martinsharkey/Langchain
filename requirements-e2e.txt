@@ -1,0 +1,26 @@
+# End-to-End Testing Requirements
+
+# Core Trading Libraries
+vectorbt-pro>=0.24.0
+optuna>=3.0.0
+pandas>=1.5.0
+numpy>=1.23.0
+
+# Technical Analysis
+TA-Lib>=0.4.20
+talib-binary>=0.4.20
+
+# MT5 Integration
+MetaTrader5>=5.0.1
+
+# Testing
+pytest>=7.0.0
+pytest-asyncio>=0.20.0
+pytest-cov>=4.0.0
+
+# Utilities
+python-dotenv>=0.20.0
+pydantic>=1.10.0
+
+# Data
+yfinance>=0.2.0

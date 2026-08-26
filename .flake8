@@ -1,0 +1,31 @@
+[flake8]
+max-line-length = 100
+exclude =
+    .git,
+    __pycache__,
+    .venv,
+    venv,
+    env,
+    build,
+    dist,
+    .pytest_cache,
+    .mypy_cache,
+    .coverage,
+    htmlcov,
+    node_modules,
+    archive,
+    *.egg-info
+
+ignore =
+    E203,  # Whitespace before ':'
+    W503,  # Line break before binary operator
+    E501,  # Line too long (handled by black)
+    F401,  # Module imported but unused (handled by pylint)
+
+per-file-ignores =
+    __init__.py:F401,F403
+    tests/*:F401,F811
+
+# Statistics
+statistics = True
+count = True

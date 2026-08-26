@@ -108,3 +108,132 @@ def pytest_collection_modifyitems(config, items):
         for item in items:
             if "live" in item.keywords:
                 item.add_marker(skip_live)
+
+
+# ============================================================================
+# COMMON FIXTURES FOR ALL TESTS
+# ============================================================================
+
+@pytest.fixture
+def sample_strategy_config():
+    """Sample strategy configuration for testing."""
+    return {
+        "symbol": "BTCUSD",
+        "session": "London",
+        "timeframe": "M15",
+        "indicators": ["Bollinger_Bands", "OsMA"],
+        "parameters": {
+            "bb_period": 20,
+            "bb_deviation": 2.0,
+            "osma_fast": 12,
+            "osma_slow": 26,
+            "osma_signal": 9
+        },
+        "performance_metrics": {
+            "profit_factor": 1.45,
+            "win_rate": 0.62,
+            "drawdown": -0.15
+        }
+    }
+
+
+@pytest.fixture
+def sample_discovery_result():
+    """Sample discovery result for testing."""
+    return {
+        "task_id": "disc_test_001",
+        "symbol": "BTCUSD",
+        "session": "London",
+        "timeframe": "M15",
+        "status": "complete",
+        "discoveries": [
+            {
+                "rank": 1,
+                "indicators": ["Bollinger_Bands", "OsMA"],
+                "performance": {
+                    "profit_factor": 1.67,
+                    "win_rate": 0.58,
+                    "total_return": 0.23,
+                    "max_drawdown": -0.12,
+                    "sharpe_ratio": 1.45,
+                    "trades": 245
+                },
+                "parameters": {
+                    "bb_period": 20,
+                    "bb_deviation": 2.0,
+                    "osma_fast": 12,
+                    "osma_slow": 26,
+                    "osma_signal": 9
+                }
+            }
+        ]
+    }
+
+
+@pytest.fixture
+def sample_optimization_result():
+    """Sample optimization result for testing."""
+    return {
+        "task_id": "opt_test_001",
+        "symbol": "BTCUSD",
+        "session": "London",
+        "timeframe": "M15",
+        "status": "complete",
+        "best_trial": {
+            "trial_id": 18,
+            "parameters": {
+                "bb_period": 22,
+                "bb_deviation": 2.1,
+                "osma_fast": 11,
+                "osma_slow": 25,
+                "osma_signal": 8
+            },
+            "metrics": {
+                "profit_factor": 1.89,
+                "win_rate": 0.61,
+                "total_return": 0.31,
+                "max_drawdown": -0.10,
+                "sharpe_ratio": 1.78
+            }
+        }
+    }
+
+
+@pytest.fixture
+def sample_validation_result():
+    """Sample validation result for testing."""
+    return {
+        "task_id": "val_test_001",
+        "symbol": "BTCUSD",
+        "session": "London",
+        "validation_status": "PASSED",
+        "summary": {
+            "in_sample_pf": 1.89,
+            "out_of_sample_pf": 1.72,
+            "pf_degradation": 0.09,
+            "pf_improvement": 0.13,
+            "original_pf": 1.52
+        },
+        "passed": True
+    }
+
+
+@pytest.fixture
+def mock_http_client(monkeypatch):
+    """Mock HTTP client for API testing."""
+    class MockResponse:
+        def __init__(self, json_data, status_code):
+            self.json_data = json_data
+            self.status_code = status_code
+
+        def json(self):
+            return self.json_data
+
+    class MockClient:
+        def get(self, url, **kwargs):
+            return MockResponse({"status": "ok"}, 200)
+
+        def post(self, url, **kwargs):
+            return MockResponse({"task_id": "test_123"}, 202)
+
+    return MockClient()

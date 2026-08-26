@@ -46,10 +46,11 @@ async def open_trade(request: ExecutionRequest) -> ExecutionResponse:
     )
     
     response = ExecutionResponse(
-        trade_id=request.trade_id,
+        job_id=request.trade_id,
         status=JobStatus.COMPLETED,
         symbol=request.symbol,
-        execution_status="open"
+        session=request.session,
+        action_result={}
     )
     
     return response

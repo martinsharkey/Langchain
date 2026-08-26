@@ -48,10 +48,11 @@ async def deploy_strategy(request: DeploymentRequest) -> DeploymentResponse:
     response = DeploymentResponse(
         job_id=request.job_id,
         status=JobStatus.COMPLETED,
-        strategy_id=request.strategy_id,
-        strategy_name=request.strategy_name,
         symbol=request.symbol,
-        deployment_status="deployed"
+        session=request.session,
+        deployment_path="",
+        approved_sessions=[],
+        rejected_sessions=[]
     )
     
     return response

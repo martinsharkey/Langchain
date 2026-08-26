@@ -1,0 +1,33 @@
+{
+  "symbol": "BTC-USD",
+  "timestamp": "2026-08-25T17:05:08.925203",
+  "data_range": "2025-08-25 to 2026-08-25",
+  "total_bars": 366,
+  "indicators_tested": 3,
+  "results": [
+    {
+      "indicator": "BBANDS",
+      "trades": 6,
+      "win_rate": 0.5,
+      "profit_factor": 0.2978483258917767,
+      "return_pct": -24.746982741889667,
+      "sharpe": -0.7797472609273528
+    },
+    {
+      "indicator": "MA_Crossover",
+      "trades": 5,
+      "win_rate": 0.4,
+      "profit_factor": 1.1623009257079322,
+      "return_pct": 2.5125730046501076,
+      "sharpe": 0.22241242058566704
+    },
+    {
+      "indicator": "OBV",
+      "trades": 36,
+      "win_rate": 0.25,
+      "profit_factor": 0.9550865572947376,
+      "return_pct": -1.7119123505935134,
+      "sharpe": 0.03815446393409744
+    }
+  ]
+}

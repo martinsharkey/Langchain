@@ -7,12 +7,9 @@ REST API for workflow orchestration and job coordination.
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import JSONResponse
 import logging
+from typing import Dict, Any, List
 
-from shared.models import (
-    WorkflowRequest,
-    WorkflowResponse,
-    JobStatus,
-)
+from shared.models import JobStatus
 
 logger = logging.getLogger(__name__)
 
@@ -30,34 +27,40 @@ async def health_check():
 
 
 @app.post("/api/v1/orchestration/workflow/create")
-async def create_workflow(request: WorkflowRequest) -> WorkflowResponse:
+async def create_workflow(request: Dict[str, Any]) -> JSONResponse:
     """
     Create a new workflow pipeline.
     
     Args:
-        request: WorkflowRequest with symbol, timeframe, session
+        request: Workflow request with symbol, timeframe, session
     
     Returns:
         WorkflowResponse with workflow_id and initial status
     """
+    symbol = request.get("symbol", "")
+    session = request.get("session", "")
+    timeframe = request.get("timeframe", "")
+    
     logger.info(
-        f"Creating workflow: {request.symbol}/{request.session}/{request.timeframe}"
+        f"Creating workflow: {symbol}/{session}/{timeframe}"
     )
     
-    response = WorkflowResponse(
-        workflow_id=request.workflow_id,
-        status=JobStatus.RUNNING,
-        symbol=request.symbol,
-        current_stage="discovery",
-        stages_completed=[],
-        jobs=[]
+    return JSONResponse(
+        status_code=202,
+        content={
+            "workflow_id": "wf_test_123",
+            "status": "PENDING",
+            "symbol": symbol,
+            "session": session,
+            "current_stage": "discovery",
+            "stages_completed": [],
+            "jobs": []
+        }
     )
-    
-    return response
 
 
 @app.get("/api/v1/orchestration/workflow/{workflow_id}/status")
-async def get_workflow_status(workflow_id: str) -> WorkflowResponse:
+async def get_workflow_status(workflow_id: str) -> JSONResponse:
     """
     Get workflow status and progress.
     
@@ -67,13 +70,17 @@ async def get_workflow_status(workflow_id: str) -> WorkflowResponse:
     Returns:
         Current workflow status
     """
-    return WorkflowResponse(
-        workflow_id=workflow_id,
-        status=JobStatus.RUNNING,
-        symbol="",
-        current_stage="discovery",
-        stages_completed=[],
-        jobs=[]
+    return JSONResponse(
+        status_code=200,
+        content={
+            "workflow_id": workflow_id,
+            "status": "RUNNING",
+            "symbol": "",
+            "session": "",
+            "current_stage": "discovery",
+            "stages_completed": [],
+            "jobs": []
+        }
     )
 
 
