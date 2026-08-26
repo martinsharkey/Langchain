@@ -13,6 +13,7 @@ sys.path.insert(0, str(project_root))
 import vectorbt as vbt
 import pandas as pd
 import pandas_ta as ta
+import talib
 import numpy as np
 import optuna
 from optuna.pruners import MedianPruner
@@ -85,10 +86,22 @@ class ComprehensiveVectorBTPipeline:
         pda_funcs = [x for x in dir(ta) if not x.startswith('_') and x.islower() and callable(getattr(ta, x))]
         pda_indicators = [(name, 'pandas_ta') for name in pda_funcs]
         
-        all_indicators = vbt_indicators + pda_indicators
+        # Get ta-lib indicators (include all callable functions)
+        talib_funcs = []
+        for name in dir(talib):
+            if name.startswith('_'):
+                continue
+            obj = getattr(talib, name)
+            if callable(obj):
+                # Skip documentation constants and settings
+                if name not in ['get_config', 'set_config'] and not name.startswith('MA_'):
+                    talib_funcs.append(name)
+        talib_indicators = [(name, 'talib') for name in talib_funcs]
         
-        print("Testing {} indicators ({} VectorBT + {} pandas_ta)".format(
-            len(all_indicators), len(vbt_indicators), len(pda_indicators)
+        all_indicators = vbt_indicators + pda_indicators + talib_indicators
+        
+        print("Testing {} indicators ({} VectorBT + {} pandas_ta + {} ta-lib)".format(
+            len(all_indicators), len(vbt_indicators), len(pda_indicators), len(talib_indicators)
         ))
         print()
         
@@ -124,6 +137,25 @@ class ComprehensiveVectorBTPipeline:
                 logger.debug("pandas_ta {}: {}".format(ind_name, str(e)[:100]))
         
         print("  Tested: {}/{} (Failed: {})".format(tested, len(pda_indicators), failed))
+        
+        # Test ta-lib indicators
+        print("\nta-lib Indicators ({} total):".format(len(talib_indicators)))
+        talib_tested = 0
+        talib_failed = 0
+        for i, (ind_name, ind_type) in enumerate(talib_indicators):
+            if i % 50 == 0:
+                print("  Testing {}-{}...".format(i, min(i+50, len(talib_indicators))))
+            
+            try:
+                result = self._test_talib_indicator(ind_name, df)
+                if result:
+                    results.append(result)
+                    talib_tested += 1
+            except Exception as e:
+                talib_failed += 1
+                logger.debug("talib {}: {}".format(ind_name, str(e)[:100]))
+        
+        print("  Tested: {}/{} (Failed: {})".format(talib_tested, len(talib_indicators), talib_failed))
         
         # Sort results
         results = sorted(results, key=lambda x: x['profit_factor'], reverse=True)
@@ -268,6 +300,94 @@ class ComprehensiveVectorBTPipeline:
             return {
                 'indicator': ind_name,
                 'type': 'pandas_ta',
+                'trades': int(pf.trades.count() or 0),
+                'win_rate': float(pf.trades.win_rate() or 0),
+                'profit_factor': float(pf.trades.profit_factor() or 0),
+                'return_pct': float(pf.total_return() * 100 if pf.total_return() else 0),
+                'sharpe': float(pf.sharpe_ratio() or 0),
+                'status': 'viable' if (pf.trades.profit_factor() or 0) >= 1.2 else 'marginal' if (pf.trades.profit_factor() or 0) >= 1.0 else 'not_viable'
+            }
+        except Exception as e:
+            return None
+    
+    def _test_talib_indicator(self, ind_name, df):
+        """Test ta-lib indicator"""
+        try:
+            price = df['close'].values
+            high = df['high'].values
+            low = df['low'].values
+            volume = df['volume'].values
+            
+            talib_func = getattr(talib, ind_name)
+            result = None
+            
+            # Try different parameter combinations for ta-lib
+            try:
+                result = talib_func(price)
+            except:
+                try:
+                    result = talib_func(high, low, price)
+                except:
+                    try:
+                        result = talib_func(price, volume)
+                    except:
+                        try:
+                            result = talib_func(high, low)
+                        except:
+                            try:
+                                result = talib_func(high, low, price, volume)
+                            except:
+                                return None
+            
+            # Handle result
+            if result is None:
+                return None
+            
+            # Convert to numpy array if needed
+            if isinstance(result, tuple):
+                # ta-lib often returns tuples (e.g., BBANDS returns (upper, middle, lower))
+                signal_data = np.array(result[0]) if len(result) > 0 else None
+            else:
+                signal_data = np.array(result)
+            
+            if signal_data is None or len(signal_data) == 0:
+                return None
+            
+            # Remove NaN values
+            signal_data = signal_data[~np.isnan(signal_data)]
+            
+            if len(signal_data) < 10:
+                return None
+            
+            # Generate entries/exits using median
+            try:
+                signal_median = np.median(signal_data)
+                entries = signal_data > signal_median
+                exits = signal_data < signal_median
+            except:
+                return None
+            
+            if entries.sum() < 2:
+                return None
+            
+            # Ensure we have matching lengths
+            if len(price) > len(entries):
+                price = price[:len(entries)]
+            elif len(entries) > len(price):
+                entries = entries[:len(price)]
+                exits = exits[:len(price)]
+            
+            try:
+                pf = vbt.Portfolio.from_signals(price, entries, exits, init_cash=self.init_cash)
+            except:
+                return None
+            
+            if not pf.trades.count() or pf.trades.count() < 1:
+                return None
+            
+            return {
+                'indicator': ind_name,
+                'type': 'talib',
                 'trades': int(pf.trades.count() or 0),
                 'win_rate': float(pf.trades.win_rate() or 0),
                 'profit_factor': float(pf.trades.profit_factor() or 0),
