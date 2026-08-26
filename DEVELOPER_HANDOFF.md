@@ -99,6 +99,7 @@ Expected:
 |---|---|---|
 | `scripts/qmmp/CODING_RULES.md` | Mandatory rules — what you can and cannot do | **Read first** |
 | `QMMP_PIPELINE_PLAN.md` | Full plan — 7 sub-tasks, confirmed API patterns, data flow | **Read second** |
+| `docs/SESSIONS.md` | Why each session exists, how it behaves differently, exact UTC boundaries, broker context, implementation gotchas, full test cases | **Read before Sub-Task 1** |
 | `docs/lib_docs/vectorbt/portfolio_base.md` | `vbt.Portfolio.from_signals()` full API | Reference |
 | `docs/lib_docs/vectorbt/indicators_factory.md` | `vbt.IndicatorFactory` usage | Reference |
 | `docs/lib_docs/vectorbt/splitters.md` | `RollingSplitter`, `RangeSplitter` for walk-forward | Reference |
