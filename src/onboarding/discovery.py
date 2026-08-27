@@ -46,12 +46,14 @@ class Discovery:
         top_n: int = 10,
         combo_depth: int = 10,
         combo_modes: Tuple[str, ...] = ("and", "or"),
+        on_indicator: Optional[callable] = None,
     ):
         self.symbol = symbol
         self.init_cash = init_cash
         self.top_n = top_n
         self.combo_depth = combo_depth
         self.combo_modes = combo_modes
+        self.on_indicator = on_indicator  # callback(library, name, idx, total)
 
     def discover(
         self,
@@ -128,7 +130,14 @@ class Discovery:
 
         # Phase 1a: single indicators — run natively on concatenated series.
         singles: List[ScoredResult] = []
-        for ind in indicators:
+        n_indicators = len(indicators)
+        for idx, ind in enumerate(indicators):
+            # Report per-indicator activity to the callback (if any).
+            if self.on_indicator:
+                try:
+                    self.on_indicator(ind.library, ind.name, idx + 1, n_indicators)
+                except Exception:
+                    pass
             result = self._run_single(ind, close, high, low, open_, volume, freq, session, timeframe)
             if result is not None:
                 singles.append(result)

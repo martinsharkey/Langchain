@@ -60,6 +60,12 @@ class OnboardingOrchestrator:
 
         self.progress_path = self.output_dir / "progress.jsonl"
         self.results_path = self.output_dir / "results_live.json"
+        self.activity_path = self.output_dir / "activity.jsonl"
+
+        # Clear stale files from previous runs.
+        for p in (self.progress_path, self.results_path, self.activity_path):
+            if p.exists():
+                p.unlink()
 
         self._thread: Optional[threading.Thread] = None
         self._stop_event = threading.Event()
@@ -68,6 +74,11 @@ class OnboardingOrchestrator:
         """Append a progress marker (JSON line)."""
         with open(self.progress_path, "a", encoding="utf-8") as f:
             f.write(json.dumps(marker, default=str) + "\n")
+
+    def _write_activity(self, activity: Dict):
+        """Append a per-indicator activity marker (JSON line)."""
+        with open(self.activity_path, "a", encoding="utf-8") as f:
+            f.write(json.dumps(activity, default=str) + "\n")
 
     def _write_results(self, results: List[Dict]):
         """Write the accumulated results file."""
@@ -124,8 +135,24 @@ class OnboardingOrchestrator:
                     df = load_ohlcv_range(self.symbol, timeframe, self.start_date, self.end_date)
                     preloaded = {timeframe: df}
 
+                    # Per-indicator activity callback.
+                    def on_indicator(library, name, idx, total):
+                        self._write_activity({
+                            "type": "indicator",
+                            "library": library,
+                            "name": name,
+                            "index": idx,
+                            "total": total,
+                            "timeframe": timeframe,
+                            "session": session,
+                            "timestamp": datetime.now().isoformat(),
+                        })
+
                     # Run VectorBT discovery natively for this (timeframe, session).
-                    discovery = Discovery(self.symbol, init_cash=INIT_CASH, top_n=self.top_n)
+                    discovery = Discovery(
+                        self.symbol, init_cash=INIT_CASH, top_n=self.top_n,
+                        on_indicator=on_indicator,
+                    )
                     session_results = discovery.discover(
                         timeframes=[timeframe],
                         sessions=[session],
@@ -252,6 +279,22 @@ def _safe_value(v):
     return markers
 
 
+def read_progress(output_dir: Path) -> List[Dict]:
+    """Read all progress markers for a symbol."""
+    progress_path = output_dir / "progress.jsonl"
+    markers = []
+    if progress_path.exists():
+        with open(progress_path, encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if line:
+                    try:
+                        markers.append(json.loads(line))
+                    except json.JSONDecodeError:
+                        continue
+    return markers
+
+
 def read_live_results(output_dir: Path) -> List[Dict]:
     """Read the live results file for a symbol."""
     results_path = output_dir / "results_live.json"
@@ -262,6 +305,38 @@ def read_live_results(output_dir: Path) -> List[Dict]:
         except json.JSONDecodeError:
             return []
     return []
+
+
+def read_activity(output_dir: Path, since: int = 0) -> List[Dict]:
+    """Read per-indicator activity markers for a symbol.
+
+    Args:
+        output_dir: Symbol onboarding directory.
+        since: Only return markers with index > this value (for polling).
+
+    Returns:
+        List of activity marker dicts.
+    """
+    activity_path = output_dir / "activity.jsonl"
+    markers = []
+    if activity_path.exists():
+        with open(activity_path, encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if line:
+                    try:
+                        marker = json.loads(line)
+                        if marker.get("index", 0) > since:
+                            markers.append(marker)
+                    except json.JSONDecodeError:
+                        continue
+    return markers
+
+
+def get_latest_activity(output_dir: Path) -> Optional[Dict]:
+    """Get the most recent activity marker (what VectorBT is doing right now)."""
+    markers = read_activity(output_dir)
+    return markers[-1] if markers else None
 
 
 __all__ = [

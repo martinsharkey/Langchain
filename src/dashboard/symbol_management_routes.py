@@ -37,48 +37,96 @@ def _get_symbol_data_dir(symbol: str) -> Path:
 
 
 def _get_onboarding_status(symbol: str) -> dict:
-    """Get current onboarding status for symbol."""
+    """Get current onboarding status for symbol.
+
+    Checks both the legacy data/qmmp/ location and the new tests/onboarding/
+    location used by the VectorBT-native onboarding pipeline.
+    """
     symbol_dir = _get_symbol_data_dir(symbol)
-    
-    if not symbol_dir.exists():
+    new_dir = PROJECT_ROOT / "tests" / "onboarding" / symbol
+
+    # Use whichever directory exists (prefer new location).
+    if new_dir.exists():
+        active_dir = new_dir
+    elif symbol_dir.exists():
+        active_dir = symbol_dir
+    else:
         return {
             "symbol": symbol,
             "status": "not_started",
             "phase1_complete": False,
             "phase2_complete": False,
             "phase3_complete": False,
-            "sessions": []
+            "sessions": [],
+            "results_count": 0,
         }
-    
-    # Check which phases are complete
-    phase1_file = symbol_dir / "phase1_vectorbt_discovery.json"
-    phase2_dir = symbol_dir / "phase2_optuna_tuning"
-    phase3_file = symbol_dir / f"phase3_validation_{symbol}.json"
-    
+
+    # Legacy phase files (data/qmmp/).
+    phase1_file = active_dir / "phase1_vectorbt_discovery.json"
+    phase2_dir = active_dir / "phase2_optuna_tuning"
+    phase3_file = active_dir / f"phase3_validation_{symbol}.json"
+
+    # New onboarding output (tests/onboarding/).
+    progress_file = active_dir / "progress.jsonl"
+    results_file = active_dir / "results_live.json"
+
     phase1_complete = phase1_file.exists()
     phase2_complete = phase2_dir.exists() and (phase2_dir / "completed.txt").exists()
     phase3_complete = phase3_file.exists()
-    
-    # Load sessions if available
+
+    # Check for new-style completion.
+    new_complete = False
+    new_results_count = 0
+    if progress_file.exists():
+        try:
+            with open(progress_file, encoding="utf-8") as f:
+                for line in f:
+                    line = line.strip()
+                    if line:
+                        try:
+                            marker = json.loads(line)
+                            if marker.get("type") == "complete":
+                                new_complete = True
+                                new_results_count = marker.get("total_results", 0)
+                            elif marker.get("type") == "combination_complete":
+                                # In progress: track latest results count.
+                                new_results_count = marker.get("results_count", new_results_count)
+                        except json.JSONDecodeError:
+                            continue
+        except Exception:
+            pass
+    if results_file.exists():
+        try:
+            with open(results_file, encoding="utf-8") as f:
+                live = json.load(f)
+                new_results_count = len(live)
+        except Exception:
+            pass
+
+    # Load sessions if available.
     sessions = []
     if phase1_complete:
         try:
             with open(phase1_file) as f:
                 discovery = json.load(f)
                 sessions = list(discovery.get("sessions", {}).keys())
-        except:
+        except Exception:
             pass
-    
-    # Determine overall status
-    if phase3_complete:
+
+    # Determine overall status.
+    if new_complete:
+        status = "onboarded"
+    elif phase3_complete:
         status = "validated"
     elif phase2_complete:
         status = "tuned"
     elif phase1_complete:
         status = "discovered"
+    elif progress_file.exists():
+        status = "onboarding"
     else:
         status = "not_started"
-    
+
     return {
         "symbol": symbol,
         "status": status,
@@ -86,7 +134,8 @@ def _get_onboarding_status(symbol: str) -> dict:
         "phase2_complete": phase2_complete,
         "phase3_complete": phase3_complete,
         "sessions": sessions,
-        "last_updated": datetime.now().isoformat()
+        "results_count": new_results_count,
+        "last_updated": datetime.now().isoformat(),
     }
 
 
@@ -161,22 +210,31 @@ def list_symbols():
     }
     """
     try:
+        # Collect symbols from both legacy (data/qmmp/) and new (tests/onboarding/) locations.
+        symbol_statuses: Dict[str, dict] = {}
+
         data_dir = PROJECT_ROOT / "data" / "qmmp"
-        
-        if not data_dir.exists():
-            return jsonify({"status": "ok", "symbols": []})
-        
-        symbols = []
-        for symbol_dir in data_dir.iterdir():
-            if symbol_dir.is_dir():
-                symbol = symbol_dir.name
-                status = _get_onboarding_status(symbol)
-                symbols.append(status)
-        
-        # Sort by status
-        status_order = {"validated": 0, "tuned": 1, "discovered": 2, "not_started": 3}
-        symbols.sort(key=lambda s: status_order.get(s["status"], 4))
-        
+        if data_dir.exists():
+            for symbol_dir in data_dir.iterdir():
+                if symbol_dir.is_dir():
+                    symbol_statuses[symbol_dir.name] = _get_onboarding_status(symbol_dir.name)
+
+        # Include symbols from the new onboarding pipeline.
+        onboarding_dir = PROJECT_ROOT / "tests" / "onboarding"
+        if onboarding_dir.exists():
+            for symbol_dir in onboarding_dir.iterdir():
+                if symbol_dir.is_dir():
+                    # Prefer new status if symbol exists in both locations.
+                    new_status = _get_onboarding_status(symbol_dir.name)
+                    if symbol_dir.name not in symbol_statuses or new_status.get("status") != "not_started":
+                        symbol_statuses[symbol_dir.name] = new_status
+
+        symbols = list(symbol_statuses.values())
+
+        # Sort by status (most complete first), then alphabetical.
+        status_order = {"onboarded": 0, "validated": 1, "tuned": 2, "discovered": 3, "onboarding": 4, "not_started": 5}
+        symbols.sort(key=lambda s: (status_order.get(s["status"], 6), s["symbol"]))
+
         return jsonify({
             "status": "ok",
             "symbols": symbols,
@@ -549,6 +607,23 @@ def get_onboarding_results(symbol: str):
         return jsonify({"status": "ok", "symbol": symbol, "results": results}), 200
     except Exception as e:
         _log.error(f"Error reading results for {symbol}: {e}", exc_info=True)
+        return jsonify({"error": str(e)}), 500
+
+
+@bp.route("/onboarding/<symbol>/activity", methods=["GET"])
+def get_onboarding_activity(symbol: str):
+    """Get real-time VectorBT activity (what indicator is being tested now)."""
+    try:
+        symbol = symbol.upper()
+        output_dir = PROJECT_ROOT / "tests" / "onboarding" / symbol
+        from src.onboarding.orchestrator import get_latest_activity, read_activity
+
+        latest = get_latest_activity(output_dir)
+        since = request.args.get("since", 0, type=int)
+        recent = read_activity(output_dir, since=since)
+        return jsonify({"status": "ok", "symbol": symbol, "latest": latest, "recent": recent}), 200
+    except Exception as e:
+        _log.error(f"Error reading activity for {symbol}: {e}", exc_info=True)
         return jsonify({"error": str(e)}), 500
 
 

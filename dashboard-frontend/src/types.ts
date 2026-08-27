@@ -209,4 +209,9 @@ export interface ProgressMarker {
   elapsed_seconds?: number
   error?: string
   timestamp?: string
+  // VectorBT activity fields.
+  library?: string
+  name?: string
+  index?: number
+  total?: number
 }

@@ -180,6 +180,14 @@ export const dashboardAPI = {
   },
 
   /**
+   * Get live VectorBT activity (what indicator is being tested now).
+   */
+  getOnboardingActivity: async (symbol: string) => {
+    const response = await apiRoot.get(`/onboarding/${symbol}/activity`)
+    return response.data
+  },
+
+  /**
    * Get onboarding tasks
    */
   getOnboardingTasks: async () => {
