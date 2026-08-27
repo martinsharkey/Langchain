@@ -1,0 +1,108 @@
+{
+  "symbol": "BTCUSD",
+  "config": {
+    "sessions": [
+      "london"
+    ],
+    "timeframes": [
+      "H1"
+    ],
+    "start_date": "2026-07-01T00:00:00+00:00",
+    "end_date": "2026-08-01T23:59:00+00:00",
+    "init_cash": 100.0
+  },
+  "results": [
+    {
+      "session": "london",
+      "session_display": "London Session",
+      "timeframe": "H1",
+      "indicator": "MINUS_DI+PVR",
+      "library": "combo",
+      "category": "and",
+      "score": 0.8934,
+      "trades": 3,
+      "win_rate": 1.0,
+      "profit_factor": "inf",
+      "total_return": 0.049006,
+      "max_drawdown": -0.014068,
+      "sharpe": 10.904171,
+      "start_balance": 100.0,
+      "end_balance": 104.9,
+      "stats": {}
+    },
+    {
+      "session": "london",
+      "session_display": "London Session",
+      "timeframe": "H1",
+      "indicator": "UI+UlcerIndex",
+      "library": "combo",
+      "category": "and",
+      "score": 0.8851,
+      "trades": 3,
+      "win_rate": 1.0,
+      "profit_factor": "inf",
+      "total_return": 0.079522,
+      "max_drawdown": -0.036085,
+      "sharpe": 8.901846,
+      "start_balance": 100.0,
+      "end_balance": 107.95,
+      "stats": {}
+    },
+    {
+      "session": "london",
+      "session_display": "London Session",
+      "timeframe": "H1",
+      "indicator": "MINUS_DM+MINUS_DI",
+      "library": "combo",
+      "category": "and",
+      "score": 0.8747,
+      "trades": 4,
+      "win_rate": 1.0,
+      "profit_factor": "inf",
+      "total_return": 0.053494,
+      "max_drawdown": -0.055094,
+      "sharpe": 4.978012,
+      "start_balance": 100.0,
+      "end_balance": 105.35,
+      "stats": {}
+    },
+    {
+      "session": "london",
+      "session_display": "London Session",
+      "timeframe": "H1",
+      "indicator": "MINUS_DM+MINUS_DI+PVR",
+      "library": "combo",
+      "category": "and",
+      "score": 0.867,
+      "trades": 3,
+      "win_rate": 1.0,
+      "profit_factor": "inf",
+      "total_return": 0.032168,
+      "max_drawdown": -0.055094,
+      "sharpe": 3.445007,
+      "start_balance": 100.0,
+      "end_balance": 103.22,
+      "stats": {}
+    },
+    {
+      "session": "london",
+      "session_display": "London Session",
+      "timeframe": "H1",
+      "indicator": "BETA+COS",
+      "library": "combo",
+      "category": "and",
+      "score": 0.8666,
+      "trades": 6,
+      "win_rate": 0.8333,
+      "profit_factor": 98.063861,
+      "total_return": 0.089085,
+      "max_drawdown": -0.026238,
+      "sharpe": 10.139273,
+      "start_balance": 100.0,
+      "end_balance": 108.91,
+      "stats": {}
+    }
+  ],
+  "elapsed_seconds": 14.5,
+  "completed_at": "2026-08-27T11:04:02.217577"
+}

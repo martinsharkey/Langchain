@@ -167,6 +167,10 @@ class OnboardingOrchestrator:
                             "session": session,
                             "session_display": get_session(session).name if session in [s for s in all_session_keys()] else session,
                             "timeframe": timeframe,
+                            "test_period": {
+                                "start": self.start_date.strftime("%Y-%m-%d"),
+                                "end": self.end_date.strftime("%Y-%m-%d"),
+                            },
                             "indicator": r.indicator,
                             "library": r.library,
                             "category": r.category,

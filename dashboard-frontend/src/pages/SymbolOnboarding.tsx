@@ -327,6 +327,30 @@ export default function SymbolOnboarding() {
                                 £{symbolResults[sym.symbol][0]?.start_balance.toFixed(0)} → best £{Math.max(...symbolResults[sym.symbol].map(r => r.end_balance)).toFixed(0)}
                               </span>
                             </div>
+
+                            {/* Test period */}
+                            {symbolResults[sym.symbol][0]?.test_period && (
+                              <div className="bg-slate-700/30 p-2 rounded text-xs text-slate-400">
+                                📅 Test period: {symbolResults[sym.symbol][0].test_period.start} → {symbolResults[sym.symbol][0].test_period.end}
+                              </div>
+                            )}
+
+                            {/* Session × Timeframe summary */}
+                            <div className="bg-slate-700/30 p-2 rounded">
+                              <p className="text-xs text-slate-400 mb-1">Combinations tested:</p>
+                              <div className="flex flex-wrap gap-1">
+                                {Array.from(new Set(symbolResults[sym.symbol].map(r => `${r.session_display}|${r.timeframe}`))).map(combo => {
+                                  const [sess, tf] = combo.split('|')
+                                  const count = symbolResults[sym.symbol].filter(r => r.session_display === sess && r.timeframe === tf).length
+                                  return (
+                                    <span key={combo} className="px-2 py-0.5 bg-slate-600/50 rounded text-xs text-slate-300">
+                                      {sess} ({tf}): {count} results
+                                    </span>
+                                  )
+                                })}
+                              </div>
+                            </div>
+
                             <div className="overflow-x-auto max-h-64 overflow-y-auto">
                               <table className="w-full text-xs">
                                 <thead className="sticky top-0 bg-slate-700">
