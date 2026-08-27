@@ -249,7 +249,10 @@ def list_symbols():
 @bp.route("/symbols/<symbol>", methods=["DELETE"])
 def delete_symbol(symbol: str):
     """Remove a symbol (and its onboarding data).
-    
+
+    Deletes from both the legacy data/qmmp/ location and the new
+    tests/onboarding/ location.
+
     Returns: {
       "status": "ok",
       "message": "Symbol XAUUSD deleted"
@@ -257,31 +260,38 @@ def delete_symbol(symbol: str):
     """
     try:
         symbol = symbol.upper()
-        symbol_dir = _get_symbol_data_dir(symbol)
-        
-        if not symbol_dir.exists():
+        legacy_dir = _get_symbol_data_dir(symbol)
+        new_dir = PROJECT_ROOT / "tests" / "onboarding" / symbol
+
+        # Check if symbol exists in either location.
+        if not legacy_dir.exists() and not new_dir.exists():
             return jsonify({"error": f"Symbol {symbol} not found"}), 404
-        
-        # Check if onboarding is in progress
+
+        # Check if onboarding is in progress.
         with _tasks_lock:
             if symbol in _onboarding_tasks:
                 task = _onboarding_tasks[symbol]
                 if task["status"] == "running":
                     return jsonify({"error": f"Cannot delete {symbol}: onboarding in progress"}), 409
-        
-        # Delete directory (in background to avoid blocking)
+
+        # Delete from both locations.
         import shutil
-        try:
-            shutil.rmtree(symbol_dir)
-            _log.info(f"Deleted symbol {symbol}")
-        except Exception as e:
-            _log.warning(f"Could not immediately delete {symbol_dir}: {e}")
-        
+        deleted_from = []
+        for d in (legacy_dir, new_dir):
+            if d.exists():
+                try:
+                    shutil.rmtree(d)
+                    deleted_from.append(str(d))
+                    _log.info(f"Deleted {d}")
+                except Exception as e:
+                    _log.warning(f"Could not delete {d}: {e}")
+
         return jsonify({
             "status": "ok",
-            "message": f"Symbol {symbol} deleted"
+            "message": f"Symbol {symbol} deleted",
+            "deleted_from": deleted_from,
         })
-    
+
     except Exception as e:
         _log.error(f"Error deleting symbol: {e}", exc_info=True)
         return jsonify({"error": str(e)}), 500

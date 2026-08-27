@@ -1,4 +1,0 @@
-{"type": "start", "symbol": "AUDCAD-ECN", "sessions": ["london"], "timeframes": ["M15"], "start_date": "2026-07-01T00:00:00+00:00", "end_date": "2026-07-10T23:59:00+00:00", "timestamp": "2026-08-27T08:45:41.767586"}
-{"type": "combination_start", "timeframe": "M15", "session": "london", "timestamp": "2026-08-27T08:45:41.767586"}
-{"type": "combination_complete", "timeframe": "M15", "session": "london", "combinations_completed": 1, "total_combinations": 1, "results_count": 3, "elapsed_seconds": 15.68, "timestamp": "2026-08-27T08:45:57.448582"}
-{"type": "complete", "total_results": 3, "elapsed_seconds": 15.68, "raw_file": "tests\\onboarding\\AUDCAD-ECN\\AUDCAD-ECN_onboarding_20260827_084557.json", "timestamp": "2026-08-27T08:45:57.450585"}
