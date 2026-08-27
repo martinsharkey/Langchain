@@ -1,0 +1,17 @@
+{
+  "symbol": "XAUUSD",
+  "config": {
+    "sessions": [
+      "london"
+    ],
+    "timeframes": [
+      "M15"
+    ],
+    "start_date": "2026-07-01T00:00:00+00:00",
+    "end_date": "2026-07-10T23:59:00+00:00",
+    "init_cash": 100.0
+  },
+  "results": [],
+  "elapsed_seconds": 0.01,
+  "completed_at": "2026-08-27T09:38:37.306261"
+}

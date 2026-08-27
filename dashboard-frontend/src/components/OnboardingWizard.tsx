@@ -1,4 +1,4 @@
-/**
+﻿/**
  * OnboardingWizard — multi-step wizard for onboarding a symbol into the
  * VectorBT pipeline. Uses native VectorBT for all backtesting; the UI only
  * configures and observes.
@@ -60,11 +60,7 @@ export default function OnboardingWizard({ onComplete }: { onComplete?: () => vo
   const [onboarding, setOnboarding] = useState(false)
   const [progress, setProgress] = useState<ProgressMarker[]>([])
   const [results, setResults] = useState<OnboardingResult[]>([])
-  const [latestActivity, setLatestActivity] = useState<ProgressMarker | null>(null)
   const [taskId, setTaskId] = useState<string | null>(null)
-
-  // --- Start onboarding ---
-  const startOnboarding = async () => {
 
   const stepIndex = STEPS.indexOf(step)
 
@@ -158,16 +154,12 @@ export default function OnboardingWizard({ onComplete }: { onComplete?: () => vo
     if (!onboarding || !selectedSymbol) return
     const interval = setInterval(async () => {
       try {
-        const [prog, res, act] = await Promise.all([
+        const [prog, res] = await Promise.all([
           dashboardAPI.getOnboardingProgress(selectedSymbol),
           dashboardAPI.getOnboardingResults(selectedSymbol),
-          dashboardAPI.getOnboardingActivity(selectedSymbol),
         ])
         setProgress(prog)
         setResults(res)
-        if (act && act.latest) {
-          setLatestActivity(act.latest)
-        }
         // Stop polling if complete.
         const last = prog[prog.length - 1]
         if (last && (last.type === 'complete' || last.type === 'cancelled')) {
@@ -180,21 +172,13 @@ export default function OnboardingWizard({ onComplete }: { onComplete?: () => vo
     return () => clearInterval(interval)
   }, [onboarding, selectedSymbol])
 
-    const latestProgress = progress[progress.length - 1]
-    const isComplete = latestProgress?.type === "complete"
-    const isError = latestProgress?.type === "combination_error"
-    const progressPct = (() => {
-      if (isComplete) return 100
-      if (!progress.length) return 0
-      // Find the latest marker with combinations_completed set
-      for (let i = progress.length - 1; i >= 0; i--) {
-        const m = progress[i]
-        if (m.combinations_completed && m.total_combinations) {
-          return Math.round((m.combinations_completed / m.total_combinations) * 100)
-        }
-      }
-      return 0
-    })()
+  const latestProgress = progress[progress.length - 1]
+  const isComplete = latestProgress?.type === 'complete'
+  const progressPct = (() => {
+    if (isComplete) return 100
+    if (!latestProgress?.combinations_completed || !latestProgress?.total_combinations) return 0
+    return Math.round((latestProgress.combinations_completed / latestProgress.total_combinations) * 100)
+  })()
 
   // --- Render ---
   if (onboarding) {
@@ -215,8 +199,6 @@ export default function OnboardingWizard({ onComplete }: { onComplete?: () => vo
                 ? `${latestProgress.timeframe}:${latestProgress.session}`
                 : latestProgress?.type === "complete"
                 ? "Finished"
-                : latestProgress?.type === "combination_start"
-                ? `${latestProgress.timeframe}:${latestProgress.session}`
                 : "Starting..."}
             </span>
             <span>{progressPct}%</span>
@@ -231,29 +213,6 @@ export default function OnboardingWizard({ onComplete }: { onComplete?: () => vo
             <p className="text-xs text-slate-400 mt-2">{latestProgress.results_count} strategy combinations found</p>
           )}
         </div>
-
-        {/* VectorBT live activity — shows what indicator is being tested right now */}
-        {!isComplete && latestActivity && latestActivity.name && (
-          <div className="bg-slate-800 rounded-lg border border-slate-700 p-4">
-            <h3 className="text-sm font-semibold text-slate-300 mb-2">VectorBT Activity</h3>
-            <div className="flex items-center justify-between text-sm">
-              <span className="text-slate-400">
-                Testing <span className="text-white font-medium">{latestActivity.name}</span>
-                <span className="text-slate-500"> ({latestActivity.library})</span>
-              </span>
-              <span className="text-slate-500">
-                {latestActivity.index}/{latestActivity.total}
-              </span>
-            </div>
-            <div className="w-full bg-slate-700 rounded-full h-2 mt-2">
-              <div
-                className="h-2 rounded-full bg-emerald-500 transition-all"
-                style={{ width: `${Math.round((latestActivity.index / latestActivity.total) * 100)}%` }}
-              />
-            </div>
-            <p className="text-xs text-slate-500 mt-1">{latestActivity.timeframe}:{latestActivity.session}</p>
-          </div>
-        )}
 
         {/* Live results table */}
         {results.length > 0 && (

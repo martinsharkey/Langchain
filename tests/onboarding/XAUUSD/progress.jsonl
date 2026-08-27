@@ -1,0 +1,4 @@
+{"type": "start", "symbol": "XAUUSD", "sessions": ["london"], "timeframes": ["M15"], "start_date": "2026-07-01T00:00:00+00:00", "end_date": "2026-07-10T23:59:00+00:00", "timestamp": "2026-08-27T09:38:37.292176"}
+{"type": "combination_start", "timeframe": "M15", "session": "london", "timestamp": "2026-08-27T09:38:37.292799"}
+{"type": "combination_error", "timeframe": "M15", "session": "london", "error": "No OHLCV data for XAUUSD M15 in range 2026-07-01 00:00:00+00:00\u20132026-07-10 23:59:00+00:00", "timestamp": "2026-08-27T09:38:37.305257"}
+{"type": "complete", "total_results": 0, "elapsed_seconds": 0.01, "raw_file": "tests\\onboarding\\XAUUSD\\XAUUSD_onboarding_20260827_093837.json", "timestamp": "2026-08-27T09:38:37.306261"}

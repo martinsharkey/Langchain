@@ -38,6 +38,8 @@ export default function SymbolOnboarding() {
   const [selectedSymbol, setSelectedSymbol] = useState<string | null>(null)
   const [sessionPreferences, setSessionPreferences] = useState<Record<string, string[]>>({})
   const [showWizard, setShowWizard] = useState(false)
+  const [symbolResults, setSymbolResults] = useState<Record<string, OnboardingResult[]>>({})
+  const [resultsLoading, setResultsLoading] = useState<Record<string, boolean>>({})
 
   // Load symbols on mount
   useEffect(() => {
@@ -54,6 +56,25 @@ export default function SymbolOnboarding() {
       return () => clearInterval(interval)
     }
   }, [activeTab])
+
+  // Fetch results when a symbol is selected.
+  useEffect(() => {
+    if (selectedSymbol && !symbolResults[selectedSymbol]) {
+      fetchSymbolResults(selectedSymbol)
+    }
+  }, [selectedSymbol])
+
+  const fetchSymbolResults = async (symbol: string) => {
+    setResultsLoading((prev) => ({ ...prev, [symbol]: true }))
+    try {
+      const data = await dashboardAPI.getOnboardingResults(symbol)
+      setSymbolResults((prev) => ({ ...prev, [symbol]: data }))
+    } catch (error) {
+      console.error(`Failed to load results for ${symbol}:`, error)
+    } finally {
+      setResultsLoading((prev) => ({ ...prev, [symbol]: false }))
+    }
+  }
 
   const loadSymbols = async () => {
     try {
@@ -249,33 +270,19 @@ export default function SymbolOnboarding() {
       )}
 
       {/* Manage Tab */}
-      {activeTab === 'manage' && (
+      {activeTab === 'manage' && !showWizard && (
         <div className="space-y-6">
-          {/* Add Symbol Form */}
-          <div className="bg-slate-800 rounded-lg border border-slate-700 p-6">
-            <h3 className="text-lg font-semibold text-white mb-4">Add Symbol</h3>
-            <form onSubmit={handleAddSymbol} className="flex gap-3">
-              <input
-                type="text"
-                value={newSymbol}
-                onChange={(e) => setNewSymbol(e.target.value)}
-                placeholder="Enter symbol (e.g., EURUSD)"
-                className="flex-1 px-4 py-2 bg-slate-700 text-white placeholder-slate-400 rounded border border-slate-600 focus:border-blue-500 focus:outline-none"
-                disabled={refreshing}
-              />
-              <button
-                type="submit"
-                disabled={refreshing || !newSymbol.trim()}
-                className="px-6 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded disabled:opacity-50 font-semibold"
-              >
-                Add
-              </button>
-            </form>
-          </div>
-
           {/* Symbols List */}
           <div className="bg-slate-800 rounded-lg border border-slate-700 p-6">
-            <h3 className="text-lg font-semibold text-white mb-4">Available Symbols</h3>
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-lg font-semibold text-white">Available Symbols</h3>
+              <button
+                onClick={() => setShowWizard(true)}
+                className="px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded font-semibold text-sm"
+              >
+                + Onboard New Symbol
+              </button>
+            </div>
 
             {loading ? (
               <div className="text-slate-400">Loading symbols...</div>
@@ -305,157 +312,72 @@ export default function SymbolOnboarding() {
                     </div>
 
                     {/* Results (if available) */}
-                    {sym.results && (
+                    {selectedSymbol === sym.symbol && (
                       <div className="mt-4 pt-4 border-t border-slate-600 space-y-4">
-                        <div>
-                          <p className="text-xs text-slate-400 mb-2">Overall Best Results</p>
-                          <div className="grid grid-cols-2 gap-3">
-                            <div>
-                              <p className="text-xs text-slate-400">Best Strategy</p>
-                              <p className="text-sm font-semibold text-white">{sym.results.best_strategy}</p>
-                            </div>
-                            <div>
-                              <p className="text-xs text-slate-400">Best Session</p>
-                              <p className="text-sm font-semibold text-blue-400">{sym.results.best_session}</p>
-                            </div>
-                            <div>
-                              <p className="text-xs text-slate-400">Profit Factor</p>
-                              <p className={`text-sm font-semibold ${sym.results.profit_factor >= 1.2 ? 'text-green-400' : 'text-yellow-400'}`}>
-                                {sym.results.profit_factor.toFixed(2)}
-                              </p>
-                            </div>
-                            <div>
-                              <p className="text-xs text-slate-400">Win Rate</p>
-                              <p className="text-sm font-semibold text-white">{(sym.results.win_rate * 100).toFixed(1)}%</p>
-                            </div>
-                            <div>
-                              <p className="text-xs text-slate-400">Sharpe Ratio</p>
-                              <p className="text-sm font-semibold text-white">{sym.results.sharpe_ratio.toFixed(2)}</p>
-                            </div>
-                            <div>
-                              <p className="text-xs text-slate-400">Total Trades</p>
-                              <p className="text-sm font-semibold text-white">{sym.results.total_trades}</p>
-                            </div>
-                          </div>
-                        </div>
-
-                        {/* Backtest Date Range */}
-                        {sym.date_range && (
-                          <div className="bg-slate-700/30 p-3 rounded border border-slate-600">
-                            <p className="text-xs text-slate-400 mb-2">📅 Backtest Period</p>
-                            <div className="space-y-1">
-                              <p className="text-xs text-slate-300">
-                                <span className="text-slate-500">Period:</span> {new Date(sym.date_range.start_date).toLocaleDateString()} → {new Date(sym.date_range.end_date).toLocaleDateString()}
-                              </p>
-                              <p className="text-xs text-slate-300">
-                                <span className="text-slate-500">Duration:</span> {sym.date_range.duration_str}
-                              </p>
-                            </div>
-                          </div>
+                        {resultsLoading[sym.symbol] && (
+                          <p className="text-sm text-slate-400">Loading results...</p>
                         )}
-
-                        {/* Session Breakdown */}
-                        {sym.sessions && Object.keys(sym.sessions).length > 0 && (
-                          <div>
-                            <div className="flex items-center justify-between mb-2">
-                              <p className="text-xs text-slate-400">📊 Per-Session Results & Trading Control</p>
-                              <p className="text-xs text-slate-500">
-                                {(sessionPreferences[sym.symbol] || Object.keys(sym.sessions)).length}/{Object.keys(sym.sessions).length} enabled
+                        {!resultsLoading[sym.symbol] && symbolResults[sym.symbol] && symbolResults[sym.symbol].length > 0 && (
+                          <>
+                            <div className="flex items-center justify-between">
+                              <p className="text-xs text-slate-400">
+                                📊 {symbolResults[sym.symbol].length} strategy combinations found
                               </p>
+                              <span className="text-xs text-slate-500">
+                                £{symbolResults[sym.symbol][0]?.start_balance.toFixed(0)} → best £{Math.max(...symbolResults[sym.symbol].map(r => r.end_balance)).toFixed(0)}
+                              </span>
                             </div>
-                            <div className="space-y-2 max-h-80 overflow-y-auto">
-                              {Object.entries(sym.sessions).map(([sessionName, session]) => {
-                                const isEnabled = (sessionPreferences[sym.symbol] || Object.keys(sym.sessions)).includes(sessionName)
-                                return (
-                                   <div
-                                     key={sessionName}
-                                     className={`bg-slate-600/30 p-3 rounded border-2 transition-colors cursor-pointer ${
-                                       isEnabled ? 'border-blue-500/50' : 'border-slate-600/50'
-                                     }`}
-                                     onClick={() => handleToggleSession(sym.symbol, sessionName)}
-                                   >
-                                     <div className="flex items-start justify-between mb-2">
-                                       <div className="flex items-center gap-2 flex-1">
-                                         <input
-                                           type="checkbox"
-                                           checked={isEnabled}
-                                           onChange={() => handleToggleSession(sym.symbol, sessionName)}
-                                           onClick={(e) => e.stopPropagation()}
-                                           className="w-4 h-4 rounded accent-blue-500 cursor-pointer"
-                                         />
-                                         <div>
-                                           <p className={`font-semibold ${isEnabled ? 'text-slate-100' : 'text-slate-400'}`}>
-                                             {sessionName}
-                                           </p>
-                                           <p className="text-xs text-slate-400">🕐 {session.timeframe}</p>
-                                         </div>
-                                       </div>
-                                       <span className={`text-xs px-2 py-1 rounded ${
-                                         session.profit_factor >= 1.5 ? 'bg-green-500/20 text-green-400' :
-                                         session.profit_factor >= 1.0 ? 'bg-blue-500/20 text-blue-400' :
-                                         'bg-yellow-500/20 text-yellow-400'
-                                       }`}>
-                                         PF {session.profit_factor.toFixed(2)}
-                                       </span>
-                                     </div>
-                                     <div className="grid grid-cols-3 gap-2 text-xs">
-                                       <div>
-                                         <p className="text-slate-500">Strategy</p>
-                                         <p className="text-slate-300">{session.best_strategy}</p>
-                                       </div>
-                                       <div>
-                                         <p className="text-slate-500">WR / Sharpe</p>
-                                         <p className="text-slate-300">{(session.win_rate * 100).toFixed(0)}% / {session.sharpe_ratio.toFixed(1)}</p>
-                                       </div>
-                                       <div>
-                                         <p className="text-slate-500">SL/TP / Trades</p>
-                                       <p className="text-slate-300">{session.sl_multiplier}x/{session.tp_ratio.toFixed(1)} • {session.total_trades}</p>
-                                     </div>
-                                   </div>
-                                   {session.floor_config && (
-                                     <div className="mt-2 pt-2 border-t border-slate-600">
-                                       <p className="text-xs text-slate-500">Floor Config: {session.floor_config.strategy} • SL={session.floor_config.sl} TP={session.floor_config.tp}</p>
-                                     </div>
-                                    )}
-                                    {session.alternative_timeframes && session.alternative_timeframes.length > 0 && (
-                                      <div className="mt-2 pt-2 border-t border-slate-600">
-                                        <p className="text-xs text-slate-500 mb-1">📊 Alternative Timeframes:</p>
-                                        <div className="space-y-1">
-                                          {session.alternative_timeframes.map((alt, idx) => (
-                                            <div key={idx} className="flex items-center justify-between text-xs bg-slate-700/30 p-1.5 rounded">
-                                              <div className="flex items-center gap-2">
-                                                <span className="text-slate-400 font-mono">{alt.timeframe}</span>
-                                                <span className="text-slate-500">{alt.best_strategy}</span>
-                                              </div>
-                                              <div className="flex items-center gap-2">
-                                                <span className={`px-1.5 rounded ${
-                                                  alt.profit_factor >= 1.5 ? 'bg-green-500/20 text-green-400' :
-                                                  alt.profit_factor >= 1.0 ? 'bg-blue-500/20 text-blue-400' :
-                                                  'bg-yellow-500/20 text-yellow-400'
-                                                }`}>
-                                                  {alt.profit_factor.toFixed(2)}
-                                                </span>
-                                                <span className="text-slate-500">{(alt.win_rate * 100).toFixed(0)}%</span>
-                                              </div>
-                                            </div>
-                                          ))}
-                                        </div>
-                                      </div>
-                                    )}
-                                 </div>
-                              )
-                            })}
+                            <div className="overflow-x-auto max-h-64 overflow-y-auto">
+                              <table className="w-full text-xs">
+                                <thead className="sticky top-0 bg-slate-700">
+                                  <tr className="text-left text-slate-400">
+                                    <th className="py-1 pr-2">Session</th>
+                                    <th className="py-1 pr-2">TF</th>
+                                    <th className="py-1 pr-2">Indicator</th>
+                                    <th className="py-1 pr-2">Lib</th>
+                                    <th className="py-1 pr-2">Score</th>
+                                    <th className="py-1 pr-2">Trades</th>
+                                    <th className="py-1 pr-2">PF</th>
+                                    <th className="py-1 pr-2">Sharpe</th>
+                                    <th className="py-1 pr-2">DD</th>
+                                    <th className="py-1 pr-2">£100→</th>
+                                  </tr>
+                                </thead>
+                                <tbody>
+                                  {symbolResults[sym.symbol]
+                                    .sort((a, b) => b.score - a.score)
+                                    .slice(0, 20)
+                                    .map((r, i) => (
+                                      <tr key={i} className="border-t border-slate-700/50">
+                                        <td className="py-1 pr-2 text-slate-300">{r.session_display}</td>
+                                        <td className="py-1 pr-2 text-slate-300">{r.timeframe}</td>
+                                        <td className="py-1 pr-2 text-white font-medium">{r.indicator.length > 20 ? r.indicator.slice(0, 20) + '…' : r.indicator}</td>
+                                        <td className="py-1 pr-2 text-slate-500">{r.library}</td>
+                                        <td className="py-1 pr-2 text-slate-300">{r.score.toFixed(3)}</td>
+                                        <td className="py-1 pr-2 text-slate-300">{r.trades}</td>
+                                        <td className={`py-1 pr-2 ${r.profit_factor >= 1.2 ? 'text-green-400' : r.profit_factor >= 1 ? 'text-blue-400' : 'text-yellow-400'}`}>
+                                          {r.profit_factor === Infinity ? 'inf' : r.profit_factor.toFixed(2)}
+                                        </td>
+                                        <td className="py-1 pr-2 text-slate-300">{r.sharpe === Infinity ? 'inf' : r.sharpe.toFixed(2)}</td>
+                                        <td className="py-1 pr-2 text-red-400">{(r.max_drawdown * 100).toFixed(1)}%</td>
+                                        <td className={`py-1 pr-2 ${r.end_balance >= 100 ? 'text-green-400' : 'text-red-400'}`}>
+                                          £{r.end_balance.toFixed(0)}
+                                        </td>
+                                      </tr>
+                                    ))}
+                                </tbody>
+                              </table>
                             </div>
-                          </div>
+                            {symbolResults[sym.symbol].length > 20 && (
+                              <p className="text-xs text-slate-500">Showing top 20 of {symbolResults[sym.symbol].length}. Download JSON for all.</p>
+                            )}
+                          </>
                         )}
-
-                        <div>
-                          <p className="text-xs text-slate-400">
-                            Validation: {sym.results.validated ? '✓ Validated' : 'Pending'}
-                          </p>
-                        </div>
+                        {!resultsLoading[sym.symbol] && (!symbolResults[sym.symbol] || symbolResults[sym.symbol].length === 0) && sym.status === 'onboarded' && (
+                          <p className="text-sm text-slate-400">No viable strategies found for this symbol.</p>
+                        )}
                       </div>
-                    )}
+                     )}
 
                     {/* Error Message */}
                     {sym.error && (
