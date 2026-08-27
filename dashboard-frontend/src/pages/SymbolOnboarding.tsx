@@ -347,7 +347,11 @@ export default function SymbolOnboarding() {
                                   {symbolResults[sym.symbol]
                                     .sort((a, b) => b.score - a.score)
                                     .slice(0, 20)
-                                    .map((r, i) => (
+                                    .map((r, i) => {
+                                      const pf = typeof r.profit_factor === 'string' ? r.profit_factor : (r.profit_factor === Infinity ? 'inf' : r.profit_factor.toFixed(2))
+                                      const sharpe = typeof r.sharpe === 'string' ? r.sharpe : (r.sharpe === Infinity ? 'inf' : r.sharpe.toFixed(2))
+                                      const pfNum = typeof r.profit_factor === 'number' ? r.profit_factor : 0
+                                      return (
                                       <tr key={i} className="border-t border-slate-700/50">
                                         <td className="py-1 pr-2 text-slate-300">{r.session_display}</td>
                                         <td className="py-1 pr-2 text-slate-300">{r.timeframe}</td>
@@ -355,16 +359,17 @@ export default function SymbolOnboarding() {
                                         <td className="py-1 pr-2 text-slate-500">{r.library}</td>
                                         <td className="py-1 pr-2 text-slate-300">{r.score.toFixed(3)}</td>
                                         <td className="py-1 pr-2 text-slate-300">{r.trades}</td>
-                                        <td className={`py-1 pr-2 ${r.profit_factor >= 1.2 ? 'text-green-400' : r.profit_factor >= 1 ? 'text-blue-400' : 'text-yellow-400'}`}>
-                                          {r.profit_factor === Infinity ? 'inf' : r.profit_factor.toFixed(2)}
+                                        <td className={`py-1 pr-2 ${pfNum >= 1.2 ? 'text-green-400' : pfNum >= 1 ? 'text-blue-400' : 'text-yellow-400'}`}>
+                                          {pf}
                                         </td>
-                                        <td className="py-1 pr-2 text-slate-300">{r.sharpe === Infinity ? 'inf' : r.sharpe.toFixed(2)}</td>
+                                        <td className="py-1 pr-2 text-slate-300">{sharpe}</td>
                                         <td className="py-1 pr-2 text-red-400">{(r.max_drawdown * 100).toFixed(1)}%</td>
                                         <td className={`py-1 pr-2 ${r.end_balance >= 100 ? 'text-green-400' : 'text-red-400'}`}>
                                           £{r.end_balance.toFixed(0)}
                                         </td>
                                       </tr>
-                                    ))}
+                                      )
+                                    })}
                                 </tbody>
                               </table>
                             </div>
