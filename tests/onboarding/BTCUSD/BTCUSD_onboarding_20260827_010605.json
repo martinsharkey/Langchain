@@ -1,0 +1,72 @@
+{
+  "symbol": "BTCUSD",
+  "config": {
+    "sessions": [
+      "london"
+    ],
+    "timeframes": [
+      "H1"
+    ],
+    "start_date": "2026-07-01T00:00:00+00:00",
+    "end_date": "2026-07-15T23:59:00+00:00",
+    "init_cash": 100.0
+  },
+  "results": [
+    {
+      "session": "london",
+      "session_display": "London Session",
+      "timeframe": "H1",
+      "indicator": "CHOP+CDL3INSIDE+ADXR",
+      "library": "combo",
+      "category": "or",
+      "score": 0.9042,
+      "trades": 8,
+      "win_rate": 1.0,
+      "profit_factor": Infinity,
+      "total_return": 0.0812,
+      "max_drawdown": -0.0215,
+      "sharpe": 17.7803,
+      "start_balance": 100.0,
+      "end_balance": 108.12,
+      "stats": {}
+    },
+    {
+      "session": "london",
+      "session_display": "London Session",
+      "timeframe": "H1",
+      "indicator": "CHOP+CDL3INSIDE+EBSW",
+      "library": "combo",
+      "category": "or",
+      "score": 0.9042,
+      "trades": 8,
+      "win_rate": 1.0,
+      "profit_factor": Infinity,
+      "total_return": 0.0807,
+      "max_drawdown": -0.0215,
+      "sharpe": 17.7185,
+      "start_balance": 100.0,
+      "end_balance": 108.07,
+      "stats": {}
+    },
+    {
+      "session": "london",
+      "session_display": "London Session",
+      "timeframe": "H1",
+      "indicator": "CHOP+CDL3INSIDE+HT_TRENDMODE",
+      "library": "combo",
+      "category": "or",
+      "score": 0.9041,
+      "trades": 8,
+      "win_rate": 1.0,
+      "profit_factor": Infinity,
+      "total_return": 0.0792,
+      "max_drawdown": -0.0215,
+      "sharpe": 17.4615,
+      "start_balance": 100.0,
+      "end_balance": 107.92,
+      "stats": {}
+    }
+  ],
+  "elapsed_seconds": 21.82,
+  "completed_at": "2026-08-27T01:06:05.552998"
+}

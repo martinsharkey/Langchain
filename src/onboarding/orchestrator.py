@@ -22,6 +22,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, List, Optional
 
+import numpy as np
 import pandas as pd
 
 from src.onboarding.data import load_ohlcv_range
@@ -145,13 +146,13 @@ class OnboardingOrchestrator:
                             "score": round(r.score, 4),
                             "trades": r.result.trades,
                             "win_rate": round(r.result.win_rate, 4),
-                            "profit_factor": round(r.result.profit_factor, 4),
-                            "total_return": round(r.result.total_return, 4),
-                            "max_drawdown": round(r.result.max_drawdown, 4),
-                            "sharpe": round(r.result.sharpe, 4),
+                            "profit_factor": _safe_value(r.result.profit_factor),
+                            "total_return": _safe_value(r.result.total_return),
+                            "max_drawdown": _safe_value(r.result.max_drawdown),
+                            "sharpe": _safe_value(r.result.sharpe),
                             "start_balance": INIT_CASH,
                             "end_balance": round(INIT_CASH * (1 + (r.result.total_return or 0)), 2),
-                            "stats": r.result.stats,
+                            "stats": _safe_stats(r.result.stats),
                         })
 
                     self._write_results(all_results)
@@ -215,7 +216,27 @@ class OnboardingOrchestrator:
         self._stop_event.set()
 
 
-def read_progress(output_dir: Path) -> List[Dict]:
+def _safe_stats(stats: Dict) -> Dict:
+    """Make stats JSON-safe (replace Infinity/NaN)."""
+    safe = {}
+    for k, v in stats.items():
+        if isinstance(v, float):
+            if not np.isfinite(v):
+                safe[k] = str(v)
+            else:
+                safe[k] = round(v, 6)
+        else:
+            safe[k] = v
+    return safe
+
+
+def _safe_value(v):
+    """Make a single value JSON-safe."""
+    if isinstance(v, float):
+        if not np.isfinite(v):
+            return str(v)
+        return round(v, 6)
+    return v
     """Read all progress markers for a symbol."""
     progress_path = output_dir / "progress.jsonl"
     markers = []

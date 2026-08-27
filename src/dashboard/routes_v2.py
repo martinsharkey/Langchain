@@ -137,4 +137,13 @@ def get_dashboard_summary():
 def register_routes(app):
     """Register all dashboard v2 routes with Flask app."""
     app.register_blueprint(bp)
+
+    # Register symbol management routes.
+    from src.dashboard.symbol_management_routes import register_routes as register_symbol_routes
+    register_symbol_routes(app)
+
+    # Register onboarding metrics routes.
+    from src.dashboard.onboarding_metrics import register_routes as register_onboarding_routes
+    register_onboarding_routes(app)
+
     _log.info("Registered Dashboard API v2 routes (fallback mode)")

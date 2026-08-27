@@ -469,7 +469,7 @@ def serve_static(filename):
     # Don't serve files that look like API routes
     if filename.startswith('api/'):
         return jsonify({"error": f"API endpoint not found"}), 404
-    
+
     # Try to serve from dashboard-frontend build first
     try:
         return send_from_directory(str(project_root / 'dashboard' / 'public'), filename)
@@ -479,6 +479,23 @@ def serve_static(filename):
         except:
             # If no file found, return 404 (don't try to serve as HTML)
             return jsonify({"error": f"File {filename} not found"}), 404
+
+
+@app.route('/symbols')
+@app.route('/discovery')
+@app.route('/backtest')
+@app.route('/optimization')
+@app.route('/live')
+def serve_spa_routes():
+    """Serve the React frontend for SPA routes (non-API pages)."""
+    try:
+        return send_from_directory(str(project_root / 'dashboard' / 'public'), 'index.html')
+    except:
+        try:
+            return send_from_directory(str(project_root / 'src' / 'ui' / 'dist'), 'index.html')
+        except:
+            return jsonify({"error": "Frontend not built"}), 500
+
 
 if __name__ == '__main__':
     socketio.run(app, host='0.0.0.0', port=5000, debug=False)

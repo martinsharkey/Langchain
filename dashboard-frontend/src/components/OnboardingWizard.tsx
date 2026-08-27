@@ -195,11 +195,11 @@ export default function OnboardingWizard({ onComplete }: { onComplete?: () => vo
         <div className="bg-slate-800 rounded-lg border border-slate-700 p-4">
           <div className="flex justify-between text-sm text-slate-400 mb-2">
             <span>
-              {latestProgress?.type === 'combination_complete
+              {latestProgress?.type === "combination_complete"
                 ? `${latestProgress.timeframe}:${latestProgress.session}`
-                : latestProgress?.type === 'complete'
-                ? 'Finished'
-                : 'Starting...'}
+                : latestProgress?.type === "complete"
+                ? "Finished"
+                : "Starting..."}
             </span>
             <span>{progressPct}%</span>
           </div>

@@ -87,9 +87,10 @@ def _get_timeframe_value(timeframe: str):
 
 
 def get_mt5_symbols() -> list:
-    """Get all tradeable MT5 symbols, sorted alphabetically.
+    """Get all tradeable MT5 symbols, sorted alphabetical.
 
-    Returns a list of dicts: [{name, description, tradeable, path}, ...].
+    Returns a list of dicts: [{name, description, tradeable, ...}, ...].
+    Uses MT5's trade_mode to determine tradeability (4 = full trading).
     """
     import MetaTrader5 as mt5
 
@@ -105,10 +106,12 @@ def get_mt5_symbols() -> list:
 
     result = []
     for s in symbols:
+        # trade_mode: 0=disabled, 1=long-only, 2=short-only, 3=close-only, 4=full
+        tradeable = getattr(s, "trade_mode", 0) >= 4
         result.append({
             "name": s.name,
             "description": s.description,
-            "tradeable:": s.tradable,
+            "tradeable": tradeable,
             "path": s.path,
             "currency_base": s.currency_base,
             "currency_profit": s.currency_profit,
